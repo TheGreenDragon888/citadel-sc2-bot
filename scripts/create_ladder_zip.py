@@ -16,6 +16,8 @@ import yaml
 
 MY_BOT_NAME: str = "MyBotName"
 ZIPFILE_NAME: str = "bot.zip"
+# the zip is written here, named after `MyBotName` in config.yml
+PUBLISH_DIR: str = "publish"
 
 CONFIG_FILE: str = "config.yml"
 ZIP_FILES: List[str] = [
@@ -233,7 +235,7 @@ def try_build_cython_extensions(build_env=None):
 
 if __name__ == "__main__":
     print("Cloning python-sc2...")
-    destination_directory = os.path.join("../", "python-sc2")
+    destination_directory = os.path.join("./", "python-sc2")
     if os.path.exists(destination_directory):
         shutil.rmtree(destination_directory, ignore_errors=False, onerror=on_error)
 
@@ -298,8 +300,8 @@ if __name__ == "__main__":
             print("File:", item)
 
     # get name of bot from config if possible (otherwise use default name)
-    # zipfile_name = get_zipfile_name()
-    zipfile_name = ZIPFILE_NAME
+    os.makedirs(path.join(ROOT_DIRECTORY, PUBLISH_DIR), exist_ok=True)
+    zipfile_name = path.join(PUBLISH_DIR, get_zipfile_name())
     print("Setting up poetry environment...")
     # ensure env is setup and dependencies are installed
     p = Popen(["poetry", "install"], cwd=f"{ROOT_DIRECTORY}")
