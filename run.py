@@ -1,9 +1,10 @@
+import os
 import random
 import sys
 from os import path
 from pathlib import Path
 import platform
-from typing import List
+from typing import List, Tuple
 from loguru import logger
 
 from sc2 import maps
@@ -17,7 +18,7 @@ sys.path.append("ares-sc2")
 
 import yaml
 
-from bot.main import MyBot
+from bot.main import CitadelBot
 from ladder import run_ladder_game
 
 plt = platform.system()
@@ -28,10 +29,10 @@ if plt == "Windows":
 elif plt == "Darwin":
     MAPS_PATH: str = "/Applications/StarCraft II/Maps"
 elif plt == "Linux":
-    # path would look a bit like this on linux after installing
-    # SC2 via lutris
-    MAPS_PATH: str = (
-        "~/<username>/Games/battlenet/drive_c/Program Files (x86)/StarCraft II/Maps"
+    # SC2 Linux package: python-sc2 finds the game through SC2PATH,
+    # and the maps live directly inside its `Maps` folder (case-sensitive)
+    MAPS_PATH: str = path.join(
+        os.environ.get("SC2PATH", path.expanduser("~/StarCraftII")), "Maps"
     )
 else:
     logger.error(f"{plt} not supported")
@@ -42,8 +43,20 @@ MAP_FILE_EXT: str = "SC2Map"
 MY_BOT_NAME: str = "MyBotName"
 MY_BOT_RACE: str = "MyBotRace"
 
+# AI Arena map pool (docs/DESIGN.md §2)
+POOL_MAPS: List[str] = [
+    "MagannathaAIE_v2",
+    "UltraloveAIE_v2",
+    "LeyLinesAIE_v3",
+    "TorchesAIE_v4",
+    "PylonAIE_v4",
+    "PersephoneAIE_v4",
+    "IncorporealAIE_v4",
+]
 
-def main():
+
+def load_bot_config() -> Tuple[str, Race]:
+    """Read the bot name and race from `config.yml` if they exist."""
     bot_name: str = "MyBot"
     race: Race = Race.Random
 
@@ -57,8 +70,31 @@ def main():
                 bot_name = config[MY_BOT_NAME]
             if MY_BOT_RACE in config:
                 race = Race[config[MY_BOT_RACE].title()]
+    return bot_name, race
 
-    bot1 = Bot(race, MyBot(), bot_name)
+
+def get_map_list() -> List[str]:
+    """Maps found in `MAPS_PATH`, or the pool list if none are found."""
+    map_list: List[str] = [
+        p.name.replace(f".{MAP_FILE_EXT}", "")
+        for p in Path(MAPS_PATH).glob(f"*.{MAP_FILE_EXT}")
+        if p.is_file()
+    ]
+    if len(map_list) == 0:
+        logger.error(f"Can't find maps, please check `MAPS_PATH` in `run.py'")
+        logger.info("Trying back up option")
+        logger.info(
+            f"\nLooking for maps in {MAPS_PATH} but didn't find anything. \n"
+            f"If this path is correct please ensure maps are present. \n"
+            f"If this path is incorrect please edit the `MAPS_PATH` in `run.py` \n"
+        )
+        map_list = list(POOL_MAPS)
+    return map_list
+
+
+def main():
+    bot_name, race = load_bot_config()
+    bot1 = Bot(race, CitadelBot(), bot_name)
 
     if "--LadderServer" in sys.argv:
         # Ladder game started by LadderManager
@@ -67,31 +103,7 @@ def main():
         print(result, " against opponent ", opponentid)
     else:
         # Local game
-        map_list: List[str] = [
-            p.name.replace(f".{MAP_FILE_EXT}", "")
-            for p in Path(MAPS_PATH).glob(f"*.{MAP_FILE_EXT}")
-            if p.is_file()
-        ]
-        if len(map_list) == 0:
-            logger.error(f"Can't find maps, please check `MAPS_PATH` in `run.py'")
-            logger.info("Trying back up option")
-            logger.info(
-                f"\nLooking for maps in {MAPS_PATH} but didn't find anything. \n"
-                f"If this path is correct please ensure maps are present. \n"
-                f"If this path is incorrect please edit the `MAPS_PATH` in `run.py` \n"
-                f"Tip: If you're using linux, MAPS_PATH will definitely need updating\n"
-            )
-
-            # see if user has any recent ladder maps
-            map_list: List[str] = [
-                "PylonAIE_v4",
-                "PersephoneAIE_v4",
-                "TorchesAIE_v4",
-                "IncorporealAIE_v4",
-                "MagannathaAIE_v2",
-                "UltraloveAIE_v2",
-            ]
-
+        map_list: List[str] = get_map_list()
         random_race = random.choice([Race.Zerg, Race.Terran, Race.Protoss])
         print("Starting local game...")
         run_game(

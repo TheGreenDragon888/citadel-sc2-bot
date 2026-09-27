@@ -129,3 +129,15 @@ dmypy.json
 .pyre/
 
 .idea
+
+# Citadel
+# ladder zip output (scripts/create_ladder_zip.py)
+publish/
+# repos cloned by scripts/create_ladder_zip.py while it builds the zip
+python-sc2/
+SC2MapAnalysis/
+cython-extensions-sc2/
+sc2-helper/
+# bot runtime data and local test output
+data/
+replays/
