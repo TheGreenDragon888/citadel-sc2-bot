@@ -26,6 +26,13 @@ poetry install
 
 StarCraft II lives at `~/StarCraftII` and python-sc2 finds it through `SC2PATH`.
 Copy the 7 pool maps from `maps/` into `~/StarCraftII/Maps` (the folder name is case-sensitive).
+The 4.10 Linux client looks for maps in a lowercase `maps` folder, so also add a link to `Maps`
+(see `docs/VERIFY_NOTES.md`, "Other M0 findings"):
+
+```bash
+cp maps/*.SC2Map ~/StarCraftII/Maps/
+ln -s Maps ~/StarCraftII/maps     # a symbolic link named `maps` that points at `Maps`
+```
 
 ## Commands
 
