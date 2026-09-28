@@ -74,12 +74,20 @@ def load_bot_config() -> Tuple[str, Race]:
 
 
 def get_map_list() -> List[str]:
-    """Maps found in `MAPS_PATH`, or the pool list if none are found."""
-    map_list: List[str] = [
+    """Pool maps found in `MAPS_PATH`, or the whole pool list if none are found.
+
+    Other maps in the folder are ignored: a non-pool map can hold unit types python-sc2
+    can't parse (e.g. AcropolisAIE crashed with `2046 is not a valid UnitTypeId`).
+    """
+    found: set = {
         p.name.replace(f".{MAP_FILE_EXT}", "")
         for p in Path(MAPS_PATH).glob(f"*.{MAP_FILE_EXT}")
         if p.is_file()
-    ]
+    }
+    map_list: List[str] = [m for m in POOL_MAPS if m in found]
+    missing: List[str] = [m for m in POOL_MAPS if m not in found]
+    if map_list and missing:
+        logger.warning(f"Pool maps missing from {MAPS_PATH}: {', '.join(missing)}")
     if len(map_list) == 0:
         logger.error(f"Can't find maps, please check `MAPS_PATH` in `run.py'")
         logger.info("Trying back up option")
