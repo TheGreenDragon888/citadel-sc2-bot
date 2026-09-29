@@ -37,7 +37,7 @@ from bot.constants import (
 )
 from bot.geometry import in_map
 from bot.intel.threat_flags import Threat
-from bot.macro.economy import ReserveForPending
+from bot.macro.economy import ReserveForPending, ReserveForStructure
 from bot.macro.production import reserve_for
 
 if TYPE_CHECKING:
@@ -80,6 +80,8 @@ class StaticDefense:
         extra Gateways."""
         bot = self.bot
         out: list["Behavior"] = []
+        if Threat.POOL_12 in plan.active:
+            out += self._core_first()
         need_nat = plan.batteries_needed.get("natural", 0)
         # while our unit holds the wall gap no probe gets out to the natural
         if need_nat and not plan.hold_wall_gap and bot.tech_requirement_progress(UnitTypeId.SHIELDBATTERY) >= 1:
@@ -104,6 +106,21 @@ class StaticDefense:
             # 43 s for money while the Nexus trained probes
             out += [ReserveForPending(t) for t in DEFENSE_STRUCTURES]
         return out
+
+    def _core_first(self) -> list["Behavior"]:
+        """The Cybernetics Core (at the ramp wall) before probes and other buildings: the
+        12-pool plan's Battery and Adepts wait for it, and as a timed opener item it came after
+        probe production and went down late in test games."""
+        bot = self.bot
+        if (
+            bot.structures(UnitTypeId.CYBERNETICSCORE)
+            or bot.mediator.get_building_counter[UnitTypeId.CYBERNETICSCORE]
+            or not bot.structures(UnitTypeId.GATEWAY).ready
+        ):
+            return []
+        if bot.can_afford(UnitTypeId.CYBERNETICSCORE):
+            return [BuildStructure(bot.start_location, UnitTypeId.CYBERNETICSCORE, wall=True)]
+        return [ReserveForStructure(UnitTypeId.CYBERNETICSCORE)]
 
     # -- main batteries near the ramp ----------------------------------------------------------------
 
@@ -220,7 +237,7 @@ class StaticDefense:
         """
         bot = self.bot
         cannons = [c for c in bot.enemy_structures if c.type_id == UnitTypeId.PHOTONCANNON]
-        for info in bot.mediator.get_building_tracker_dict.values():
+        for tag, info in bot.mediator.get_building_tracker_dict.items():
             target = info.get(TARGET)
             structure_id = info.get(ID)
             if not isinstance(target, Point2) or structure_id not in STRUCTURE_TO_BUILDING_SIZE:
@@ -232,6 +249,10 @@ class StaticDefense:
             if structure_id == UnitTypeId.NEXUS:
                 if covered or not plan.allow_expand:
                     info[TARGET] = None
+                    # ares drops the order but leaves the probe's build command, which still
+                    # placed the Nexus in a 12-pool test game; Mining takes it back to work
+                    if (worker := bot.unit_tag_dict.get(tag)) is not None:
+                        worker.stop()
                     logger.info(
                         f"DEFENSE Nexus order at {target.rounded} dropped: "
                         f"{'an enemy Cannon covers it' if covered else 'the plan holds expansions'} ({bot.time_formatted})"

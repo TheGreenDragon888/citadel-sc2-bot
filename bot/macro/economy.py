@@ -60,6 +60,17 @@ class ReserveForPending:
         )
 
 
+@dataclass
+class ReserveForStructure:
+    """Holds the rest of a MacroPlan while `type_id` can't be afforded (the caller adds it only
+    while that structure is wanted and not yet ordered)."""
+
+    type_id: UnitTypeId
+
+    def execute(self, ai: "AresBot", config: dict, mediator) -> bool:
+        return not ai.can_afford(self.type_id)
+
+
 class Economy:
     def __init__(self, bot: "AresBot"):
         self.bot = bot
