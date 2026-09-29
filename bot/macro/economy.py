@@ -63,10 +63,14 @@ class Economy:
         self.bot = bot
         self.gas_floating: bool = False
 
-    def mining_behavior(self) -> Mining:
+    def mining_behavior(self, long_distance: bool = True) -> Mining:
         """ares's Mining (speed mining included). While at least `GAS_FLOAT_HIGH` gas is banked,
         only `WORKERS_PER_GAS_FLOATING` probes per gas building; back to 3 below `GAS_FLOAT_LOW`
-        (defense plans make mineral-only units, and a one-base bot starves on minerals)."""
+        (defense plans make mineral-only units, and a one-base bot starves on minerals).
+
+        `long_distance=False` keeps spare probes home instead of sending them to other bases'
+        minerals (ares's long-distance mining walked them one by one into rush Cannons at our
+        natural in test games)."""
         vespene = self.bot.vespene
         if not self.gas_floating and vespene >= GAS_FLOAT_HIGH:
             self.gas_floating = True
@@ -74,7 +78,10 @@ class Economy:
         elif self.gas_floating and vespene < GAS_FLOAT_LOW:
             self.gas_floating = False
             logger.info(f"GAS {vespene} banked at {self.bot.time_formatted}: 3 probes per gas again")
-        return Mining(workers_per_gas=WORKERS_PER_GAS_FLOATING if self.gas_floating else 3)
+        return Mining(
+            workers_per_gas=WORKERS_PER_GAS_FLOATING if self.gas_floating else 3,
+            long_distance_mine=long_distance,
+        )
 
     @staticmethod
     def worker_behavior() -> BuildWorkers:

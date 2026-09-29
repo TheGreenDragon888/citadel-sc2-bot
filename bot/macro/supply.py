@@ -40,6 +40,7 @@ from bot.constants import (
     SUPPLY_MAX_PYLONS_AT_ONCE,
     SUPPLY_MIN_BUFFER,
 )
+from bot.geometry import in_map
 
 if TYPE_CHECKING:
     from ares import AresBot
@@ -126,7 +127,8 @@ def _fallback_spot(ai: "AresBot", main_only: bool = False) -> Optional[Point2]:
         )
         for p in candidates:
             if (
-                p.distance_to(th) < 5
+                not in_map(ai, p)
+                or p.distance_to(th) < 5
                 or abs(ai.get_terrain_z_height(p) - z) >= SAME_LEVEL_Z
                 or p.distance_to(ramp) < PYLON_FALLBACK_RAMP_CLEARANCE
                 or any(p.distance_to(m) < PYLON_FALLBACK_MINERAL_CLEARANCE for m in minerals)

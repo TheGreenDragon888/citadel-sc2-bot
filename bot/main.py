@@ -24,7 +24,7 @@ from bot.defense.worker_defense import WorkerDefense
 from bot.intel.ares_bridge import AresBridge
 from bot.intel.detectors import Detectors
 from bot.intel.scout_planner import NaturalScout
-from bot.intel.threat_flags import FlagStore
+from bot.intel.threat_flags import FlagStore, Threat
 from bot.macro.build_executor import BuildExecutor
 from bot.macro.economy import Economy, ReserveForPending
 from bot.macro.production import Production
@@ -98,7 +98,10 @@ class CitadelBot(AresBot):
         started = time.perf_counter()
         await super(CitadelBot, self).on_step(iteration)
         # ares only moves workers that a Mining behavior tells to mine; register it every step
-        self.register_behavior(self.economy.mining_behavior())
+        # no long-distance mining while rush Cannons may cover other bases' minerals (§4.2)
+        self.register_behavior(
+            self.economy.mining_behavior(long_distance=Threat.CANNON_RUSH not in self.planner.plan.active)
+        )
 
         if not self.build_order_runner.build_completed and self.time > OPENER_TIMEOUT_S:
             logger.warning(
@@ -179,7 +182,7 @@ class CitadelBot(AresBot):
         if self.flags is not None:
             self.flags.on_unit_destroyed(unit_tag, self.time)  # §5 expiry rule (a)
         if own is not None and self.telemetry is not None:
-            self.telemetry.on_own_unit_destroyed(own.type_id)
+            self.telemetry.on_own_unit_destroyed(own)
 
     async def on_unit_took_damage(self, unit: Unit, amount_damage_taken: float) -> None:
         await super(CitadelBot, self).on_unit_took_damage(unit, amount_damage_taken)

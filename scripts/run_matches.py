@@ -20,6 +20,7 @@ import random
 import statistics
 import sys
 import time
+import traceback
 from collections import Counter
 from datetime import datetime
 from itertools import cycle, islice
@@ -256,6 +257,7 @@ def main() -> int:
             outcome = result.name if isinstance(result, Result) else str(result)
         except Exception as e:
             outcome, error = CRASH, repr(e)
+            print(traceback.format_exc())
         if bot.start_error is not None:
             outcome, error = CRASH, f"on_start: {bot.start_error}"
         # `state` only exists once the first observation arrived

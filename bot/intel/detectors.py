@@ -64,6 +64,7 @@ from bot.constants import (
     WORKER_RUSH_RADIUS,
     WORKER_RUSH_UNTIL_S,
 )
+from bot.geometry import in_map
 from bot.intel.threat_flags import Evidence, ExpiryContext, FlagStore, Threat
 
 if TYPE_CHECKING:
@@ -212,6 +213,7 @@ class Detectors:
                 p = Point2((enemy_main.x + dx * MAIN_SAMPLE_STEP, enemy_main.y + dy * MAIN_SAMPLE_STEP))
                 if (
                     p.distance_to(enemy_main) <= MAIN_RADIUS
+                    and in_map(bot, p)
                     and bot.in_pathing_grid(p)
                     and abs(bot.get_terrain_z_height(p) - z) < SAME_LEVEL_Z
                 ):

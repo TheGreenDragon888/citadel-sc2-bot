@@ -31,6 +31,7 @@ from bot.constants import (
     RAMP_CORRIDOR_LENGTH,
     SAME_LEVEL_Z,
 )
+from bot.geometry import in_map
 
 if TYPE_CHECKING:
     from ares import AresBot
@@ -127,7 +128,8 @@ class StaticDefense:
             for dy in range(-SEARCH_RADIUS, SEARCH_RADIUS + 1):
                 p = Point2((cx + dx, cy + dy))
                 if (
-                    p.distance_to(anchor) <= MAIN_BATTERY_RAMP_DIST
+                    in_map(bot, p)
+                    and p.distance_to(anchor) <= MAIN_BATTERY_RAMP_DIST
                     and all(self._distance_to_segment(p, a, b) >= RAMP_CORRIDOR_HALF_WIDTH + size for a, b in corridors)
                     and self._same_level(p)
                     and bot.mediator.can_place_structure(position=p, structure_type=type_id)

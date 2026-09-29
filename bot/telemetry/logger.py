@@ -33,9 +33,20 @@ class Telemetry:
         self.step_max_ms: float = 0.0
         self.probes_lost: int = 0
 
-    def on_own_unit_destroyed(self, type_id) -> None:
-        if type_id == UnitTypeId.PROBE:
-            self.probes_lost += 1
+    def on_own_unit_destroyed(self, unit) -> None:
+        """`unit` is last step's snapshot of our destroyed unit."""
+        if unit.type_id != UnitTypeId.PROBE:
+            return
+        self.probes_lost += 1
+        # where probes die, and to what (§8 "army value lost"; M2 defense evidence)
+        bot = self.bot
+        enemies = [e for e in bot.all_enemy_units if not e.is_memory]
+        near = min(enemies, key=lambda e: e.distance_to(unit), default=None)
+        role = next((str(r) for r, tags in bot.mediator.get_unit_role_dict.items() if unit.tag in tags), "?")
+        logger.info(
+            f"PROBE lost at {unit.position.rounded} ({bot.time_formatted}, role {role}); nearest enemy "
+            + (f"{near.type_id.name} at {near.distance_to(unit):.1f}" if near is not None else "none seen")
+        )
 
     def record_step_time(self, started: float) -> None:
         """`started` is `time.perf_counter()` at the start of `on_step`."""
