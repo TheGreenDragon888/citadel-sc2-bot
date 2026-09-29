@@ -110,7 +110,7 @@ class CitadelBot(AresBot):
         bases = executor.bases_target()
         plan.add(self.economy.expansion_behavior(bases, prioritize=not executor.finished))
         if not executor.waiting_for_money:
-            for behavior in self.production.behaviors():
+            for behavior in self.production.behaviors(schedule_finished=executor.finished):
                 plan.add(behavior)
         self.register_behavior(plan)
 

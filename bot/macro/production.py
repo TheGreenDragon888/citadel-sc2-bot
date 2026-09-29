@@ -6,12 +6,13 @@ mix needs), plus the §4.5.1 upgrade order through ares's UpgradeController. The
 the combat-sim checks of the mix come later.
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from ares.behaviors.macro import ProductionController, SpawnController, UpgradeController
 from ares.consts import GATEWAY_UNITS
 from sc2.data import Race
 from sc2.ids.unit_typeid import UnitTypeId
+from sc2.ids.upgrade_id import UpgradeId
 
 from bot.constants import (
     ARMY_COMPOSITION_PCT,
@@ -46,14 +47,28 @@ class Production:
             for unit, pct in shares.items()
         }
 
-    def behaviors(self) -> list["Behavior"]:
-        """Behaviors for this tick's MacroPlan, after the economy and the opener schedule."""
+    def _next_upgrade(self) -> Optional[UpgradeId]:
+        bot = self.bot
+        order = UPGRADES_VS_P if bot.enemy_race == Race.Protoss else UPGRADES_VS_ZT
+        for upgrade in order:
+            progress = bot.already_pending_upgrade(upgrade)
+            if progress == 0:
+                return upgrade
+            if progress < 1:
+                return None  # wait for the one in progress
+        return None
+
+    def behaviors(self, schedule_finished: bool) -> list["Behavior"]:
+        """Behaviors for this tick's MacroPlan, after the economy and the opener schedule.
+        ProductionController (more Gateways/Robos and their tech) starts once the opener's timed
+        schedule is finished, or at `PRODUCTION_CONTROLLER_START_S` at the latest."""
         bot = self.bot
         comp = self.composition()
         out: list["Behavior"] = []
-        if bot.time >= UPGRADES_START_S:
-            upgrades = UPGRADES_VS_P if bot.enemy_race == Race.Protoss else UPGRADES_VS_ZT
-            out.append(UpgradeController(list(upgrades), base_location=bot.start_location))
+        if bot.time >= UPGRADES_START_S and (upgrade := self._next_upgrade()) is not None:
+            # one at a time, in §4.5.1 order: given the whole list, UpgradeController starts every
+            # tech building at once (a Hard-Zerg loss had Forge, Twilight and Robo Bay at 5:00)
+            out.append(UpgradeController([upgrade], base_location=bot.start_location))
         observers = len(bot.mediator.get_own_army_dict[UnitTypeId.OBSERVER]) + bot.unit_pending(
             UnitTypeId.OBSERVER
         )
@@ -73,7 +88,7 @@ class Production:
             gateway_mix = {u: info for u, info in comp.items() if u in GATEWAY_UNITS}
             if gateway_mix:
                 out.append(SpawnController(gateway_mix, freeflow_mode=True))
-        if bot.time >= PRODUCTION_CONTROLLER_START_S:
+        if schedule_finished or bot.time >= PRODUCTION_CONTROLLER_START_S:
             out.append(
                 ProductionController(
                     comp,

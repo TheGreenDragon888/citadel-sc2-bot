@@ -299,11 +299,13 @@ OBSERVER_COUNT: int = 2  # §4.5.1 "Observer 2 fixed"
 # At this many banked minerals, also warp in Gateway units without waiting on higher-priority
 # units that are short of gas
 MINERAL_FLOAT_BANK: int = 700
-# ProductionController (adds Gateways/Robos and the tech they need) starts after the schedules
+# ProductionController (adds Gateways/Robos and the tech they need) starts when the opener's
+# timed schedule is finished, or at this time at the latest
 PRODUCTION_CONTROLLER_START_S: float = 330.0
 MAX_PRODUCTION_STRUCTURES: int = 12
 # §4.5.1 upgrades: Forge weapons first, then armour; Twilight -> Charge (vs Z, T) or Blink (vs P);
-# then Colossus range. UpgradeController builds the tech structures they need.
+# then Colossus range. One at a time, in this order; UpgradeController builds the tech structures
+# each one needs.
 UPGRADES_START_S: float = 300.0
 UPGRADES_VS_ZT: Tuple[UpgradeId, ...] = (
     UpgradeId.PROTOSSGROUNDWEAPONSLEVEL1, UpgradeId.PROTOSSGROUNDWEAPONSLEVEL2,
