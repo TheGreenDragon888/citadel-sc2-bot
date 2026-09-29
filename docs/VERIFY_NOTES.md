@@ -639,6 +639,12 @@ acting, which stops everything after them:
   `ares-sc2/src/ares/behaviors/macro/spawn_controller.py:176-178`). Short of gas for a Colossus or
   Immortal, it made nothing while minerals piled up. `bot/macro/production.py` adds a
   `freeflow_mode` Gateway-unit spend above `MINERAL_FLOAT_BANK`.
+- `SpawnController` also skips a unit whose tech isn't ready
+  (`ares-sc2/src/ares/behaviors/macro/spawn_controller.py:130`) and stops making a unit once its
+  count reaches its share of the current army (`:190`). A share for an unbuildable unit (Colossus
+  before a Robotics Bay) therefore left the Gateways idle: in a C_2GateRobo game vs Hard Protoss
+  the army was 22 supply at 6:00 with 700+ minerals banked. `bot/macro/production.py` now gives it
+  only the tech-ready units, with their shares rescaled (32 army supply in the same game).
 
 - `UpgradeController` walks its whole list on every call
   (`ares-sc2/src/ares/behaviors/macro/upgrade_controller.py:66`). An upgrade whose research
