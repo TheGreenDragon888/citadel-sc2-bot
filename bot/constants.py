@@ -430,8 +430,8 @@ CANNON_PROBE_LINGER_S: float = 10.0
 # 12-pool (§4.2): Zerglings seen before 2:20
 EARLY_LINGS_UNTIL_S: float = 140.0
 # a Pool started by then came before any natural Hatchery could (12 workers: the earliest
-# hatch-first natural goes down at ~0:45), so no natural check is needed (Citadel)
-EARLY_POOL_CERTAIN_S: float = 40.0
+# hatch-first natural goes down at ~0:48), so no natural check is needed (Citadel)
+EARLY_POOL_CERTAIN_S: float = 45.0
 # Proxy (§4.4 rows 7 and 10), checked once the enemy main is scouted and not before 1:30
 PROXY_CHECK_FROM_S: float = 90.0
 MAIN_SAMPLE_STEP: float = 4.0  # enemy main sample-point spacing for "main scouted"
