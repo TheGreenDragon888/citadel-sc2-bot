@@ -640,6 +640,13 @@ acting, which stops everything after them:
   Immortal, it made nothing while minerals piled up. `bot/macro/production.py` adds a
   `freeflow_mode` Gateway-unit spend above `MINERAL_FLOAT_BANK`.
 
+- `UpgradeController` walks its whole list on every call
+  (`ares-sc2/src/ares/behaviors/macro/upgrade_controller.py:66`). An upgrade whose research
+  building is still under construction is skipped, and the next one starts its own tech building
+  (`:81-86`, `:118`), so a list of six started a Forge, Twilight Council and Robotics Bay within
+  one second at 5:00. That game (B_PvZ vs Hard Zerg) had 9 army supply at 6:00 and was lost.
+  `bot/macro/production.py` passes one upgrade at a time.
+
 **Opener timing on the pool (12-worker, with Nexus chrono from 0:00).**
 - The build runner logs `<supply> <time> <command>` when a step completes
   (`ares-sc2/src/ares/build_runner/build_order_runner.py:530`); these are the opener timings.
