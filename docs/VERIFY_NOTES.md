@@ -686,7 +686,13 @@ leaves workers out.
   (`:369-377`).
 - Citadel: `static_defense.py` moves tracked orders whose target an enemy Cannon covers to a new
   ares placement (as ares does for a blocked spot), and `supply.py` stops counting a Pylon order
-  that hasn't started after `PYLON_STUCK_S` as on its way. **Runtime** (cannon rush, natural
+  that hasn't started after `PYLON_STUCK_S` as on its way (neither as a free build slot nor as
+  coming supply: ares's `structure_pending` counts every tracker entry,
+  `ares-sc2/src/ares/main.py:1086-1115`).
+- A builder that dies with enemy static defense or enemy units within `BUILDER_DANGER_RADIUS`
+  of its target or of where it fell has its order dropped (target None, which ares removes,
+  `building_manager.py:254-257`) instead of handed on; with static defense at the target the
+  spot is also marked unavailable. Other builder deaths are left to ares. **Runtime** (cannon rush, natural
   variant, PylonAIE_v4): before the fix one Pylon order sat 55 s at (93, 181) next to the rush
   Cannons while minerals reached 960 at 47/47 supply; after it, `DEFENSE PYLON order moved from
   (93, 181) to (78, 172)`.
@@ -705,8 +711,12 @@ Cannon is gone. `BUILDING_SIZE_ENUM_TO_RADIUS` is in `ares.consts` (`consts.py:1
 **ares never cancels a dying structure.** `BuildingManager.on_structure_took_damage` would
 cancel below max(50, 9% of max HP) (`ares-sc2/src/ares/managers/building_manager.py:688-701`),
 but the hub's `on_unit_took_damage` is an empty method
-(`ares-sc2/src/ares/managers/hub.py:306-314`), so it never runs. Citadel's
-`WorkerDefense.on_structure_damaged` applies the same rule from `CitadelBot.on_unit_took_damage`.
+(`ares-sc2/src/ares/managers/hub.py:306-314`), so it never runs. ares's threshold also compares
+health only, against the finished maximum: a structure starts at 10% of its HP and shield and
+gains the rest as it builds, so a new Pylon (20 of 200 HP) is under 50 from the start and would
+be cancelled at its first hit. Citadel's `WorkerDefense.on_structure_damaged` (called from
+`CitadelBot.on_unit_took_damage`) cancels when HP + shield falls below
+`CANCEL_EXPECTED_FRACTION` of the undamaged value at the current build progress.
 python-sc2 fires `on_unit_took_damage` for own units and structures
 (`sc2/bot_ai_internal.py:917`, `:952`) and `on_unit_destroyed` for every tag in the previous
 step's map, enemies included (`sc2/bot_ai_internal.py:980-982`), which §5 rule (a) needs.
@@ -732,7 +742,10 @@ once idle, ares hands it back to `GATHERING` before 390 s
 10 of the ramp top (`ares-sc2/src/ares/build_runner/build_order_runner.py:618-625`).
 
 **python-sc2 memory flag.** `Unit.is_memory` is True for a Unit object older than the current
-game loop (`sc2/unit.py:476-479`), which is how ares's ghosts show up in `enemy_units`.
+game loop (`sc2/unit.py:476-479`), which is how ares's ghosts show up in `enemy_units`: its
+UnitMemoryManager appends remembered units to `ai.enemy_units` and `ai.all_enemy_units` each
+step (`ares-sc2/src/ares/managers/unit_memory_manager.py:224-225`). Checks of where enemies are
+now (the 12-pool expansion gate, worker defense targets) filter them out.
 
 **ExpansionController stops holding money once its probe leaves.** With `prioritize=True` it
 returns True (holding the rest of a MacroPlan) only until it sends a probe; from then on the
@@ -749,3 +762,23 @@ cluster of enemy structures stops short with nothing in range (units idle ~9 fro
 cluster at our natural in a test game); `BasicArmy` attacks a visible structure directly once
 within `ARMY_DIRECT_ATTACK_MARGIN` of weapon range. `client.query_pathing` to a point inside a
 structure's footprint returns None, so it can't be used to test such targets.
+
+## M2 Citadel choices
+
+Where §4.2/§5 leave a choice open, or a test game showed the spec's plan alone wasn't enough,
+M2 decided as below. Every value is in `bot/constants.py`.
+
+| Area | Choice | Why |
+|---|---|---|
+| Scope (user decision) | Detectors for M2's five threats only; test opponents are our own python-sc2 bots (`scripts/test_bots/`); the proxy check uses §4.4 rows 7 and 10 once our scout has seen the enemy main, not before 1:30; the scout probe then watches the enemy natural until the one-base deadline | Plan approval |
+| Opener override | WORKER_RUSH, PROXY and POOL_12 end the ares opener; CANNON_RUSH only with STRUCTURE evidence (an enemy probe alone is often a scout); ONE_BASE_ALLIN never. After an override or the 4:00 timeout `BuildExecutor` adds `OPENER_ESSENTIALS` (ramp Gateway and Core, 2 gas, Warp Gate, 2 bases) | 12-pool Zerglings arrived before the opener's Zealot |
+| Early Pool | A Pool started by `EARLY_POOL_CERTAIN_S` (0:45) raises POOL_12 at once; later ones are compared with the natural Hatchery | No hatch-first natural starts before ~0:48 on 12 workers |
+| Unit reserve | `reserve_units`: until that many Gateway units exist, the MacroPlan and the direct main-Battery orders wait for the plan's first tech-ready Gateway unit (`ReserveForUnit`) | Probes and Pylons took the minerals for the wall Zealot |
+| 12-pool | 2 Gateways, chrono on Gateways, Zealot then Adepts, tech waits while the expansion gate is closed; the gate switches only after its condition holds `POOL_12_GATE_HOLD_S`; the army holds behind the wall gap until `POOL_12_PUSH_SUPPLY`, then the natural | Test games |
+| Proxy | Timed tech waits below `DEFENSE_TECH_AFTER_SUPPLY` army supply (not vs Cannons); ramp hold with a leash until 2 units and a natural, then the natural | Units trickled out one by one |
+| One-base | Timed tech waits below 8 army supply unless Roaches or Cannons are seen; Immortal after earlier threats' first units vs Roaches; an earlier threat's hold point stands | Plan precedence |
+| Cannon rush | Build out of finished Cannons' range by marking ares's placement table; move covered orders; no long-distance mining; while a Cannon covers our natural, no expansion at all (every probe sent to the next base died passing the Cannons) | Natural-variant test games |
+| Expansion | `EXPANSION_RETRY_S` without a new Nexus after a Nexus builder dies; probes capped at `PROBES_PER_HELD_BASE` per base + `PROBES_HELD_SPARE` while expanding is held | 60 probes on one base left the Gateways idle |
+| Army | Recall from an attack only if enemies at home have ≥ `ARMY_RECALL_FRACTION` of our supply; don't engage at home below `ARMY_ENGAGE_RATIO` of enemy supply (finished Cannons count `ARMY_SUPPLY_PER_CANNON`); structures near our bases are targets from `ARMY_CLEAR_STRUCTURES_SUPPLY` | Units fed into Cannons and Marines one at a time |
+| Production | `gateway_upkeep` morphs powered idle Gateways and powers unpowered ones | ares's SpawnController makes nothing while any ready idle Gateway exists after Warp Gate |
+| Cancel rule | HP + shield below `CANCEL_EXPECTED_FRACTION` of the undamaged value at the current build progress | ares's rule cancels new Pylons at their first hit |

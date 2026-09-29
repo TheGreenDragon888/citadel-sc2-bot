@@ -64,7 +64,9 @@ ladder zip): `worker_rush`, `cannon_rush` (SharpCannons-style), `twelve_pool`, `
 | Ramp wall helpers on both spawns of every pool map | `poetry run python scripts/check_ramp_walls.py` |
 | Forced ramp wall fallback (§4.8) | `poetry run python scripts/test_wall_fallback.py --case ramp` (or `--case choke`) |
 | Combat-sim static-defense test | `poetry run python scripts/test_can_win_fight.py` |
-| M2 acceptance batch, one per cheese bot | `poetry run python scripts/run_matches.py --opponent worker_rush --map all --total 10` (also `cannon_rush`, `twelve_pool`, `proxy_rax`) |
+| M2 acceptance batch, one per cheese bot | `poetry run python scripts/run_matches.py --opponent worker_rush --map all --total 10 --seed 100` (also `cannon_rush`, `twelve_pool`, `proxy_rax`) |
+| One cheese variant only | add `--variant natural` or `main` (`cannon_rush`), `third` or `center` (`proxy_rax`) |
+| One-base all-in plan vs the built-in AI | `poetry run python scripts/run_matches.py --difficulty Harder --build Rush --race Terran Zerg Protoss --map all --total 3` |
 | ThreatFlag expiry rules (§5), no game | `poetry run python scripts/test_threat_flags.py` |
 | Build the ladder zip | `poetry run python scripts/create_ladder_zip.py` |
 | Check the zip layout | `unzip -l publish/*.zip \| head` (`run.py` must be at the top level) |
