@@ -176,7 +176,7 @@ class ScheduleItem(NamedTuple):
     kind: str  # "structure", "unit", "upgrade", "gas" or "bases"
     type_id: Optional[object] = None  # UnitTypeId (structure/unit) or UpgradeId (upgrade)
     count: int = 1
-    where: str = "main"  # structures: "main" or "nat"
+    where: str = "main"  # structures: "main", "nat" or "ramp" (ares's ramp-wall spots)
     # Must hold before the item acts (see build_executor.CONDITIONS)...
     only_if: Optional[str] = None
     # ...unless the game time is past this (None: wait for the condition forever)
@@ -261,6 +261,16 @@ _C2_SCHEDULE: Tuple[ScheduleItem, ...] = (
     ScheduleItem(225, "gas", None, 4),
     # Never a third before 5:00 unless the enemy has also expanded
     ScheduleItem(300, "bases", None, 3, early_if="enemy_expanded"),
+)
+# What every opener has built by its last step. Prepended to each schedule: when a threat flag
+# ends the ares opener early (§3 step 3), these finish it; otherwise they are already met.
+# The natural waits for DefensePlan.allow_expand (bases_target).
+OPENER_ESSENTIALS: Tuple[ScheduleItem, ...] = (
+    ScheduleItem(0, "structure", UnitTypeId.GATEWAY, 1, "ramp"),
+    ScheduleItem(0, "structure", UnitTypeId.CYBERNETICSCORE, 1, "ramp"),
+    ScheduleItem(0, "gas", None, 2),
+    ScheduleItem(0, "upgrade", UpgradeId.WARPGATERESEARCH),
+    ScheduleItem(0, "bases", None, 2),
 )
 OPENER_SCHEDULES: dict[str, Tuple[ScheduleItem, ...]] = {
     "A_Standard": _A_SCHEDULE,
@@ -372,3 +382,69 @@ ONE_BASE_PHASE_END_S: float = 420.0  # with ONE_BASE_PHASE_BATTERIES and the arm
 ONE_BASE_PHASE_BATTERIES: int = 3
 ONE_BASE_PHASE_ARMY_SUPPLY: int = 20
 POOL_12_PHASE_END_S: float = 240.0
+
+# §4.2 detectors (bot/intel/detectors.py, ares_bridge.py)
+BRIDGE_HOME_RADIUS: float = 30.0  # "near our bases" for confirming units
+SAME_LEVEL_Z: float = 0.5  # terrain heights closer than this are the same level
+MAIN_RADIUS: float = 22.0  # a main base: within this of its start location, on its level
+# Worker rush (§4.2 local backup): >= 5 enemy workers within 30 of our main before 2:00
+WORKER_RUSH_MIN_WORKERS: int = 5
+WORKER_RUSH_RADIUS: float = 30.0
+WORKER_RUSH_UNTIL_S: float = 120.0
+WORKER_RUSH_CONFIRM_MIN: int = 2  # the pull ends at <= 1 enemy worker near our bases (§4.2)
+# Cannon rush (§4.2): structures within 25 of our main/natural before 4:00; a probe in our main
+# for > 10 s between 1:00 and 3:00
+CANNON_RUSH_RADIUS: float = 25.0
+CANNON_RUSH_UNTIL_S: float = 240.0
+CANNON_PROBE_FROM_S: float = 60.0
+CANNON_PROBE_UNTIL_S: float = 180.0
+CANNON_PROBE_LINGER_S: float = 10.0
+# 12-pool (§4.2): Zerglings seen before 2:20
+EARLY_LINGS_UNTIL_S: float = 140.0
+# Proxy (§4.4 rows 7 and 10), checked once the enemy main is scouted and not before 1:30
+PROXY_CHECK_FROM_S: float = 90.0
+MAIN_SAMPLE_STEP: float = 4.0  # enemy main sample-point spacing for "main scouted"
+MAIN_SCOUTED_FRACTION: float = 0.6  # this share of the sample points seen = main scouted
+PROXY_TERRAN_MAX_SCVS: int = 12
+PROXY_PROTOSS_WORKERS_SHORT: int = 2
+PROXY_FAR_FROM_MAIN: float = 50.0  # §4.2: a production structure this far from the enemy main
+PROXY_NEAR_ENEMY_TOWNHALL: float = 15.0  # ...and not next to one of their townhalls (Citadel)
+PROXY_DETECT_UNTIL_S: float = 330.0  # far production after this is not a proxy (Citadel)
+# One-base (§4.2 detectors.no_natural): no natural townhall by 2:45 (T/P) or 2:15 (Z),
+# with >= 2 gas or >= 3 production structures. Random uses the T/P time until the race is seen.
+NO_NATURAL_DEADLINE_S: dict[str, float] = {"Terran": 165.0, "Protoss": 165.0, "Zerg": 135.0, "Random": 165.0}
+NO_NATURAL_MIN_GAS: int = 2
+NO_NATURAL_MIN_PRODUCTION: int = 3
+NO_NATURAL_SEEN_GRACE_S: float = 10.0  # the natural counts as seen at the deadline if seen this recently
+NO_NATURAL_GIVE_UP_S: float = 30.0  # natural still unseen this long after the deadline: skip the check
+NATURAL_TOWNHALL_RADIUS: float = 6.0  # an enemy townhall this close to their natural spot
+# Natural scout (§4.3 probe route, M2 part): after ares's scout circles the enemy main, it
+# watches the enemy natural from this far toward the map centre until the deadline above
+NAT_SCOUT_STANDOFF: float = 7.0
+NAT_SCOUT_RETREAT_HP: float = 0.5  # HP+shield fraction: below this the scout goes home
+
+# §4.2 defense plans (bot/defense/)
+WORKER_RUSH_KEEP_MINING: int = 2  # §4.2: pull all probes except 2
+WORKER_RUSH_SWAP_HP: float = 15.0  # §4.2: a pulled probe below this HP+shield goes back to mining
+WORKER_RUSH_END_AT: int = 1  # §4.2: end the pull when enemy workers near our base are <= 1
+CANNON_PROBES_PER_PYLON: int = 3  # §4.2
+CANNON_PROBES_PER_CANNON: int = 4  # §4.2
+CANNON_PROBES_PER_ENEMY_PROBE: int = 1  # §4.2: "kill the enemy probe with 1-2 probes"
+CANNON_PROBES_ON_PROBES_MAX: int = 2
+CANNON_PULL_MAX: int = 12  # never more probes than this on a cannon rush (Citadel)
+CANNON_COVER_EXTRA: float = 1.0  # safety margin on a finished Cannon's range
+LING_DEFENSE_RADIUS: float = 9.0  # §4.2 "lings in the mineral line": this close to a mineral line
+LING_DEFENSE_PROBES_PER_LING: int = 2
+LING_DEFENSE_MAX: int = 12
+POOL_12_UNITS_BEFORE_EXPAND: int = 3  # §4.2: resume the Nexus at >= 3 units ...
+POOL_12_LING_CLEAR_RADIUS: float = 20.0  # ... and no lings within 20
+POOL_12_MAIN_BATTERIES: int = 1
+PROXY_UNITS_BEFORE_EXPAND: int = 2  # §4.2: skip the natural until 2 units are out
+PROXY_GATEWAYS: int = 2
+PROXY_MAIN_BATTERIES: int = 1
+ONE_BASE_BATTERIES: int = 3  # §4.2 "2-3"; §5's phase rule counts 3
+RAMP_HOLD_OFFSET: float = 2.0  # hold point: ramp top moved this far toward the main
+NATURAL_HOLD_OFFSET: float = 6.0  # hold point: natural moved this far toward the enemy
+MAIN_BATTERY_RAMP_DIST: float = 6.0  # main batteries within this of the ramp top, main level
+CANCEL_HEALTH_MIN: float = 50.0  # cancel our unfinished structure below max(this, fraction x max HP)
+CANCEL_HEALTH_FRACTION: float = 0.09  # (ares's own unused rule, building_manager.py:690-700)

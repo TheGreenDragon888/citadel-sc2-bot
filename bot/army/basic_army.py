@@ -64,6 +64,9 @@ class BasicArmy:
         self.launch_supply: float = 0.0
         self.retreated_at: float = -ARMY_RELAUNCH_WAIT_S
         self.excluded_tags: set[int] = set()  # units other modules control (wall holder)
+        # §4.2 DefensePlan.army_hold_point: while set, the army waits here instead of the rally
+        # point and doesn't attack
+        self.hold_point: Optional[Point2] = None
         self._hunt_points: list[Point2] = []
         self._visited: set[Point2] = set()
         self._orders: dict[int, tuple[Point2, float]] = {}  # tag -> (target, time given)
@@ -81,6 +84,11 @@ class BasicArmy:
         threat = self._home_threat()
         if threat is not None:
             target = threat
+        elif self.hold_point is not None:
+            if self.state == self.ATTACK:
+                self.state = self.GATHER
+                logger.info(f"ARMY recalled to the defense hold point at {bot.time_formatted}")
+            target = self.hold_point
         else:
             self._update_state(supply)
             target = self._attack_target(center, army) if self.state == self.ATTACK else self._rally_point()

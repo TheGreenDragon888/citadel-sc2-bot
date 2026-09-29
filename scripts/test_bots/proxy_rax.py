@@ -2,7 +2,8 @@
 
 Two SCVs leave at 0:00 for a hidden spot near the opponent's natural (their third base, or a
 point toward the map centre; random unless given as the variant `third`/`center`) and build
-`RAX` Barracks there as soon as each is affordable. A Supply Depot goes down at home. Marines
+`RAX` Barracks there as soon as each is affordable, after a Supply Depot at home (Barracks need
+one). Marines
 come from every Barracks; the first `FIRST_WAVE` attack together and later ones stream in. SCVs
 go to 16. The builders return home to mine once the Barracks are placed.
 """
@@ -43,6 +44,8 @@ class ProxyRaxBot(CheeseBot):
             self.proxy = self.their_third().towards(nat, 4)
         else:
             self.proxy = nat.towards(self.game_info.map_center, 30)
+        # a 3x3 building's centre sits on .5 coordinates; the build order fails on others
+        self.proxy = Point2((int(self.proxy.x) + 0.5, int(self.proxy.y) + 0.5))
         self.proxy = await self.find_placement(UnitTypeId.BARRACKS, self.proxy, max_distance=15, placement_step=2) or self.proxy
         for worker in self.workers.closest_n_units(self.proxy, BUILDERS):
             self.builders.add(worker.tag)
@@ -58,8 +61,13 @@ class ProxyRaxBot(CheeseBot):
         # the Barracks come first: SCVs stop at SCVS_BEFORE_RAX until both are placed
         await self.macro_basics(WORKER_TARGET if placed >= RAX else SCVS_BEFORE_RAX)
 
+        # a Supply Depot first: Barracks need a finished one
+        depots = self.structures(UnitTypeId.SUPPLYDEPOT)
+        if not depots and not self.already_pending(UnitTypeId.SUPPLYDEPOT) and self.can_afford(UnitTypeId.SUPPLYDEPOT):
+            await self.build(UnitTypeId.SUPPLYDEPOT, near=self.start_location.towards(self.game_info.map_center, 7), placement_step=2)
+
         # proxy barracks
-        if placed < RAX and self.can_afford(UnitTypeId.BARRACKS):
+        if placed < RAX and self.can_afford(UnitTypeId.BARRACKS) and depots.ready:
             idle_builder = next((w for w in builders if not self.ordered_rax(w) and not w.is_constructing_scv), None)
             if idle_builder is not None:
                 p = await self.find_placement(UnitTypeId.BARRACKS, self.proxy, max_distance=12, placement_step=3)
@@ -74,8 +82,7 @@ class ProxyRaxBot(CheeseBot):
                 w.move(self.proxy)
 
         # home: supply, an extra barracks later
-        depots = self.structures(UnitTypeId.SUPPLYDEPOT)
-        if placed >= RAX and self.supply_left < 3 and self.supply_cap < 200 and not self.already_pending(UnitTypeId.SUPPLYDEPOT) and self.can_afford(UnitTypeId.SUPPLYDEPOT):
+        if depots and placed >= RAX and self.supply_left < 3 and self.supply_cap < 200 and not self.already_pending(UnitTypeId.SUPPLYDEPOT) and self.can_afford(UnitTypeId.SUPPLYDEPOT):
             await self.build(UnitTypeId.SUPPLYDEPOT, near=self.start_location.towards(self.game_info.map_center, 7 + 2 * len(depots)), placement_step=2)
         if (
             self.time > EXTRA_RAX_AT_S

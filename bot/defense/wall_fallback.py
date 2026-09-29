@@ -20,6 +20,8 @@ start (§4.8.3). While `wall_ok` is False, `step` then:
   main's level, once the Cybernetics Core is ready;
 - makes the first Zealot or Adept hold position `WALL_HOLD_OFFSET` from the choke toward the
   main until `WALL_HOLD_UNTIL_S`.
+When the wall is usable, `step(hold_gap=True)` (§4.2 12-pool plan) makes the first Zealot or
+Adept hold the wall's gap, `protoss_wall_warpin`, for as long as it is asked to.
 """
 
 from typing import TYPE_CHECKING, Optional
@@ -56,6 +58,7 @@ class WallFallback:
         self.choke: Optional[Point2] = None
         self.hold_point: Optional[Point2] = None
         self.holder_tag: Optional[int] = None
+        self.gap: Optional[Point2] = None  # protoss_wall_warpin when the wall is usable
         self.battery_ordered: bool = False
         self.ramp_pylon_ordered: bool = False
         self._last_hold_order: float = -ORDER_REFRESH_S
@@ -92,6 +95,8 @@ class WallFallback:
 
         self.wall_ok = not problems
         self.reason = "; ".join(problems) if problems else "ok"
+        if self.wall_ok:
+            self.gap = Point2(warpin)
         logger.info(
             f"WALL map={bot.game_info.map_name} start={bot.start_location.rounded} "
             f"wall_ok={self.wall_ok} ({self.reason})"
@@ -146,12 +151,17 @@ class WallFallback:
 
     # -- every army tick while the wall is not usable ------------------------------------------
 
-    def step(self) -> Optional[int]:
+    def step(self, hold_gap: bool = False) -> Optional[int]:
         """Returns the holding unit's tag (for the army to leave alone), if any."""
-        if self.wall_ok:
-            return None
-        self._build_battery()
-        return self._hold()
+        if not self.wall_ok:
+            self._build_battery()
+            return self._hold(self.hold_point, WALL_HOLD_UNTIL_S)
+        if hold_gap and self.gap is not None:
+            return self._hold(self.gap, None)
+        if self.holder_tag is not None:
+            logger.info(f"WALL gap holder released at {self.bot.time_formatted}")
+            self.holder_tag = None
+        return None
 
     def _same_level(self, point: Point2) -> bool:
         bot = self.bot
@@ -217,9 +227,10 @@ class WallFallback:
             return False
         return bool(mediator.build_with_specific_worker(worker=worker, structure_type=type_id, pos=pos))
 
-    def _hold(self) -> Optional[int]:
+    def _hold(self, point: Point2, until_s: Optional[float]) -> Optional[int]:
+        """The first Zealot/Adept holds position at `point` (until `until_s`, if given)."""
         bot = self.bot
-        if bot.time > WALL_HOLD_UNTIL_S:
+        if until_s is not None and bot.time > until_s:
             if self.holder_tag is not None:
                 logger.info(f"WALL fallback: holder released at {bot.time_formatted}")
                 self.holder_tag = None
@@ -230,15 +241,16 @@ class WallFallback:
             if not candidates:
                 self.holder_tag = None
                 return None
-            holder = min(candidates, key=lambda u: u.distance_to(self.hold_point))
+            holder = min(candidates, key=lambda u: u.distance_to(point))
             self.holder_tag = holder.tag
-            logger.info(f"WALL fallback: {holder.type_id.name} {holder.tag} holds {self.hold_point.rounded}")
+            what = "fallback" if not self.wall_ok else "gap"
+            logger.info(f"WALL {what}: {holder.type_id.name} {holder.tag} holds {point.rounded} at {bot.time_formatted}")
         if (
-            holder.distance_to(self.hold_point) > 1.0
+            holder.distance_to(point) > 1.0
             and not holder.is_attacking
             and bot.time - self._last_hold_order >= ORDER_REFRESH_S
         ):
-            holder.move(self.hold_point)
+            holder.move(point)
             holder.hold_position(queue=True)
             self._last_hold_order = bot.time
         return holder.tag

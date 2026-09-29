@@ -81,9 +81,17 @@ class Telemetry:
         fields = " ".join(f"{k}={v}" for k, v in snap.items())
         logger.info(f"METRIC t={_mmss(mark)} {fields}")
 
-    def end_report(self) -> None:
+    def end_report(self, flags=None) -> None:
         mean = self.step_total_ms / self.step_count if self.step_count else 0.0
         logger.info(
             f"METRIC end t={self.bot.time_formatted} supply_blocked_s={self.supply_blocked_s:.1f} "
             f"steps={self.step_count} step_mean_ms={mean:.1f} step_max_ms={self.step_max_ms:.1f}"
         )
+        # §8: flags with their raise and expire reasons and times
+        for r in flags.history if flags is not None else []:
+            expired = (
+                f"expired {_mmss(r.expired_at)}: {r.expire_reason}" if r.expired_at is not None else "still active"
+            )
+            logger.info(
+                f"METRIC flag {r.threat.name} ({r.source}) raised {_mmss(r.raised_at)}: {r.reason}; {expired}"
+            )

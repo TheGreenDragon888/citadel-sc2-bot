@@ -30,6 +30,8 @@ if TYPE_CHECKING:
     from ares import AresBot
     from ares.behaviors.behavior import Behavior
 
+    from bot.defense.defense_planner import DefensePlan
+
 
 class Production:
     def __init__(self, bot: "AresBot"):
@@ -68,15 +70,31 @@ class Production:
                 return None  # wait for the one in progress
         return None
 
-    def behaviors(self, schedule_finished: bool) -> list["Behavior"]:
+    def defense_behaviors(self, plan: "DefensePlan") -> list["Behavior"]:
+        """§4.2 plan units, ahead of everything else (Defense > Economy, §3): the first
+        tech-ready unit of `plan.unit_priority` from every idle producer, and with
+        `all_gateways_producing` the Gateway share of the mix without waiting for a bank."""
+        bot = self.bot
+        out: list["Behavior"] = []
+        unit = next((u for u in plan.unit_priority if bot.tech_ready_for_unit(u)), None)
+        if unit is not None:
+            out.append(SpawnController({unit: {"proportion": 1.0, "priority": 0}}, freeflow_mode=True))
+        if plan.all_gateways_producing:
+            gateway_mix = {u: info for u, info in self.composition(tech_ready_only=True).items() if u in GATEWAY_UNITS}
+            if gateway_mix:
+                out.append(SpawnController(gateway_mix, freeflow_mode=True))
+        return out
+
+    def behaviors(self, schedule_finished: bool, plan: "DefensePlan") -> list["Behavior"]:
         """Behaviors for this tick's MacroPlan, after the economy and the opener schedule.
         ProductionController (more Gateways/Robos and their tech) starts once the opener's timed
-        schedule is finished, or at `PRODUCTION_CONTROLLER_START_S` at the latest."""
+        schedule is finished, or at `PRODUCTION_CONTROLLER_START_S` at the latest. Upgrades wait
+        while the DefensePlan delays the Forge (§4.2 one-base)."""
         bot = self.bot
         comp = self.composition()  # full mix: ProductionController techs toward all of it
         buildable = self.composition(tech_ready_only=True)
         out: list["Behavior"] = []
-        if bot.time >= UPGRADES_START_S and (upgrade := self._next_upgrade()) is not None:
+        if plan.allow_forge and bot.time >= UPGRADES_START_S and (upgrade := self._next_upgrade()) is not None:
             # one at a time, in §4.5.1 order: given the whole list, UpgradeController starts every
             # tech building at once (a Hard-Zerg loss had Forge, Twilight and Robo Bay at 5:00)
             out.append(UpgradeController([upgrade], base_location=bot.start_location))

@@ -5,7 +5,9 @@ of each opener lives in `constants.OPENER_SCHEDULES` and runs here once the YAML
 complete. Each item becomes active at its time and stays active until its count is reached;
 the first time it is reached is logged as a `SCHEDULE` line.
 
-`DefensePlan.allow_expand` (M2) does not exist yet, so expansions are always allowed.
+`constants.OPENER_ESSENTIALS` come first in every schedule: they rebuild what the opener would
+have if a threat flag ended it early, and are already met otherwise. The active DefensePlan
+(§4.2) gates expansions (`allow_expand`, `allow_third`) and the Forge (`allow_forge`).
 """
 
 from dataclasses import dataclass
@@ -22,12 +24,15 @@ from sc2.position import Point2
 from bot.constants import (
     GAS_PER_BASE_AFTER_SCHEDULE,
     MAX_BASES,
+    OPENER_ESSENTIALS,
     OPENER_SCHEDULES,
     ScheduleItem,
 )
 
 if TYPE_CHECKING:
     from ares import AresBot
+
+    from bot.defense.defense_planner import DefensePlanner
 
 # structures within this distance of the natural's townhall spot count as "at the natural"
 NAT_RADIUS: float = 14.0
@@ -64,19 +69,39 @@ CONDITIONS: dict[str, Callable[["AresBot"], bool]] = {
 }
 
 
+# structures and upgrades that need a Forge; §4.2 one-base delays the Forge
+NEEDS_FORGE: frozenset = frozenset(
+    {
+        UnitTypeId.FORGE, UnitTypeId.PHOTONCANNON,
+        UpgradeId.PROTOSSGROUNDWEAPONSLEVEL1, UpgradeId.PROTOSSGROUNDARMORSLEVEL1,
+        UpgradeId.PROTOSSSHIELDSLEVEL1,
+    }
+)
+
+
 class BuildExecutor:
-    def __init__(self, bot: "AresBot", opener: str):
+    def __init__(self, bot: "AresBot", opener: str, planner: "DefensePlanner"):
         self.bot = bot
         self.opener = opener
-        self.items: tuple[ScheduleItem, ...] = OPENER_SCHEDULES.get(opener, ())
-        if not self.items:
+        self.planner = planner
+        schedule = OPENER_SCHEDULES.get(opener, ())
+        if not schedule:
             logger.warning(f"SCHEDULE: no timed steps for opener {opener}")
-        self._reached: set[int] = set()  # indexes of items whose count was reached once
+        self.schedule: tuple[ScheduleItem, ...] = schedule
+        self._reached: set[ScheduleItem] = set()  # items whose count was reached once
         self.waiting_for_money: bool = False
 
     @property
+    def items(self) -> tuple[ScheduleItem, ...]:
+        """The opener essentials (only once a threat flag ended the opener early), then the
+        opener's timed schedule."""
+        if self.planner.opener_ended_by is not None:
+            return OPENER_ESSENTIALS + self.schedule
+        return self.schedule
+
+    @property
     def finished(self) -> bool:
-        return len(self._reached) == len(self.items)
+        return all(item in self._reached for item in self.items)
 
     # -- targets used by the economy -------------------------------------------------------
 
@@ -88,10 +113,20 @@ class BuildExecutor:
         return max(counts, default=len(bot.gas_buildings))
 
     def bases_target(self) -> int:
+        """Bases wanted now, after the DefensePlan: no new base while `allow_expand` is off
+        (a Nexus already started stays), at most 2 while `allow_third` is off."""
+        townhalls = len(self.bot.townhalls)
         if self.finished:
-            return MAX_BASES
-        counts = [item.count for item in self.items if item.kind == "bases" and self._active(item)]
-        return max(counts, default=len(self.bot.townhalls))
+            target = MAX_BASES
+        else:
+            counts = [item.count for item in self.items if item.kind == "bases" and self._active(item)]
+            target = max(counts, default=townhalls)
+        plan = self.planner.plan
+        if not plan.allow_expand:
+            target = min(target, townhalls)
+        if not plan.allow_third:
+            target = min(target, max(2, townhalls))
+        return target
 
     # -- per macro tick -----------------------------------------------------------------------
 
@@ -101,13 +136,13 @@ class BuildExecutor:
         bot = self.bot
         self.waiting_for_money = False
         out: list[Behavior] = []
-        for index, item in enumerate(self.items):
+        for item in self.items:
             if not self._active(item):
                 continue
             have = self._count(item)
             if have >= item.count:
-                if index not in self._reached:
-                    self._reached.add(index)
+                if item not in self._reached:
+                    self._reached.add(item)
                     name = item.type_id.name if item.type_id is not None else item.kind
                     logger.info(
                         f"SCHEDULE {self.opener}: {name} x{item.count} ({item.where}) "
@@ -122,6 +157,8 @@ class BuildExecutor:
 
     def _active(self, item: ScheduleItem) -> bool:
         bot = self.bot
+        if item.type_id in NEEDS_FORGE and not self.planner.plan.allow_forge:
+            return False
         early = item.early_if is not None and CONDITIONS[item.early_if](bot)
         if bot.time < item.at_s and not early:
             return False
@@ -152,7 +189,7 @@ class BuildExecutor:
     def _behavior(self, item: ScheduleItem) -> Optional[Behavior]:
         bot = self.bot
         if item.kind in ("gas", "bases"):
-            if item.kind == "bases" and not bot.can_afford(UnitTypeId.NEXUS):
+            if item.kind == "bases" and self.bases_target() > len(bot.townhalls) and not bot.can_afford(UnitTypeId.NEXUS):
                 self.waiting_for_money = True
             return None  # handled by the economy through gas_target() / bases_target()
 
@@ -190,6 +227,7 @@ class BuildExecutor:
             base_location=bot.mediator.get_own_nat if at_nat else bot.start_location,
             structure_id=item.type_id,
             static_defence=item.type_id == UnitTypeId.SHIELDBATTERY,
+            wall=item.where == "ramp",  # ares's ramp-wall spots, as `@ ramp` in the opener
             # a natural item must not wander to another base when the natural has no spot yet
             find_alternative=not at_nat,
         )

@@ -43,13 +43,15 @@ class Economy:
         """
         return ExpansionController(to_count=min(to_count, MAX_BASES), prioritize=prioritize)
 
-    async def chrono(self) -> None:
+    async def chrono(self, gateways_first: bool = False) -> None:
         """Cast one chrono per call on the §4.1 target, if a Nexus has the energy for it.
+        `gateways_first` (§4.2 proxy plan, "chrono the Gateway units") puts a busy Gateway first.
 
         Energy cost isn't readable from game data (docs/VERIFY_NOTES.md §11.7), so ask the game
         which Nexuses can cast it right now instead of comparing energy to a number.
         """
-        target: Optional[Unit] = self._chrono_target()
+        gates = self._busy(UnitTypeId.GATEWAY) if gateways_first else []
+        target: Optional[Unit] = gates[0] if gates else self._chrono_target()
         if target is None:
             return
         nexuses = [th for th in self.bot.townhalls if th.is_ready]
@@ -63,17 +65,18 @@ class Economy:
                 nexus(CHRONO, target)
                 return
 
+    def _busy(self, type_id: UnitTypeId) -> list[Unit]:
+        return [
+            s
+            for s in self.bot.mediator.get_own_structures_dict[type_id]
+            if s.is_ready and not s.is_idle and not s.has_buff(BuffId.CHRONOBOOSTENERGYCOST)
+        ]
+
     def _chrono_target(self) -> Optional[Unit]:
         """§4.1: Nexus probes until the Core is ready, then Warp Gate research, then
         `constants.CHRONO_AFTER_WARPGATE` (Citadel's order)."""
         bot = self.bot
-
-        def busy(type_id: UnitTypeId) -> list[Unit]:
-            return [
-                s
-                for s in bot.mediator.get_own_structures_dict[type_id]
-                if s.is_ready and not s.is_idle and not s.has_buff(BuffId.CHRONOBOOSTENERGYCOST)
-            ]
+        busy = self._busy
 
         cores = [
             s for s in bot.mediator.get_own_structures_dict[UnitTypeId.CYBERNETICSCORE] if s.is_ready
