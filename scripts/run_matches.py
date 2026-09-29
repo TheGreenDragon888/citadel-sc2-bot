@@ -7,9 +7,14 @@ Examples:
     poetry run python scripts/run_matches.py --map all --games 1 --difficulty VeryHard --build Rush
     poetry run python scripts/run_matches.py --map all --total 10 --race Terran Zerg Protoss Random
     poetry run python scripts/run_matches.py --opener B_PvZ --race Zerg --map PylonAIE_v4 --time-limit 420
+    poetry run python scripts/run_matches.py --opponent cannon_rush --map all --total 10
+
+`--opponent` plays one of the scripted cheese bots in scripts/test_bots/ instead of the built-in
+AI (M2 acceptance: >= 8/10 wins against each).
 """
 
 import argparse
+import asyncio
 import os
 import random
 import statistics
@@ -31,11 +36,15 @@ sys.path.insert(0, str(ROOT))
 import run  # noqa: E402  (also puts ares-sc2 on sys.path)
 from sc2 import maps  # noqa: E402
 from sc2.data import AIBuild, Difficulty, Race, Result  # noqa: E402
-from sc2.main import run_game  # noqa: E402
+from sc2.main import _host_game, _join_game, run_game  # noqa: E402
+from sc2.portconfig import Portconfig  # noqa: E402
 from sc2.player import Bot, Computer  # noqa: E402
 
 from bot.constants import LADDER_TIE_GAME_SECONDS, M1_PROBES_AT_6_MIN  # noqa: E402
 from bot.main import CitadelBot  # noqa: E402
+from scripts.test_bots import TEST_BOTS  # noqa: E402
+
+M2_WIN_RATE: float = 0.8  # M2 acceptance: >= 8/10 against each cheese bot
 
 CRASH: str = "Crash"
 BUILDS_FILE: Path = ROOT / "protoss_builds.yml"
@@ -94,9 +103,20 @@ def parse_args() -> argparse.Namespace:
         "--race",
         nargs="+",
         choices=[r.name for r in Race if r != Race.NoRace],
-        default=[Race.Random.name],
-        help="built-in AI race; several values are cycled game by game (default Random)",
+        default=None,
+        help="opponent race; several values are cycled game by game "
+        "(default Random for the built-in AI, the bot's own races for --opponent)",
     )
+    parser.add_argument(
+        "--opponent",
+        choices=sorted(TEST_BOTS),
+        default=None,
+        help="play this scripted cheese bot (scripts/test_bots/) instead of the built-in AI",
+    )
+    parser.add_argument(
+        "--variant", default=None, help="--opponent variant (default: random per game where the bot has variants)"
+    )
+    parser.add_argument("--seed", type=int, default=None, help="seed for the --opponent bot's random choices")
     parser.add_argument(
         "--build",
         choices=[b.name for b in AIBuild],
@@ -130,11 +150,35 @@ def parse_args() -> argparse.Namespace:
         parser.error("--games must be at least 1")
     if args.total is not None and args.total < 1:
         parser.error("--total must be at least 1")
+    if args.race is None:
+        args.race = [r.name for r in TEST_BOTS[args.opponent][1]] if args.opponent else [Race.Random.name]
     if args.opener is not None:
         builds = yaml.safe_load(BUILDS_FILE.read_text())["Builds"]
         if args.opener not in builds:
             parser.error(f"--opener must be one of: {', '.join(builds)}")
     return args
+
+
+def run_bot_game(map_name: str, players: list, replay: Optional[str], time_limit: int) -> tuple[Result, Optional[str]]:
+    """Bot vs bot. python-sc2's `run_game` turns an exception on either side into a bare
+    AssertionError, so host and join here to keep both. Returns Citadel's result and the
+    opponent bot's error, if any; Citadel's own exception is raised."""
+    portconfig = Portconfig()
+
+    async def host_and_join():
+        return await asyncio.gather(
+            _host_game(
+                maps.get(map_name), players, realtime=False, portconfig=portconfig,
+                save_replay_as=replay, game_time_limit=time_limit,
+            ),
+            _join_game(players, realtime=False, portconfig=portconfig, game_time_limit=time_limit),
+            return_exceptions=True,
+        )
+
+    ours, theirs = asyncio.run(host_and_join())
+    if isinstance(ours, BaseException):
+        raise ours
+    return ours, (repr(theirs) if isinstance(theirs, BaseException) else None)
 
 
 def build_schedule(map_args: List[str], games: int, total: Optional[int]) -> List[str]:
@@ -167,31 +211,48 @@ def main() -> int:
     races = list(islice(cycle(Race[r] for r in args.race), len(schedule)))
     if args.replays is not None:
         args.replays.mkdir(parents=True, exist_ok=True)
-    opponent = f"{'/'.join(args.race)} {difficulty.name} {ai_build.name}"
+    if args.opponent:
+        opponent = f"{args.opponent} ({'/'.join(args.race)})"
+    else:
+        opponent = f"{'/'.join(args.race)} {difficulty.name} {ai_build.name}"
 
     rows = []
     for i, (map_name, opp_race) in enumerate(zip(schedule, races), start=1):
-        print(
-            f"\n=== Game {i}/{len(schedule)}: {bot_name} vs {opp_race.name} {difficulty.name} "
-            f"{ai_build.name} on {map_name} ==="
-        )
+        if args.opponent:
+            bot_class = TEST_BOTS[args.opponent][0]
+            seed = None if args.seed is None else args.seed + i
+            opponent_bot = bot_class(seed=seed, variant=args.variant)
+            opponent_player = Bot(opp_race, opponent_bot, args.opponent)
+            label = f"{args.opponent} ({opp_race.name})"
+        else:
+            opponent_bot = None
+            opponent_player = Computer(opp_race, difficulty, ai_build=ai_build)
+            label = f"{opp_race.name} {difficulty.name} {ai_build.name}"
+        print(f"\n=== Game {i}/{len(schedule)}: {bot_name} vs {label} on {map_name} ===")
         bot = TrackedCitadelBot(forced_opener=args.opener)
         replay: Optional[str] = None
         if args.replays is not None:
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             replay = str(
-                (args.replays / f"{stamp}_{map_name}_{opp_race.name}_{difficulty.name}_{i}.SC2Replay").resolve()
+                (args.replays / f"{stamp}_{map_name}_{opp_race.name}_{args.opponent or difficulty.name}_{i}.SC2Replay").resolve()
             )
         started = time.perf_counter()
         error: Optional[str] = None
         try:
-            result = run_game(
-                maps.get(map_name),
-                [Bot(bot_race, bot, bot_name), Computer(opp_race, difficulty, ai_build=ai_build)],
-                realtime=False,
-                save_replay_as=replay,
-                game_time_limit=args.time_limit,
-            )
+            if args.opponent:
+                result, opponent_error = run_bot_game(
+                    map_name, [Bot(bot_race, bot, bot_name), opponent_player], replay, args.time_limit
+                )
+                if opponent_error is not None:
+                    error = f"opponent bot: {opponent_error}"
+            else:
+                result = run_game(
+                    maps.get(map_name),
+                    [Bot(bot_race, bot, bot_name), opponent_player],
+                    realtime=False,
+                    save_replay_as=replay,
+                    game_time_limit=args.time_limit,
+                )
             outcome = result.name if isinstance(result, Result) else str(result)
         except Exception as e:
             outcome, error = CRASH, repr(e)
@@ -201,6 +262,12 @@ def main() -> int:
         game_seconds = bot.time if getattr(bot, "state", None) is not None else None
         telemetry = getattr(bot, "telemetry", None)
         snap = telemetry.snapshots.get(PROBES_AT_S) if telemetry is not None else None
+        flag_store = getattr(bot, "flags", None)
+        flags = (
+            ",".join(f"{r.threat.name}@{format_game_time(r.raised_at)}" for r in flag_store.history)
+            if flag_store is not None
+            else ""
+        )
         rows.append(
             {
                 "i": i,
@@ -211,6 +278,8 @@ def main() -> int:
                 "probes6": snap["probes"] if snap else None,
                 "bases6": snap["bases"] if snap else None,
                 "outcome": outcome,
+                "variant": getattr(opponent_bot, "variant", None),
+                "flags": flags,
                 "game_s": game_seconds,
                 "real_s": time.perf_counter() - started,
                 "error": error,
@@ -235,6 +304,9 @@ def main() -> int:
             f"{cell(r['probes6']):>8} {cell(r['bases6']):>7}  {r['outcome']:<8} "
             f"{format_game_time(r['game_s']):>6} {r['real_s']:>6.0f}s"
         )
+        if r["variant"]:
+            line += f"  variant={r['variant']}"
+        line += f"  flags={r['flags'] or '-'}"
         print(line + (f"  {r['error']}" if r["error"] else ""))
     print(
         f"Wins {counts[Result.Victory.name]}/{len(rows)}  Losses {counts[Result.Defeat.name]}  "
@@ -249,6 +321,13 @@ def main() -> int:
             f"probes@6:00 >= {M1_PROBES_AT_6_MIN}: {reached}/{len(rows)} games  "
             f"(min {min(probes)}, median {statistics.median(probes):g}, max {max(probes)}; "
             f"{len(rows) - len(probes)} games without a 6:00 snapshot)"
+        )
+    if args.opponent:
+        needed = -(-M2_WIN_RATE * len(rows) // 1)
+        ok = counts[Result.Victory.name] >= needed and not counts[CRASH]
+        print(
+            f"M2 acceptance vs {args.opponent}: {counts[Result.Victory.name]}/{len(rows)} wins "
+            f"(>= {needed:.0f} needed), {counts[CRASH]} crashes: {'PASS' if ok else 'FAIL'}"
         )
     return 1 if counts[CRASH] else 0
 
