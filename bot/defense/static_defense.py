@@ -16,7 +16,7 @@
 from typing import TYPE_CHECKING, Optional
 
 from ares.behaviors.macro import BuildStructure
-from ares.consts import BUILDING_SIZE_ENUM_TO_RADIUS, ID, TARGET
+from ares.consts import BUILDING_SIZE_ENUM_TO_RADIUS, ID, TARGET, WORKER_TYPES
 from ares.dicts.structure_to_building_size import STRUCTURE_TO_BUILDING_SIZE
 from cython_extensions import cy_pylon_matrix_covers
 from loguru import logger
@@ -30,6 +30,7 @@ from bot.constants import (
     DEFENSE_ORDER_RETRY_S,
     MAIN_BATTERY_RAMP_DIST,
     MAIN_BATTERY_SEARCH_RADIUS,
+    MAIN_RADIUS,
     NATURAL_RADIUS,
     RAMP_CORRIDOR_HALF_WIDTH,
     RAMP_CORRIDOR_LENGTH,
@@ -116,11 +117,25 @@ class StaticDefense:
             bot.structures(UnitTypeId.CYBERNETICSCORE)
             or bot.mediator.get_building_counter[UnitTypeId.CYBERNETICSCORE]
             or not bot.structures(UnitTypeId.GATEWAY).ready
+            # not while enemies are loose in our main: five probes sent to rebuild a lost wall
+            # Core died on the way in a Ley Lines test game
+            or self._enemies_in_main()
         ):
             return []
         if bot.can_afford(UnitTypeId.CYBERNETICSCORE):
             return [BuildStructure(bot.start_location, UnitTypeId.CYBERNETICSCORE, wall=True)]
         return [ReserveForStructure(UnitTypeId.CYBERNETICSCORE)]
+
+    def _enemies_in_main(self) -> bool:
+        bot = self.bot
+        z = bot.get_terrain_z_height(bot.start_location)
+        return any(
+            not e.is_memory
+            and e.distance_to(bot.start_location) <= MAIN_RADIUS
+            and abs(bot.get_terrain_z_height(e) - z) < SAME_LEVEL_Z
+            for e in bot.enemy_units
+            if not e.is_flying and e.type_id not in WORKER_TYPES  # a worker scout is no danger
+        )
 
     # -- main batteries near the ramp ----------------------------------------------------------------
 
