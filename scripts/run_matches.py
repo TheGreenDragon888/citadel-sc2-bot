@@ -48,7 +48,8 @@ class TrackedCitadelBot(CitadelBot):
     - python-sc2 turns an exception in `on_start` into a plain Defeat, so record it here.
       Exceptions in `on_step` propagate out of `run_game` and are caught by the caller.
     - `forced_opener` (test only) narrows every `BuildChoices` list in protoss_builds.yml to
-      one build after ares has loaded the file, so ares's own selection picks it.
+      one build after ares has loaded the file, so ares's own selection picks it. Those games
+      don't write ./data, so they don't change later opener selection.
     """
 
     start_error: Optional[str] = None
@@ -62,6 +63,7 @@ class TrackedCitadelBot(CitadelBot):
         if self.forced_opener is not None:
             for choice in self.config["BuildChoices"].values():
                 choice["Cycle"] = [self.forced_opener]
+            self.config["UseData"] = False
 
     async def on_start(self) -> None:
         try:

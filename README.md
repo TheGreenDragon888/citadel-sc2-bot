@@ -34,12 +34,24 @@ cp maps/*.SC2Map ~/StarCraftII/Maps/
 ln -s Maps ~/StarCraftII/maps     # a symbolic link named `maps` that points at `Maps`
 ```
 
+## Openers and data
+
+Openers are in `protoss_builds.yml` (ares build runner); their timed steps are
+`OPENER_SCHEDULES` in `bot/constants.py`. ares records each game's opener and result in
+`./data/<opponent_id>-protoss.json` (`None-protoss.json` in local games) and uses it to pick the
+next opener. Delete `./data` to start local selection from scratch.
+
 ## Commands
 
 | Task | Command |
 |---|---|
-| One local game (random map/race) | `poetry run python run.py` |
+| One local game (random pool map and race) | `poetry run python run.py` |
 | N games vs the built-in AI, with a summary | `poetry run python scripts/run_matches.py --help` |
+| M1 acceptance batch (repeat with `--difficulty Hard`) | `poetry run python scripts/run_matches.py --difficulty Medium --map all --total 10 --race Terran Zerg Protoss Random` |
+| One opener, forced (no `./data` written) | `poetry run python scripts/run_matches.py --opener B_PvZ --race Zerg --map PylonAIE_v4` |
+| Opener selection wiring (ares cycles on a loss) | `poetry run python scripts/test_opener_cycle.py` |
+| Ramp wall helpers on both spawns of every pool map | `poetry run python scripts/check_ramp_walls.py` |
+| Forced ramp wall fallback (§4.8) | `poetry run python scripts/test_wall_fallback.py --case ramp` (or `--case choke`) |
 | Combat-sim static-defense test | `poetry run python scripts/test_can_win_fight.py` |
 | Build the ladder zip | `poetry run python scripts/create_ladder_zip.py` |
 | Check the zip layout | `unzip -l publish/*.zip \| head` (`run.py` must be at the top level) |

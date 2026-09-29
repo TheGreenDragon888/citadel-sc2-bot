@@ -7,7 +7,13 @@ from loguru import logger
 from sc2.data import Result
 
 from bot.army.basic_army import BasicArmy
-from bot.constants import ARMY_EVERY_STEPS, MACRO_EVERY_STEPS, OPENER_TIMEOUT_S, PROBE_TARGET
+from bot.constants import (
+    ARMY_EVERY_STEPS,
+    MACRO_EVERY_STEPS,
+    OPENER_TIMEOUT_S,
+    PROBE_TARGET,
+    RULESET_12_WORKER,
+)
 from bot.defense.wall_fallback import WallFallback
 from bot.macro.build_executor import BuildExecutor
 from bot.macro.economy import Economy
@@ -41,6 +47,9 @@ class CitadelBot(AresBot):
     async def on_start(self) -> None:
         # §4.0: loop-0 state is parsed here, before ares picks an opener in super().on_start()
         self.ruleset = detect_ruleset(self)
+        if self.ruleset != RULESET_12_WORKER:
+            # M1 ships 12-worker openers only (every pool map is 12-worker, VERIFY_NOTES §11.8)
+            logger.error(f"RULESET {self.ruleset}: no openers for it; playing the 12-worker ones")
         # §4.8: must run before ares's placement solver, which crashes on an unusable ramp wall
         self.wall = WallFallback(self)
         self.wall_ok = self.wall.prepare()

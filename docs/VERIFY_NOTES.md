@@ -588,3 +588,65 @@ empty and 0) sets `supply_cap` from `food_cap` (`sc2/bot_ai_internal.py:709`). E
   "`Maps`, not `maps`"; on this client both names are needed.
 - **Template zip script** deleted `../python-sc2` (a folder beside the repo) before cloning; fixed
   to `./python-sc2`.
+
+## M1 findings
+
+Found while building M1 (openers, economy, wall fallback). Source lines are for the versions
+at the top of this file.
+
+**Ramp walls on every pool spawn (§4.8, Open Question 6).** `scripts/check_ramp_walls.py`
+evaluates python-sc2's `protoss_wall_*` helpers from both spawns of each map (two players per
+game). All 14 spawns have a wall Pylon, 2 wall buildings and a warp-in spot, and every ramp top
+is 14.0–17.9 from the start location (§4.8's limit is 30). No pool map uses the fallback.
+
+| map | spawn | ramp upper points | start → ramp top | wall_ok |
+|---|---|---|---|---|
+| Magannatha AIE | (38.5, 141.5) / (141.5, 38.5) | 2 / 2 | 15.1 / 15.1 | True / True |
+| Ultralove AIE | (42.5, 46.5) / (141.5, 137.5) | 2 / 2 | 14.6 / 15.8 | True / True |
+| Ley Lines AIE | (155.5, 133.5) / (42.5, 40.5) | 2 / 5 | 15.0 / 14.4 | True / True |
+| Torches AIE | (124.5, 159.5) / (124.5, 48.5) | 2 / 2 | 15.7 / 15.2 | True / True |
+| Pylon AIE | (175.5, 76.5) / (72.5, 171.5) | 2 / 5 | 16.2 / 15.8 | True / True |
+| Persephone AIE | (37.5, 145.5) / (37.5, 34.5) | 5 / 2 | 17.9 / 17.5 | True / True |
+| Incorporeal AIE | (32.5, 139.5) / (123.5, 24.5) | 2 / 2 | 14.0 / 15.0 | True / True |
+
+**How the fallback avoids ares's crash without editing ares (§4.8, §11.5).**
+- python-sc2's wall helpers are `functools.cached_property` (`sc2/game_info.py:163`, `:178`,
+  `:200`), so assigning the attribute on our `Ramp` object replaces the cached value.
+  `bot/defense/wall_fallback.py` does that before `super().on_start()`, pointing them at
+  unbuildable map-edge tiles.
+- ares keeps only placements that pass `can_place_structure`
+  (`ares-sc2/src/ares/managers/placement_manager.py:713`), so those spots are never offered.
+- With no wall spot available, ares's placement strategies fall back to ordinary spots: 3x3s near
+  a Pylon toward `main_base_ramp.bottom_center`
+  (`ares-sc2/src/ares/managers/utils/placement_strategy.py:161`) and Pylons at the free spot
+  nearest `main_base_ramp.top_center` (`:263`, `:276`). `scripts/test_wall_fallback.py` checks
+  this in game.
+
+**`MacroPlan` stops at the first behavior that returns True**
+(`ares-sc2/src/ares/behaviors/macro/macro_plan.py:51`). Two ares behaviors return True without
+acting, which stops everything after them:
+- `AutoSupply` returns True whenever supply is "required"
+  (`ares-sc2/src/ares/behaviors/macro/auto_supply.py:43`, `:58`), and it counts as required until
+  half as many Pylons are in progress as there are production structures (`:119`). It builds with
+  `BuildStructure`, whose `max_on_route` defaults to 1
+  (`ares-sc2/src/ares/behaviors/macro/build_structure.py:83`, `:111`), so only one Pylon is ever
+  on its way. In test games it returned True on 68 and 109 macro ticks in minutes 7 and 8, and
+  probes and production stopped. Citadel uses its own Pylon timing after the opener
+  (`bot/macro/supply.py`). The build runner still uses `AutoSupply` during the opener
+  (`ares-sc2/src/ares/build_runner/build_order_runner.py:264`).
+- `SpawnController` stops at the first unit in priority order that it can't afford, even when
+  that unit's share is already met ("don't spend resources on lower priority units",
+  `ares-sc2/src/ares/behaviors/macro/spawn_controller.py:176-178`). Short of gas for a Colossus or
+  Immortal, it made nothing while minerals piled up. `bot/macro/production.py` adds a
+  `freeflow_mode` Gateway-unit spend above `MINERAL_FLOAT_BANK`.
+
+**Opener timing on the pool (12-worker, with Nexus chrono from 0:00).**
+- The build runner logs `<supply> <time> <command>` when a step completes
+  (`ares-sc2/src/ares/build_runner/build_order_runner.py:530`); these are the opener timings.
+- A family (A/A2/B/B2 and the vs-Random pair): "19 Nexus" landed at 1:17, before §4.1's
+  ~1:25–1:40, so the openers use the spec's other option, 20.
+- C2's "23 Nexus" lands at about 2:10, before §4.1's ~2:30–2:45. The supply number is kept.
+- Two supply blocks happen in every A/B opener: 0:18–0:32 (waiting for the 14 Pylon to finish)
+  and about 1:50–2:04 at 23/31. The 22 Pylon only goes down at ~1:46 once the Nexus, Core and gas
+  are paid for; a 21 trigger changed nothing. Removing it would need a Pylon before the Core,
+  which changes the spec's build.
