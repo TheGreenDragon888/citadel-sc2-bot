@@ -234,6 +234,8 @@ class StaticDefense:
             return
         target: Point2 = info[TARGET]
         info[TARGET] = None
+        if info[ID] == UnitTypeId.NEXUS:
+            self.planner.expansion_failed()
         blocked = 0
         for sizes in bot.mediator.get_placements_dict.values():
             for spots in sizes.values():

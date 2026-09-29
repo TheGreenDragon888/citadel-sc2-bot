@@ -456,6 +456,7 @@ CANNON_PROBES_PER_ENEMY_PROBE: int = 1  # §4.2: "kill the enemy probe with 1-2 
 CANNON_PROBES_ON_PROBES_MAX: int = 2
 CANNON_PULL_MAX: int = 12  # never more probes than this on a cannon rush (Citadel)
 CANNON_NEARLY_DONE: float = 0.6  # probes skip targets in range of a Cannon this far built
+EXPANSION_RETRY_S: float = 90.0  # after a Nexus builder dies on its way, no expansion for this long
 CANNON_COVER_EXTRA: float = 1.0  # safety margin on a finished Cannon's range
 LING_DEFENSE_RADIUS: float = 9.0  # §4.2 "lings in the mineral line": this close to a mineral line
 LING_DEFENSE_PROBES_PER_LING: int = 2

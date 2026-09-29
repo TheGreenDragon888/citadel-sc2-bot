@@ -12,7 +12,8 @@ then build what the opener would have.
 Plans (§4.2):
 - WORKER_RUSH: pull probes (worker_defense.py), Zealot first, no expansion while it lasts.
 - CANNON_RUSH: probes on unfinished Pylons/Cannons (worker_defense.py); once a Cannon is done,
-  Stalkers/Immortal, and our natural cancelled if a finished Cannon covers it.
+  Stalkers/Immortal; while a finished Cannon covers our natural, the natural is cancelled and
+  no base is taken.
 - POOL_12: no expansion until POOL_12_UNITS_BEFORE_EXPAND units and no Zerglings near our bases;
   a Zealot/Adept holds the wall gap; a Battery in the main.
 - PROXY: no expansion until PROXY_UNITS_BEFORE_EXPAND units; a 2nd Gateway and a Battery in the
@@ -32,6 +33,7 @@ from bot.constants import (
     ARMY_HOLD_LEASH,
     CANNON_COVER_EXTRA,
     DEFENSE_TECH_AFTER_SUPPLY,
+    EXPANSION_RETRY_S,
     HOLD_SHIFT_STEP,
     HOLD_SHIFT_STEPS,
     NATURAL_HOLD_OFFSET,
@@ -144,6 +146,7 @@ class DefensePlanner:
         # has held for POOL_12_GATE_HOLD_S
         self._pool_expand_ok: bool = False
         self._pool_gate_since: float = 0.0
+        self._no_expand_until: float = 0.0  # set when a Nexus builder dies on its way
 
     # -- policy for new flags ------------------------------------------------------------------
 
@@ -178,6 +181,8 @@ class DefensePlanner:
         for threat in PLAN_ORDER:
             if threat in active:
                 getattr(self, f"_plan_{threat.name.lower()}")(plan, army)
+        if bot.time < self._no_expand_until:
+            plan.allow_expand = False
         # the unit priority list without repeats, in order
         seen: set[UnitTypeId] = set()
         plan.unit_priority = [u for u in plan.unit_priority if not (u in seen or seen.add(u))]
@@ -187,6 +192,12 @@ class DefensePlanner:
             self._summary = summary
             logger.info(f"PLAN at {bot.time_formatted}: {summary}")
         return plan
+
+    def expansion_failed(self) -> None:
+        """A probe sent to build a Nexus died on its way: don't send another for
+        EXPANSION_RETRY_S (each retry cost a probe in test games)."""
+        self._no_expand_until = self.bot.time + EXPANSION_RETRY_S
+        logger.info(f"PLAN no new expansion until {int(self._no_expand_until) // 60}:{int(self._no_expand_until) % 60:02d}")
 
     def _maybe_end_opener(self) -> None:
         runner = self.bot.build_order_runner
@@ -253,9 +264,10 @@ class DefensePlanner:
             plan.unit_priority += [UnitTypeId.IMMORTAL, UnitTypeId.STALKER]
             nat = self.bot.mediator.get_own_nat
             if self.cannon_covers(nat, 2.75):  # Nexus footprint radius
-                # §4.2 cancels the natural; ares's ExpansionController skips a spot enemy
-                # Cannons make unsafe, so expanding elsewhere stays allowed (Citadel)
+                # §4.2 cancels the natural. Other bases wait too: ares then picks the next
+                # expansion, and in test games every probe sent there died passing the Cannons
                 plan.cancel_natural = True
+                plan.allow_expand = False
 
     def _plan_pool_12(self, plan: DefensePlan, army: list) -> None:
         bot = self.bot
