@@ -733,3 +733,19 @@ once idle, ares hands it back to `GATHERING` before 390 s
 
 **python-sc2 memory flag.** `Unit.is_memory` is True for a Unit object older than the current
 game loop (`sc2/unit.py:476-479`), which is how ares's ghosts show up in `enemy_units`.
+
+**ExpansionController stops holding money once its probe leaves.** With `prioritize=True` it
+returns True (holding the rest of a MacroPlan) only until it sends a probe; from then on the
+order counts as pending (`structure_pending` counts building-tracker entries,
+`ares-sc2/src/ares/main.py:1100-1107`) and `execute` returns False
+(`ares-sc2/src/ares/behaviors/macro/expansion_controller.py`, `execute`). Everything after it keeps
+spending, and ares's building manager only places the Nexus when it can be afforded
+(`building_manager.py:380-385`). **Runtime** (worker rush, UltraloveAIE_v2): the probe waited at
+the natural from 1:17 to past 5:00 with minerals under 400. `economy.ReserveForPending` now holds
+later spending while such an order is younger than `RESERVE_FOR_PENDING_MAX_S`.
+
+**Attack-moving into a cluster of structures.** An attack-move to a point inside a
+cluster of enemy structures stops short with nothing in range (units idle ~9 from a Cannon
+cluster at our natural in a test game); `BasicArmy` attacks a visible structure directly once
+within `ARMY_DIRECT_ATTACK_MARGIN` of weapon range. `client.query_pathing` to a point inside a
+structure's footprint returns None, so it can't be used to test such targets.

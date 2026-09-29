@@ -12,7 +12,7 @@ then build what the opener would have.
 Plans (§4.2):
 - WORKER_RUSH: pull probes (worker_defense.py), Zealot first, no expansion while it lasts.
 - CANNON_RUSH: probes on unfinished Pylons/Cannons (worker_defense.py); once a Cannon is done,
-  Stalkers/Immortal, no expansion (and cancel ours) if a finished Cannon covers our natural.
+  Stalkers/Immortal, and our natural cancelled if a finished Cannon covers it.
 - POOL_12: no expansion until POOL_12_UNITS_BEFORE_EXPAND units and no Zerglings near our bases;
   a Zealot/Adept holds the wall gap; a Battery in the main.
 - PROXY: no expansion until PROXY_UNITS_BEFORE_EXPAND units; a 2nd Gateway and a Battery in the
@@ -31,10 +31,14 @@ from sc2.position import Point2
 from bot.constants import (
     ARMY_HOLD_LEASH,
     CANNON_COVER_EXTRA,
+    DEFENSE_TECH_AFTER_SUPPLY,
+    HOLD_SHIFT_STEP,
+    HOLD_SHIFT_STEPS,
     NATURAL_HOLD_OFFSET,
     ONE_BASE_BATTERIES,
     POOL_12_LING_CLEAR_RADIUS,
     POOL_12_GATE_HOLD_S,
+    POOL_12_GATEWAYS,
     POOL_12_HOLD_OFFSET,
     POOL_12_MAIN_BATTERIES,
     POOL_12_PUSH_SUPPLY,
@@ -149,15 +153,10 @@ class DefensePlanner:
         if threat == Threat.CANNON_RUSH:
             return evidence == Evidence.STRUCTURE  # an enemy probe alone is often just a scout
         if threat == Threat.POOL_12:
-            return not self._natural_started()  # §4.2: delay the natural if it isn't started
+            # §4.2 delays the natural if it isn't started; either way the Zealot for the wall gap
+            # can't wait for the rest of the opener (Zerglings arrived before it in test games)
+            return True
         return False
-
-    def _natural_started(self) -> bool:
-        bot = self.bot
-        nat = bot.mediator.get_own_nat
-        return any(th.distance_to(nat) < 3 for th in bot.townhalls) or bool(
-            bot.mediator.get_building_counter[UnitTypeId.NEXUS]
-        )
 
     # -- per intel tick ------------------------------------------------------------------------
 
@@ -199,13 +198,25 @@ class DefensePlanner:
 
     # -- helpers ---------------------------------------------------------------------------------
 
+    def _safe(self, point: Point2) -> Point2:
+        """`point`, moved toward our main until no finished enemy Cannon can hit a unit there."""
+        bot = self.bot
+        for _ in range(HOLD_SHIFT_STEPS):
+            if not self.cannon_covers(point, 1.0):
+                break
+            point = point.towards(bot.start_location, HOLD_SHIFT_STEP)
+        return point
+
     def _ramp_hold(self, offset: float = RAMP_HOLD_OFFSET) -> Point2:
         bot = self.bot
-        return bot.main_base_ramp.top_center.towards(bot.start_location, offset)
+        return self._safe(bot.main_base_ramp.top_center.towards(bot.start_location, offset))
 
     def _natural_hold(self) -> Point2:
         bot = self.bot
-        return bot.mediator.get_own_nat.towards(bot.enemy_start_locations[0], NATURAL_HOLD_OFFSET)
+        return self._safe(bot.mediator.get_own_nat.towards(bot.enemy_start_locations[0], NATURAL_HOLD_OFFSET))
+
+    def _army_supply(self, army: list) -> float:
+        return sum(self.bot.calculate_supply_cost(u.type_id) for u in army)
 
     def _our_natural(self) -> Optional["Unit"]:
         nat = self.bot.mediator.get_own_nat
@@ -237,7 +248,8 @@ class DefensePlanner:
             plan.unit_priority += [UnitTypeId.IMMORTAL, UnitTypeId.STALKER]
             nat = self.bot.mediator.get_own_nat
             if self.cannon_covers(nat, 2.75):  # Nexus footprint radius
-                plan.allow_expand = False
+                # §4.2 cancels the natural; ares's ExpansionController skips a spot enemy
+                # Cannons make unsafe, so expanding elsewhere stays allowed (Citadel)
                 plan.cancel_natural = True
 
     def _plan_pool_12(self, plan: DefensePlan, army: list) -> None:
@@ -260,6 +272,7 @@ class DefensePlanner:
             plan.allow_expand = False
             # Citadel: units before tech until the Nexus may resume (Defense > Economy, §3)
             plan.hold_tech = True
+        plan.gateways_needed = max(plan.gateways_needed, POOL_12_GATEWAYS)  # Citadel
         # a Zealot for the wall gap first, then Adepts (ranged, bonus vs light) behind the wall
         has_zealot = any(u.type_id == UnitTypeId.ZEALOT for u in army)
         plan.unit_priority += (
@@ -268,8 +281,7 @@ class DefensePlanner:
         plan.batteries_needed["main"] = max(plan.batteries_needed["main"], POOL_12_MAIN_BATTERIES)
         # the army waits behind the wall and the Battery, not outside it, until it is strong
         # enough to hold the natural; then the gap holder steps aside so it can get out (Citadel)
-        supply = sum(bot.calculate_supply_cost(u.type_id) for u in army)
-        if supply < POOL_12_PUSH_SUPPLY:
+        if self._army_supply(army) < POOL_12_PUSH_SUPPLY:
             plan.hold_wall_gap = True
             plan.army_hold_point = self._ramp_hold(POOL_12_HOLD_OFFSET)
             plan.army_leash = ARMY_HOLD_LEASH
@@ -279,6 +291,8 @@ class DefensePlanner:
     def _plan_proxy(self, plan: DefensePlan, army: list) -> None:
         if len(army) < PROXY_UNITS_BEFORE_EXPAND:
             plan.allow_expand = False
+        if self._army_supply(army) < DEFENSE_TECH_AFTER_SUPPLY:
+            plan.hold_tech = True  # Citadel: Gateway units before the Robo
         plan.gateways_needed = max(plan.gateways_needed, PROXY_GATEWAYS)
         plan.batteries_needed["main"] = max(plan.batteries_needed["main"], PROXY_MAIN_BATTERIES)
         plan.unit_priority += (
@@ -294,6 +308,8 @@ class DefensePlanner:
             plan.army_hold_point = self._natural_hold()
 
     def _plan_one_base_allin(self, plan: DefensePlan, army: list) -> None:
+        if self._army_supply(army) < DEFENSE_TECH_AFTER_SUPPLY and not self.roaches_seen:
+            plan.hold_tech = True  # Citadel: Gateway units first (the Robo stays vs Roaches)
         where = "natural" if self._our_natural() is not None else "main"
         plan.batteries_needed[where] = max(plan.batteries_needed[where], ONE_BASE_BATTERIES)
         plan.allow_third = False

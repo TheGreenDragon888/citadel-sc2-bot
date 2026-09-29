@@ -119,7 +119,9 @@ class CitadelBot(AresBot):
 
         if iteration % MACRO_EVERY_STEPS == 0:
             self.static_defense.step(plan)
-            defense = self.static_defense.behaviors(plan) + self.production.defense_behaviors(plan)
+            # units before structures: in test games Batteries and Pylons took every mineral
+            # while Marines walked in
+            defense = self.production.defense_behaviors(plan) + self.static_defense.behaviors(plan)
             await self.economy.chrono(gateways_first=plan.chrono_gateways)
             if self.build_order_runner.build_completed:
                 self._register_macro_plan(defense)

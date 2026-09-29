@@ -452,11 +452,15 @@ CANNON_PULL_MAX: int = 12  # never more probes than this on a cannon rush (Citad
 CANNON_COVER_EXTRA: float = 1.0  # safety margin on a finished Cannon's range
 LING_DEFENSE_RADIUS: float = 9.0  # §4.2 "lings in the mineral line": this close to a mineral line
 LING_DEFENSE_PROBES_PER_LING: int = 2
-LING_DEFENSE_MAX: int = 12
+LING_DEFENSE_MAX: int = 16
 POOL_12_UNITS_BEFORE_EXPAND: int = 3  # §4.2: resume the Nexus at >= 3 units ...
 POOL_12_LING_CLEAR_RADIUS: float = 20.0  # ... and no lings within 20
 POOL_12_GATE_HOLD_S: float = 10.0  # that condition must hold (or fail) this long to switch
 POOL_12_PUSH_SUPPLY: int = 16  # from this army supply the army holds the natural, not the ramp
+POOL_12_GATEWAYS: int = 2  # (Citadel; §4.2 names none for 12-pool)
+DEFENSE_TECH_AFTER_SUPPLY: int = 8  # proxy / one-base plans: timed tech waits below this army supply
+HOLD_SHIFT_STEP: float = 2.0  # a hold point a finished enemy Cannon covers moves this far inward ...
+HOLD_SHIFT_STEPS: int = 6  # ... at most this many times
 POOL_12_MAIN_BATTERIES: int = 1
 PROXY_UNITS_BEFORE_EXPAND: int = 2  # §4.2: skip the natural until 2 units are out
 PROXY_GATEWAYS: int = 2
