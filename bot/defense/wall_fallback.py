@@ -41,6 +41,10 @@ from bot.constants import (
     WALL_HOLD_UNTIL_S,
     WALL_RAMP_MAX_DIST,
     WALL_SPOT_SEARCH_RADIUS,
+    WALL_SWAP_BACKOFF,
+    WALL_SWAP_FRESH_FRACTION,
+    WALL_SWAP_HP_FRACTION,
+    WALL_SWAP_RADIUS,
 )
 
 if TYPE_CHECKING:
@@ -227,6 +231,10 @@ class WallFallback:
             return False
         return bool(mediator.build_with_specific_worker(worker=worker, structure_type=type_id, pos=pos))
 
+    @staticmethod
+    def _health(unit) -> float:
+        return (unit.health + unit.shield) / max(1.0, unit.health_max + unit.shield_max)
+
     def _hold(self, point: Point2, until_s: Optional[float]) -> Optional[int]:
         """The first Zealot/Adept holds position at `point` (until `until_s`, if given)."""
         bot = self.bot
@@ -245,6 +253,25 @@ class WallFallback:
             self.holder_tag = holder.tag
             what = "fallback" if not self.wall_ok else "gap"
             logger.info(f"WALL {what}: {holder.type_id.name} {holder.tag} holds {point.rounded} at {bot.time_formatted}")
+        elif self._health(holder) < WALL_SWAP_HP_FRACTION:
+            fresh = [
+                u for t in HOLDER_TYPES for u in bot.mediator.get_own_army_dict[t]
+                if u.tag != holder.tag
+                and self._health(u) >= WALL_SWAP_FRESH_FRACTION
+                and u.distance_to(point) <= WALL_SWAP_RADIUS
+            ]
+            if fresh:
+                new = min(fresh, key=lambda u: u.distance_to(point))
+                holder.move(point.towards(bot.start_location, WALL_SWAP_BACKOFF))
+                new.move(point)
+                new.hold_position(queue=True)
+                self._last_hold_order = bot.time
+                logger.info(
+                    f"WALL swap: {new.type_id.name} {new.tag} takes {point.rounded} from {holder.type_id.name} "
+                    f"at {self._health(holder):.0%} at {bot.time_formatted}"
+                )
+                self.holder_tag = new.tag
+                return new.tag
         if (
             holder.distance_to(point) > 1.0
             and not holder.is_attacking

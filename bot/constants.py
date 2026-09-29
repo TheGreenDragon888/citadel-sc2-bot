@@ -374,6 +374,14 @@ WALL_BATTERY_MAX_DIST: float = 6.0  # battery within this of the ramp top, on th
 WALL_HOLD_OFFSET: float = 1.5  # holding unit: ramp top moved this far toward the main
 WALL_HOLD_UNTIL_S: float = 360.0  # the holding unit rejoins the army after this (Citadel)
 WALL_SPOT_SEARCH_RADIUS: int = 3  # tiles searched around a wanted wall Pylon/Battery spot
+# the wall-gap holder below this HP+shield fraction swaps with a Zealot/Adept above
+# WALL_SWAP_FRESH_FRACTION within WALL_SWAP_RADIUS of the gap, and steps back WALL_SWAP_BACKOFF
+# toward the main (Citadel; 12-pool test games lost one holder every ~20 s with the next unit
+# standing behind it)
+WALL_SWAP_HP_FRACTION: float = 0.35
+WALL_SWAP_FRESH_FRACTION: float = 0.7
+WALL_SWAP_RADIUS: float = 8.0
+WALL_SWAP_BACKOFF: float = 3.0
 
 # Telemetry snapshots (§8 metrics), game seconds
 METRIC_TIMES_S: Tuple[int, ...] = (240, 360, 480, 600)
