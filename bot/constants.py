@@ -340,3 +340,35 @@ WALL_HOLD_UNTIL_S: float = 360.0  # the holding unit rejoins the army after this
 METRIC_TIMES_S: Tuple[int, ...] = (240, 360, 480, 600)
 # M1 acceptance: 44 probes by 6:00 (12-worker ruleset)
 M1_PROBES_AT_6_MIN: int = 44
+
+
+# ---------------------------------------------------------------------------------------------
+# M2: ares bridge, detectors, ThreatFlag expiry, defense plans
+# ---------------------------------------------------------------------------------------------
+
+# §3/§6 cadence: intel (ares bridge, detectors, flag expiry) and the defense planner
+INTEL_EVERY_STEPS: int = 8
+
+# §5 ThreatFlag expiry. Keyed by Threat name (bot/intel/threat_flags.py).
+# UNIT evidence expires this long after it was last confirmed. §5 gives WORKER_RUSH,
+# TIMING_ATTACK, ARMY_OUT_OF_POSITION and POOL_12; the others are Citadel's choice.
+UNIT_TTL_S: dict[str, float] = {
+    "WORKER_RUSH": 20.0,
+    "TIMING_ATTACK": 30.0,
+    "ARMY_OUT_OF_POSITION": 15.0,
+    "POOL_12": 45.0,
+    "CANNON_RUSH": 20.0,  # raised by an enemy probe in our main (Citadel)
+    "PROXY": 45.0,  # raised by units, e.g. ares's marine-rush or reaper flags (Citadel)
+    "ONE_BASE_ALLIN": 45.0,  # raised by units, e.g. ares's roach flag (Citadel)
+}
+UNIT_TTL_DEFAULT_S: float = 45.0
+MIN_PLAN_DURATION_S: float = 20.0  # no flag expires sooner, except by rule (a)
+RESCOUT_STALE_S: float = 90.0  # STRUCTURE evidence unseen this long: log a re-scout request
+# §5 phase rules (c)
+CANNON_RUSH_PHASE_END_S: float = 300.0  # and no enemy structure within the radius below
+CANNON_RUSH_PHASE_RADIUS: float = 25.0
+PROXY_PHASE_END_S: float = 330.0  # and no proxy structure known
+ONE_BASE_PHASE_END_S: float = 420.0  # with ONE_BASE_PHASE_BATTERIES and the army supply below
+ONE_BASE_PHASE_BATTERIES: int = 3
+ONE_BASE_PHASE_ARMY_SUPPLY: int = 20
+POOL_12_PHASE_END_S: float = 240.0
