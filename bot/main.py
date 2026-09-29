@@ -8,6 +8,7 @@ from sc2.data import Result
 
 from bot.army.basic_army import BasicArmy
 from bot.constants import ARMY_EVERY_STEPS, MACRO_EVERY_STEPS, OPENER_TIMEOUT_S, PROBE_TARGET
+from bot.defense.wall_fallback import WallFallback
 from bot.macro.build_executor import BuildExecutor
 from bot.macro.economy import Economy
 from bot.macro.production import Production
@@ -34,11 +35,17 @@ class CitadelBot(AresBot):
         self.telemetry: Optional[Telemetry] = None
         self.production: Optional[Production] = None
         self.army: Optional[BasicArmy] = None
+        self.wall: Optional[WallFallback] = None
+        self.wall_ok: Optional[bool] = None
 
     async def on_start(self) -> None:
         # §4.0: loop-0 state is parsed here, before ares picks an opener in super().on_start()
         self.ruleset = detect_ruleset(self)
+        # §4.8: must run before ares's placement solver, which crashes on an unusable ramp wall
+        self.wall = WallFallback(self)
+        self.wall_ok = self.wall.prepare()
         await super(CitadelBot, self).on_start()
+        self.wall.after_start()
         self.opener = self.build_order_runner.chosen_opening
         logger.info(f"OPENER {self.opener} (enemy race at start: {self.enemy_race.name})")
         yaml_probes = self.config["Builds"][self.opener].get("ConstantWorkerProductionTill")
@@ -72,6 +79,8 @@ class CitadelBot(AresBot):
                 self._register_macro_plan()
 
         if iteration % ARMY_EVERY_STEPS == 0:
+            holder = self.wall.step()
+            self.army.excluded_tags = {holder} if holder is not None else set()
             self.army.step()
 
         self.telemetry.step()
