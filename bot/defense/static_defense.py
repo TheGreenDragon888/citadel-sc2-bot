@@ -25,13 +25,18 @@ from sc2.ids.unit_typeid import UnitTypeId
 from sc2.position import Point2
 
 from bot.constants import (
+    BUILDER_DANGER_RADIUS,
     CANNON_COVER_EXTRA,
+    DEFENSE_ORDER_RETRY_S,
     MAIN_BATTERY_RAMP_DIST,
+    MAIN_BATTERY_SEARCH_RADIUS,
+    NATURAL_RADIUS,
     RAMP_CORRIDOR_HALF_WIDTH,
     RAMP_CORRIDOR_LENGTH,
     SAME_LEVEL_Z,
 )
 from bot.geometry import in_map
+from bot.macro.production import reserve_for
 
 if TYPE_CHECKING:
     from ares import AresBot
@@ -39,16 +44,17 @@ if TYPE_CHECKING:
 
     from bot.defense.defense_planner import DefensePlan, DefensePlanner
 
-NAT_RADIUS: float = 14.0  # structures this close to the natural spot are "at the natural"
-SEARCH_RADIUS: int = 5
-ORDER_RETRY_S: float = 20.0  # a worker sent to build that hasn't started by then may be re-sent
+# enemy structures that make a spot deadly for a builder (on_worker_died)
+STATIC_DEFENSE: frozenset[UnitTypeId] = frozenset(
+    {UnitTypeId.PHOTONCANNON, UnitTypeId.BUNKER, UnitTypeId.SPINECRAWLER, UnitTypeId.PLANETARYFORTRESS}
+)
 
 
 class StaticDefense:
     def __init__(self, bot: "AresBot", planner: "DefensePlanner"):
         self.bot = bot
         self.planner = planner
-        self._last_main_order: float = -ORDER_RETRY_S
+        self._last_main_order: float = -DEFENSE_ORDER_RETRY_S
         self._blocked: dict[int, list[tuple]] = {}  # cannon tag -> placements we made unavailable
         self._blocked_at: dict[int, Point2] = {}  # cannon tag -> its position
 
@@ -58,7 +64,7 @@ class StaticDefense:
         """Direct actions: main batteries, cancelling the natural, cannon-range placements."""
         self._block_cannon_range()
         self._retarget_builds(plan)
-        if plan.batteries_needed.get("main", 0):
+        if plan.batteries_needed.get("main", 0) and not self._reserve_unmet(plan):
             self._main_batteries(plan.batteries_needed["main"])
         if plan.cancel_natural:
             self._cancel_natural()
@@ -69,13 +75,14 @@ class StaticDefense:
         bot = self.bot
         out: list["Behavior"] = []
         need_nat = plan.batteries_needed.get("natural", 0)
-        if need_nat and bot.tech_requirement_progress(UnitTypeId.SHIELDBATTERY) >= 1:
+        # while our unit holds the wall gap no probe gets out to the natural
+        if need_nat and not plan.hold_wall_gap and bot.tech_requirement_progress(UnitTypeId.SHIELDBATTERY) >= 1:
             nat: Point2 = bot.mediator.get_own_nat
-            pylons = [p for p in bot.mediator.get_own_structures_dict[UnitTypeId.PYLON] if p.distance_to(nat) < NAT_RADIUS]
+            pylons = [p for p in bot.mediator.get_own_structures_dict[UnitTypeId.PYLON] if p.distance_to(nat) < NATURAL_RADIUS]
             if not pylons:
                 if not bot.not_started_but_in_building_tracker(UnitTypeId.PYLON) and bot.can_afford(UnitTypeId.PYLON):
                     out.append(BuildStructure(nat, UnitTypeId.PYLON, find_alternative=False))
-            elif self._count_near(UnitTypeId.SHIELDBATTERY, nat, NAT_RADIUS) < need_nat and bot.can_afford(UnitTypeId.SHIELDBATTERY):
+            elif self._count_near(UnitTypeId.SHIELDBATTERY, nat, NATURAL_RADIUS) < need_nat and bot.can_afford(UnitTypeId.SHIELDBATTERY):
                 out.append(BuildStructure(nat, UnitTypeId.SHIELDBATTERY, static_defence=True, find_alternative=False))
         if plan.gateways_needed:
             gates = (
@@ -88,6 +95,12 @@ class StaticDefense:
         return out
 
     # -- main batteries near the ramp ----------------------------------------------------------------
+
+    def _reserve_unmet(self, plan: "DefensePlan") -> bool:
+        """The plan's reserved first Gateway unit isn't out yet: direct Battery/Pylon orders wait
+        like the MacroPlan does (`ReserveForUnit`)."""
+        reserve = reserve_for(self.bot, plan)
+        return reserve is not None and reserve.unmet(self.bot, self.bot.mediator)
 
     def _count_near(self, type_id: UnitTypeId, point: Point2, radius: float) -> int:
         return sum(1 for s in self.bot.mediator.get_own_structures_dict[type_id] if s.distance_to(point) <= radius)
@@ -124,8 +137,8 @@ class StaticDefense:
         corridors = self._ramp_corridors()
         cx, cy = round(around.x), round(around.y)
         out = []
-        for dx in range(-SEARCH_RADIUS, SEARCH_RADIUS + 1):
-            for dy in range(-SEARCH_RADIUS, SEARCH_RADIUS + 1):
+        for dx in range(-MAIN_BATTERY_SEARCH_RADIUS, MAIN_BATTERY_SEARCH_RADIUS + 1):
+            for dy in range(-MAIN_BATTERY_SEARCH_RADIUS, MAIN_BATTERY_SEARCH_RADIUS + 1):
                 p = Point2((cx + dx, cy + dy))
                 if (
                     in_map(bot, p)
@@ -142,7 +155,7 @@ class StaticDefense:
         bot = self.bot
         if bot.tech_requirement_progress(UnitTypeId.SHIELDBATTERY) < 1:
             return
-        if bot.time - self._last_main_order < ORDER_RETRY_S:
+        if bot.time - self._last_main_order < DEFENSE_ORDER_RETRY_S:
             return
         ramp_top: Point2 = bot.main_base_ramp.top_center
         have = self._count_near(UnitTypeId.SHIELDBATTERY, ramp_top, MAIN_BATTERY_RAMP_DIST + 1)
@@ -223,28 +236,41 @@ class StaticDefense:
                     f"an enemy Cannon covers it ({bot.time_formatted})"
                 )
 
-    def on_worker_died(self, tag: int) -> None:
-        """A builder died on its way: drop its order (no target, which ares removes) and take
-        the spot out of ares's placement table, instead of ares sending the next probe to the
-        same spot (`building_manager.py:393-411`; a natural-cannon test game lost a probe
-        every few seconds that way)."""
+    def on_worker_died(self, tag: int, died_at: Point2) -> None:
+        """A builder died near enemy static defense or enemy units (around its target or where
+        it fell): drop its order (no target, which ares removes) instead of ares sending the
+        next probe the same way (`building_manager.py:393-411`; a natural-cannon test game lost
+        a probe every few seconds that way). With static defense near the target the spot is
+        also taken out of ares's placement table, since that danger stays; otherwise it isn't,
+        as units move on (a ramp or wall spot must stay usable). Any other builder death is
+        left to ares."""
         bot = self.bot
         info = bot.mediator.get_building_tracker_dict.get(tag)
         if info is None or not isinstance(info.get(TARGET), Point2):
             return
         target: Point2 = info[TARGET]
+
+        def near(u) -> bool:
+            return u.distance_to(target) < BUILDER_DANGER_RADIUS or u.distance_to(died_at) < BUILDER_DANGER_RADIUS
+
+        static = [s for s in bot.enemy_structures if s.type_id in STATIC_DEFENSE and near(s)]
+        units = [u for u in bot.enemy_units if near(u)]
+        if not static and not units:
+            return
         info[TARGET] = None
         if info[ID] == UnitTypeId.NEXUS:
             self.planner.expansion_failed()
         blocked = 0
-        for sizes in bot.mediator.get_placements_dict.values():
-            for spots in sizes.values():
-                spot = spots.get(target)
-                if spot is not None and spot.get("available"):
-                    spot["available"] = False
-                    blocked += 1
+        if any(s.distance_to(target) < BUILDER_DANGER_RADIUS for s in static):
+            for sizes in bot.mediator.get_placements_dict.values():
+                for spots in sizes.values():
+                    spot = spots.get(target)
+                    if spot is not None and spot.get("available"):
+                        spot["available"] = False
+                        blocked += 1
+        cause = f"enemy {static[0].type_id.name}" if static else f"{len(units)} enemy units"
         logger.info(
-            f"DEFENSE builder for {info[ID].name} died on its way to {target.rounded} "
+            f"DEFENSE builder for {info[ID].name} died on its way to {target.rounded} near {cause} "
             f"({bot.time_formatted}): order dropped{', spot blocked' if blocked else ''}"
         )
 

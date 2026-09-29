@@ -53,6 +53,7 @@ class CitadelBot(AresBot):
         self.army: Optional[BasicArmy] = None
         self.wall: Optional[WallFallback] = None
         self.wall_ok: Optional[bool] = None
+        self.pylon_fallback_scan_at: Optional[float] = None  # macro/supply.py
         # M2: intel and defense (§3, §4.2, §5)
         self.flags: Optional[FlagStore] = None
         self.planner: Optional[DefensePlanner] = None
@@ -109,6 +110,7 @@ class CitadelBot(AresBot):
                 f"(step {self.build_order_runner.build_step}); ending it"
             )
             self.build_order_runner.set_build_completed()
+            self.planner.opener_ended_by = "timeout"  # BuildExecutor adds the opener essentials
 
         # §3 step 2: intel, flag expiry and the defense plan
         if iteration % INTEL_EVERY_STEPS == 0:
@@ -180,7 +182,7 @@ class CitadelBot(AresBot):
         role = "?"
         if own is not None and self.static_defense is not None:
             role = next((str(r) for r, tags in self.mediator.get_unit_role_dict.items() if unit_tag in tags), "?")
-            self.static_defense.on_worker_died(unit_tag)  # before ares hands its order on
+            self.static_defense.on_worker_died(unit_tag, own.position)  # before ares hands its order on
         await super(CitadelBot, self).on_unit_destroyed(unit_tag)
         if self.army is not None:
             self.army.forget(unit_tag)

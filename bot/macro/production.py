@@ -54,13 +54,26 @@ class ReserveForUnit:
     unit: UnitTypeId
     wanted: int
 
-    def execute(self, ai: "AresBot", config: dict, mediator) -> bool:
+    def unmet(self, ai: "AresBot", mediator) -> bool:
+        """Fewer than `wanted` Gateway units (made or in production) while a Gateway could make
+        one now."""
         have = sum(len(mediator.get_own_army_dict[t]) for t in GATEWAY_UNITS) + ai.unit_pending(self.unit)
-        if have >= self.wanted or ai.can_afford(self.unit):
+        if have >= self.wanted:
             return False
         return any(
             g.is_ready and g.is_idle for g in mediator.get_own_structures_dict[UnitTypeId.GATEWAY]
         ) or bool(mediator.get_own_structures_dict[UnitTypeId.WARPGATE])
+
+    def execute(self, ai: "AresBot", config: dict, mediator) -> bool:
+        return not ai.can_afford(self.unit) and self.unmet(ai, mediator)
+
+
+def reserve_for(bot: "AresBot", plan: "DefensePlan") -> Optional[ReserveForUnit]:
+    """The plan's reserve: its first tech-ready Gateway unit, if it reserves any."""
+    if not plan.reserve_units:
+        return None
+    unit = next((u for u in plan.unit_priority if u in GATEWAY_UNITS and bot.tech_ready_for_unit(u)), None)
+    return ReserveForUnit(unit, plan.reserve_units) if unit is not None else None
 
 
 class Production:
@@ -152,8 +165,10 @@ class Production:
         unit = next((u for u in plan.unit_priority if bot.tech_ready_for_unit(u)), None)
         if unit is not None:
             out.append(SpawnController({unit: {"proportion": 1.0, "priority": 0}}, freeflow_mode=True))
-            if plan.reserve_units:
-                out.append(ReserveForUnit(unit, plan.reserve_units))
+        if (reserve := reserve_for(bot, plan)) is not None:
+            if reserve.unit != unit:
+                out.append(SpawnController({reserve.unit: {"proportion": 1.0, "priority": 0}}, freeflow_mode=True))
+            out.append(reserve)
         if plan.all_gateways_producing:
             gateway_mix = {u: info for u, info in self.composition(tech_ready_only=True).items() if u in GATEWAY_UNITS}
             if gateway_mix:

@@ -25,6 +25,8 @@ Plans (§4.2):
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
 
+from ares.consts import BUILDING_SIZE_ENUM_TO_RADIUS
+from ares.dicts.structure_to_building_size import STRUCTURE_TO_BUILDING_SIZE
 from loguru import logger
 from sc2.ids.unit_typeid import UnitTypeId
 from sc2.position import Point2
@@ -73,6 +75,7 @@ GROUND_ARMY: frozenset[UnitTypeId] = frozenset(
     }
 )
 ROACHES: frozenset[UnitTypeId] = frozenset({UnitTypeId.ROACH, UnitTypeId.RAVAGER})
+NEXUS_RADIUS: float = BUILDING_SIZE_ENUM_TO_RADIUS[STRUCTURE_TO_BUILDING_SIZE[UnitTypeId.NEXUS]]
 
 
 @dataclass
@@ -263,7 +266,7 @@ class DefensePlanner:
         if self.completed_enemy_cannons():
             plan.unit_priority += [UnitTypeId.IMMORTAL, UnitTypeId.STALKER]
             nat = self.bot.mediator.get_own_nat
-            if self.cannon_covers(nat, 2.75):  # Nexus footprint radius
+            if self.cannon_covers(nat, NEXUS_RADIUS):
                 # §4.2 cancels the natural. Other bases wait too: ares then picks the next
                 # expansion, and in test games every probe sent there died passing the Cannons
                 plan.cancel_natural = True
@@ -277,6 +280,7 @@ class DefensePlanner:
         lings_near = [
             e for e in bot.enemy_units
             if e.type_id == UnitTypeId.ZERGLING
+            and not e.is_memory  # ares's remembered units: where they were, not where they are
             and any(e.distance_to(h) < POOL_12_LING_CLEAR_RADIUS for h in homes)
         ]
         ok_now = len(army) >= POOL_12_UNITS_BEFORE_EXPAND and not lings_near
@@ -335,14 +339,18 @@ class DefensePlanner:
             and Threat.CANNON_RUSH not in plan.active
         ):
             plan.hold_tech = True  # Citadel: Gateway units first (the Robo stays vs Roaches, Cannons)
-        where = "natural" if self._our_natural() is not None else "main"
+        # while our unit holds the wall gap, nothing gets out to the natural
+        at_natural = self._our_natural() is not None and not plan.hold_wall_gap
+        where = "natural" if at_natural else "main"
         plan.batteries_needed[where] = max(plan.batteries_needed[where], ONE_BASE_BATTERIES)
         plan.allow_third = False
         plan.allow_forge = False
         plan.all_gateways_producing = True
+        # after the units earlier threats put first (the 12-pool wall Zealot)
         if self.roaches_seen:
-            plan.unit_priority.insert(0, UnitTypeId.IMMORTAL)
+            plan.unit_priority.append(UnitTypeId.IMMORTAL)
         plan.unit_priority += [UnitTypeId.STALKER, UnitTypeId.ZEALOT]
-        if plan.army_hold_point is None or where == "natural":
-            plan.army_hold_point = self._natural_hold() if where == "natural" else self._ramp_hold()
-            plan.army_leash = None if where == "natural" else ARMY_HOLD_LEASH
+        # an earlier threat's hold point (a 12-pool or proxy ramp hold) stands
+        if plan.army_hold_point is None:
+            plan.army_hold_point = self._natural_hold() if at_natural else self._ramp_hold()
+            plan.army_leash = None if at_natural else ARMY_HOLD_LEASH

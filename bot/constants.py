@@ -159,6 +159,7 @@ PYLON_FALLBACK_MINERAL_CLEARANCE: float = 3.5  # ... any mineral field of that b
 PYLON_FALLBACK_RAMP_CLEARANCE: float = 5.0  # ... the main ramp top
 PYLON_FALLBACK_CANNON_CLEARANCE: float = 9.0  # ... any enemy Photon Cannon
 PYLON_STUCK_S: float = 25.0  # a Pylon order not started after this doesn't count as on its way
+PYLON_FALLBACK_SCAN_EVERY_S: float = 2.0  # the fallback search is a few thousand tile checks
 
 # Gas buildings after each opener's timed schedule is finished: this many per ready base
 GAS_PER_BASE_AFTER_SCHEDULE: int = 2
@@ -372,6 +373,7 @@ WALL_CHOKE_MIN_DIST: float = 8.0  # ignore map-analyzer chokes this close to our
 WALL_BATTERY_MAX_DIST: float = 6.0  # battery within this of the ramp top, on the main side
 WALL_HOLD_OFFSET: float = 1.5  # holding unit: ramp top moved this far toward the main
 WALL_HOLD_UNTIL_S: float = 360.0  # the holding unit rejoins the army after this (Citadel)
+WALL_SPOT_SEARCH_RADIUS: int = 3  # tiles searched around a wanted wall Pylon/Battery spot
 
 # Telemetry snapshots (§8 metrics), game seconds
 METRIC_TIMES_S: Tuple[int, ...] = (240, 360, 480, 600)
@@ -497,5 +499,18 @@ MAIN_BATTERY_RAMP_DIST: float = 6.0  # main batteries within this of the ramp to
 # this far to each side of it, plus the building's own half-size)
 RAMP_CORRIDOR_LENGTH: float = 6.0
 RAMP_CORRIDOR_HALF_WIDTH: float = 1.5
-CANCEL_HEALTH_MIN: float = 50.0  # cancel our unfinished structure below max(this, fraction x max HP)
-CANCEL_HEALTH_FRACTION: float = 0.09  # (ares's own unused rule, building_manager.py:690-700)
+MAIN_BATTERY_SEARCH_RADIUS: int = 5  # tiles searched around the wanted main battery/Pylon spot
+DEFENSE_ORDER_RETRY_S: float = 20.0  # a probe sent to build that hasn't started may be re-sent
+# structures (and our build orders) within this of the natural's townhall spot are "at the
+# natural"
+NATURAL_RADIUS: float = 14.0
+# a builder that dies with an enemy Cannon, Bunker or Spine/Spore, or an enemy unit, within this
+# of its target: the order is dropped and the spot blocked instead of ares sending the next
+# probe there (static_defense.py)
+BUILDER_DANGER_RADIUS: float = 12.0
+# cancel our unfinished structure once its HP + shield is below this fraction of what it would
+# have at its build progress if undamaged (a structure starts at BUILD_START_HP_FRACTION of its
+# max and gains the rest as it builds). ares's own unused rule (health < max(50, 9% of max HP),
+# building_manager.py:697-699) cancels a freshly placed Pylon at its first hit.
+CANCEL_EXPECTED_FRACTION: float = 0.3
+BUILD_START_HP_FRACTION: float = 0.1  # the game's: a new structure starts at 10% HP and shield

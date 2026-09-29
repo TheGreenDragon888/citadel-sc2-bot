@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 from ares.behaviors.macro import BuildStructure, SpawnController
 from ares.behaviors.behavior import Behavior
+from ares.consts import ID, TARGET
 from loguru import logger
 from sc2.ids.unit_typeid import UnitTypeId
 from sc2.ids.upgrade_id import UpgradeId
@@ -24,6 +25,7 @@ from sc2.position import Point2
 from bot.constants import (
     GAS_PER_BASE_AFTER_SCHEDULE,
     MAX_BASES,
+    NATURAL_RADIUS,
     OPENER_ESSENTIALS,
     OPENER_SCHEDULES,
     ScheduleItem,
@@ -34,8 +36,6 @@ if TYPE_CHECKING:
 
     from bot.defense.defense_planner import DefensePlanner
 
-# structures within this distance of the natural's townhall spot count as "at the natural"
-NAT_RADIUS: float = 14.0
 # other structure types that count toward an item's count
 COUNTS_AS: dict[UnitTypeId, tuple[UnitTypeId, ...]] = {
     UnitTypeId.GATEWAY: (UnitTypeId.GATEWAY, UnitTypeId.WARPGATE),
@@ -100,8 +100,8 @@ class BuildExecutor:
 
     @property
     def items(self) -> tuple[ScheduleItem, ...]:
-        """The opener essentials (only once a threat flag ended the opener early), then the
-        opener's timed schedule."""
+        """The opener essentials (only once a threat flag or the timeout ended the opener
+        early), then the opener's timed schedule."""
         if self.planner.opener_ended_by is not None:
             return OPENER_ESSENTIALS + self.schedule
         return self.schedule
@@ -200,10 +200,21 @@ class BuildExecutor:
         # structures: finished or under construction, plus workers on their way to build one
         types = COUNTS_AS.get(item.type_id, (item.type_id,))
         structures = [s for t in types for s in bot.mediator.get_own_structures_dict[t]]
-        on_route = bot.not_started_but_in_building_tracker(item.type_id)
-        if item.where == "nat":
-            nat: Point2 = bot.mediator.get_own_nat
-            structures = [s for s in structures if s.distance_to(nat) < NAT_RADIUS]
+        if item.where != "nat":
+            return len(structures) + bot.not_started_but_in_building_tracker(item.type_id)
+        # at the natural: only structures and build orders there (a main Battery order must not
+        # count toward the natural's)
+        nat: Point2 = bot.mediator.get_own_nat
+        structures = [s for s in structures if s.distance_to(nat) < NATURAL_RADIUS]
+        started = {s.position.rounded for s in bot.structures}
+        on_route = sum(
+            1
+            for info in bot.mediator.get_building_tracker_dict.values()
+            if info[ID] == item.type_id
+            and isinstance(target := info[TARGET], Point2)
+            and target.distance_to(nat) < NATURAL_RADIUS
+            and target.rounded not in started
+        )
         return len(structures) + on_route
 
     def _behavior(self, item: ScheduleItem) -> Optional[Behavior]:

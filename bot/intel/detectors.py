@@ -21,6 +21,7 @@ including the §5 phase rules.
 import math
 from typing import TYPE_CHECKING, Callable, Optional
 
+from ares.consts import WORKER_TYPES
 from loguru import logger
 from sc2.data import Race
 from sc2.ids.unit_typeid import UnitTypeId
@@ -70,7 +71,7 @@ from bot.intel.threat_flags import Evidence, ExpiryContext, FlagStore, Threat
 if TYPE_CHECKING:
     from ares import AresBot
 
-WORKERS: frozenset[UnitTypeId] = frozenset({UnitTypeId.PROBE, UnitTypeId.SCV, UnitTypeId.DRONE})
+WORKERS: frozenset[UnitTypeId] = WORKER_TYPES
 CANNON_RUSH_TYPES: frozenset[UnitTypeId] = frozenset(
     {UnitTypeId.PYLON, UnitTypeId.FORGE, UnitTypeId.PHOTONCANNON}
 )
@@ -114,6 +115,10 @@ class Detectors:
         self._main_seen: set[int] = set()
         self.main_scouted_at: Optional[float] = None
         self.enemy_workers_in_main: set[int] = set()
+        self._workers_last_added_at: float = 0.0  # when the last new one was seen
+        # created in on_start at loop 0: both sides start with as many workers as we have now
+        # (12 or 8 by ruleset, §4.0)
+        self._start_workers: int = len(bot.workers)
         self.natural_seen_at: Optional[float] = None  # last time the enemy natural spot was in vision
         self.natural_townhall_seen_at: Optional[float] = None
         self._probe_in_main_since: dict[int, float] = {}
@@ -193,8 +198,9 @@ class Detectors:
                     f"({len(self._main_seen)}/{len(self._main_samples)} sample points seen)"
                 )
         for w in self._visible_enemy_units(WORKERS):
-            if w.distance_to(enemy_main) < MAIN_RADIUS:
+            if w.distance_to(enemy_main) < MAIN_RADIUS and w.tag not in self.enemy_workers_in_main:
                 self.enemy_workers_in_main.add(w.tag)
+                self._workers_last_added_at = now
         nat: Point2 = bot.mediator.get_enemy_nat
         if bot.is_visible(nat):
             self.natural_seen_at = now
@@ -352,8 +358,10 @@ class Detectors:
                 reasons.append(f"{workers} SCVs seen in the main (<= {PROXY_TERRAN_MAX_SCVS})")
             if race == Race.Protoss:
                 build_s = bot.game_data.units[UnitTypeId.PROBE.value].cost.time / 22.4
-                # 12 start + one probe per build time since 0:00, less their own scouting probe
-                expected = 12 + math.floor(now / build_s) - 1
+                # the starting probes + one per build time until the probes were counted (the
+                # scout may have left the main since), less their own scouting probe
+                seen_at = self._workers_last_added_at
+                expected = self._start_workers + math.floor(seen_at / build_s) - 1
                 if workers <= expected - PROXY_PROTOSS_WORKERS_SHORT:
                     reasons.append(f"{workers} probes seen in the main, expected ~{expected}")
             logger.info(

@@ -19,6 +19,7 @@ whenever a matching unit shows up.
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ares.consts import WORKER_TYPES
 from loguru import logger
 from sc2.ids.unit_typeid import UnitTypeId
 from sc2.position import Point2
@@ -29,7 +30,7 @@ from bot.intel.threat_flags import Evidence, FlagStore, Threat
 if TYPE_CHECKING:
     from ares import AresBot
 
-WORKERS: frozenset[UnitTypeId] = frozenset({UnitTypeId.PROBE, UnitTypeId.SCV, UnitTypeId.DRONE})
+WORKERS: frozenset[UnitTypeId] = WORKER_TYPES
 
 
 @dataclass(frozen=True)

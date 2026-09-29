@@ -34,19 +34,19 @@ from sc2.position import Point2
 
 from bot.constants import (
     ORDER_REFRESH_S,
+    SAME_LEVEL_Z,
     WALL_BATTERY_MAX_DIST,
     WALL_CHOKE_MIN_DIST,
     WALL_HOLD_OFFSET,
     WALL_HOLD_UNTIL_S,
     WALL_RAMP_MAX_DIST,
+    WALL_SPOT_SEARCH_RADIUS,
 )
 
 if TYPE_CHECKING:
     from ares import AresBot
 
 HOLDER_TYPES: frozenset[UnitTypeId] = frozenset({UnitTypeId.ZEALOT, UnitTypeId.ADEPT})
-SEARCH_RADIUS: int = 3  # tiles searched around a wanted Pylon/Battery spot
-SAME_LEVEL_Z: float = 0.5  # terrain heights closer than this are the same level
 
 
 class WallFallback:
@@ -173,8 +173,8 @@ class WallFallback:
         bot = self.bot
         cx, cy = round(around.x), round(around.y)
         out = []
-        for dx in range(-SEARCH_RADIUS, SEARCH_RADIUS + 1):
-            for dy in range(-SEARCH_RADIUS, SEARCH_RADIUS + 1):
+        for dx in range(-WALL_SPOT_SEARCH_RADIUS, WALL_SPOT_SEARCH_RADIUS + 1):
+            for dy in range(-WALL_SPOT_SEARCH_RADIUS, WALL_SPOT_SEARCH_RADIUS + 1):
                 p = Point2((cx + dx, cy + dy))
                 if (
                     p.distance_to(self.choke) <= WALL_BATTERY_MAX_DIST

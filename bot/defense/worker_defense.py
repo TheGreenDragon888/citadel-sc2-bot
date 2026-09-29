@@ -15,14 +15,15 @@ builders or the scout). Orders are re-issued only when the target changes (§6 A
   completes: stop the probe attack").
 - Zerglings in a mineral line (POOL_12 active): LING_DEFENSE_PROBES_PER_LING probes per
   Zergling within LING_DEFENSE_RADIUS of a mineral line, no chasing beyond it.
-- `on_structure_damaged`: cancels our unfinished structure once its HP falls below
-  max(CANCEL_HEALTH_MIN, CANCEL_HEALTH_FRACTION x max HP). ares has this rule but never calls it
-  (its hub's `on_unit_took_damage` is empty, `ares-sc2/src/ares/managers/hub.py:306`).
+- `on_structure_damaged`: cancels our unfinished structure once its HP + shield falls below
+  CANCEL_EXPECTED_FRACTION of what it would have undamaged at its build progress. ares has a
+  cancel rule but never calls it (its hub's `on_unit_took_damage` is empty,
+  `ares-sc2/src/ares/managers/hub.py:306`), and its threshold (50 HP) is above a new Pylon's.
 """
 
 from typing import TYPE_CHECKING
 
-from ares.consts import UnitRole
+from ares.consts import UnitRole, WORKER_TYPES
 from loguru import logger
 from sc2.ids.ability_id import AbilityId
 from sc2.ids.unit_typeid import UnitTypeId
@@ -31,8 +32,8 @@ from sc2.unit import Unit
 
 from bot.constants import (
     BRIDGE_HOME_RADIUS,
-    CANCEL_HEALTH_FRACTION,
-    CANCEL_HEALTH_MIN,
+    BUILD_START_HP_FRACTION,
+    CANCEL_EXPECTED_FRACTION,
     CANNON_NEARLY_DONE,
     CANNON_PROBES_ON_PROBES_MAX,
     CANNON_PROBES_PER_CANNON,
@@ -54,7 +55,7 @@ if TYPE_CHECKING:
 
     from bot.defense.defense_planner import DefensePlan, DefensePlanner
 
-WORKERS: frozenset[UnitTypeId] = frozenset({UnitTypeId.PROBE, UnitTypeId.SCV, UnitTypeId.DRONE})
+WORKERS: frozenset[UnitTypeId] = WORKER_TYPES
 
 
 def hp(unit: Unit) -> float:
@@ -233,10 +234,14 @@ class WorkerDefense:
     def on_structure_damaged(self, unit: Unit) -> None:
         if not unit.is_structure or unit.is_ready or unit.type_id not in self._cancellable:
             return
-        if unit.health < max(CANCEL_HEALTH_MIN, CANCEL_HEALTH_FRACTION * unit.health_max):
+        have = unit.health + unit.shield
+        undamaged = (unit.health_max + unit.shield_max) * (
+            BUILD_START_HP_FRACTION + (1 - BUILD_START_HP_FRACTION) * unit.build_progress
+        )
+        if have < CANCEL_EXPECTED_FRACTION * undamaged:
             logger.info(
                 f"DEFENSE cancelling {unit.type_id.name} at {unit.position.rounded} "
-                f"({unit.health:.0f} HP, {unit.build_progress:.0%} built) at {self.bot.time_formatted}"
+                f"({have:.0f}/{undamaged:.0f} HP+shield, {unit.build_progress:.0%} built) at {self.bot.time_formatted}"
             )
             unit(AbilityId.CANCEL_BUILDINPROGRESS)
 

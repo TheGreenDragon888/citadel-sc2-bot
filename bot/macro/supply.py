@@ -34,6 +34,7 @@ from bot.constants import (
     PYLON_FALLBACK_CANNON_CLEARANCE,
     PYLON_FALLBACK_MINERAL_CLEARANCE,
     PYLON_FALLBACK_RAMP_CLEARANCE,
+    PYLON_FALLBACK_SCAN_EVERY_S,
     PYLON_STUCK_S,
     SAME_LEVEL_Z,
     SUPPLY_BUFFER_PER_PRODUCER,
@@ -72,7 +73,16 @@ class PylonTiming:
         nexuses_soon = [
             th for th in ai.townhalls.not_ready if (1 - th.build_progress) * nexus_time <= pylon_time
         ]
-        coming = ai.structure_pending(UnitTypeId.PYLON) * pylon_food + len(
+        # a Pylon order that hasn't started after PYLON_STUCK_S is not counted as on its way:
+        # ares keeps such orders for up to 120 s (building_manager.py:67), e.g. when enemy
+        # Cannons cover the spot. ares's structure_pending counts every tracker order
+        # (main.py:1086-1115), so it comes off that too.
+        stuck = sum(
+            1
+            for info in mediator.get_building_tracker_dict.values()
+            if info[ID] == UnitTypeId.PYLON and ai.time - info[TIME_ORDER_COMMENCED] > PYLON_STUCK_S
+        )
+        coming = (ai.structure_pending(UnitTypeId.PYLON) - stuck) * pylon_food + len(
             nexuses_soon
         ) * _food_provided(ai, UnitTypeId.NEXUS)
         headroom = ai.supply_left + coming
@@ -81,14 +91,6 @@ class PylonTiming:
         if headroom >= buffer:
             return False
         wanted = min(math.ceil((buffer - headroom) / pylon_food), SUPPLY_MAX_PYLONS_AT_ONCE)
-        # a Pylon order that hasn't started after PYLON_STUCK_S is not counted as on its way:
-        # ares keeps such orders for up to 120 s (building_manager.py:67), e.g. when enemy
-        # Cannons cover the spot
-        stuck = sum(
-            1
-            for info in mediator.get_building_tracker_dict.values()
-            if info[ID] == UnitTypeId.PYLON and ai.time - info[TIME_ORDER_COMMENCED] > PYLON_STUCK_S
-        )
         on_route = ai.not_started_but_in_building_tracker(UnitTypeId.PYLON) - stuck
         if on_route < wanted:
             placed = BuildStructure(
@@ -102,16 +104,14 @@ class PylonTiming:
         return headroom < buffer / 2 and not ai.can_afford(UnitTypeId.PYLON)
 
 
-FALLBACK_SCAN_EVERY_S: float = 2.0  # the search is a few thousand tile checks; not every tick
-_last_scan: dict[int, float] = {}  # id(bot) -> game time of the last search
-
-
 def _fallback_spot(ai: "AresBot", main_only: bool = False) -> Optional[Point2]:
     """A free Pylon spot on the level of one of our ready bases (or the main only), nearest
-    the base first."""
-    if ai.time - _last_scan.get(id(ai), -FALLBACK_SCAN_EVERY_S) < FALLBACK_SCAN_EVERY_S:
+    the base first. Searches at most every PYLON_FALLBACK_SCAN_EVERY_S (the last search time
+    is kept on the bot)."""
+    last = getattr(ai, "pylon_fallback_scan_at", None)
+    if last is not None and ai.time - last < PYLON_FALLBACK_SCAN_EVERY_S:
         return None
-    _last_scan[id(ai)] = ai.time
+    ai.pylon_fallback_scan_at = ai.time
     mediator = ai.mediator
     ramp = ai.main_base_ramp.top_center
     cannons = [s for s in ai.enemy_structures if s.type_id == UnitTypeId.PHOTONCANNON]
