@@ -223,6 +223,29 @@ class StaticDefense:
                     f"an enemy Cannon covers it ({bot.time_formatted})"
                 )
 
+    def on_worker_died(self, tag: int) -> None:
+        """A builder died on its way: drop its order (no target, which ares removes) and take
+        the spot out of ares's placement table, instead of ares sending the next probe to the
+        same spot (`building_manager.py:393-411`; a natural-cannon test game lost a probe
+        every few seconds that way)."""
+        bot = self.bot
+        info = bot.mediator.get_building_tracker_dict.get(tag)
+        if info is None or not isinstance(info.get(TARGET), Point2):
+            return
+        target: Point2 = info[TARGET]
+        info[TARGET] = None
+        blocked = 0
+        for sizes in bot.mediator.get_placements_dict.values():
+            for spots in sizes.values():
+                spot = spots.get(target)
+                if spot is not None and spot.get("available"):
+                    spot["available"] = False
+                    blocked += 1
+        logger.info(
+            f"DEFENSE builder for {info[ID].name} died on its way to {target.rounded} "
+            f"({bot.time_formatted}): order dropped{', spot blocked' if blocked else ''}"
+        )
+
     def _block_cannon_range(self) -> None:
         bot = self.bot
         cannons = {c.tag: c for c in bot.enemy_structures if c.type_id == UnitTypeId.PHOTONCANNON}

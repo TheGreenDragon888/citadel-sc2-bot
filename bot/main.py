@@ -176,13 +176,17 @@ class CitadelBot(AresBot):
     async def on_unit_destroyed(self, unit_tag: int) -> None:
         # python-sc2 still holds last step's own units here, so the type is known
         own = self._units_previous_map.get(unit_tag)
+        role = "?"
+        if own is not None and self.static_defense is not None:
+            role = next((str(r) for r, tags in self.mediator.get_unit_role_dict.items() if unit_tag in tags), "?")
+            self.static_defense.on_worker_died(unit_tag)  # before ares hands its order on
         await super(CitadelBot, self).on_unit_destroyed(unit_tag)
         if self.army is not None:
             self.army.forget(unit_tag)
         if self.flags is not None:
             self.flags.on_unit_destroyed(unit_tag, self.time)  # §5 expiry rule (a)
         if own is not None and self.telemetry is not None:
-            self.telemetry.on_own_unit_destroyed(own)
+            self.telemetry.on_own_unit_destroyed(own, role)
 
     async def on_unit_took_damage(self, unit: Unit, amount_damage_taken: float) -> None:
         await super(CitadelBot, self).on_unit_took_damage(unit, amount_damage_taken)
