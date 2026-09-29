@@ -23,6 +23,8 @@ from bot.constants import (
     GAS_FLOAT_LOW,
     MAX_BASES,
     PROBE_TARGET,
+    PROBES_HELD_SPARE,
+    PROBES_PER_HELD_BASE,
     RESERVE_FOR_PENDING_MAX_S,
     WORKERS_PER_GAS_FLOATING,
 )
@@ -83,9 +85,16 @@ class Economy:
             long_distance_mine=long_distance,
         )
 
-    @staticmethod
-    def worker_behavior() -> BuildWorkers:
-        return BuildWorkers(to_count=PROBE_TARGET)
+    def worker_behavior(self, expansion_allowed: bool = True) -> BuildWorkers:
+        """Probes to PROBE_TARGET (§1). While a threat plan forbids expanding, only to
+        PROBES_PER_HELD_BASE per ready base plus PROBES_HELD_SPARE: probes past saturation
+        took the minerals the Gateways needed in cannon-rush test games (60 probes on one base,
+        idle Warp Gates)."""
+        target = PROBE_TARGET
+        if not expansion_allowed:
+            bases = max(1, len(self.bot.ready_townhalls))
+            target = min(PROBE_TARGET, PROBES_PER_HELD_BASE * bases + PROBES_HELD_SPARE)
+        return BuildWorkers(to_count=target)
 
     @staticmethod
     def gas_behavior(to_count: int) -> GasBuildingController:

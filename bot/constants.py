@@ -136,6 +136,10 @@ ARES_INTEL: dict[str, AresIntelFlag] = {
 # protoss_builds.yml, which covers the opener (checked at start-up).
 PROBE_TARGET: int = 66
 MAX_BASES: int = 3  # M1 deliverable: 3 bases
+# While a threat plan forbids expanding (M2): probes to this many per ready base, plus a spare
+# few for the next base (16 on minerals + 6 on gas saturate one base)
+PROBES_PER_HELD_BASE: int = 22
+PROBES_HELD_SPARE: int = 6
 
 # §3/§6 cadence, in on_step calls (GameStep 2: one call every 2 game loops)
 MACRO_EVERY_STEPS: int = 4  # economy, timed schedule, production

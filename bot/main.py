@@ -160,7 +160,7 @@ class CitadelBot(AresBot):
         plan.add(supply_behavior(self, other_bases=not self.planner.plan.hold_wall_gap))
         for behavior in defense:
             plan.add(behavior)
-        plan.add(self.economy.worker_behavior())
+        plan.add(self.economy.worker_behavior(expansion_allowed=self.planner.plan.allow_expand))
         plan.add(ReserveForPending(UnitTypeId.NEXUS))  # a probe waiting at an expansion
         for behavior in executor.behaviors():
             plan.add(behavior)
