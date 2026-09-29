@@ -10,7 +10,9 @@ builders or the scout). Orders are re-issued only when the target changes (§6 A
   the lowest HP+shield enemy worker in reach, otherwise the nearest.
 - Cannon rush (CANNON_RUSH active): 3 probes per unfinished enemy Pylon, 4 per unfinished
   Cannon, 1 per enemy probe near our bases (2 at most), CANNON_PULL_MAX in all. Targets a
-  finished Cannon can hit are skipped; finished Pylons and Cannons are left alone.
+  finished Cannon can hit are skipped; finished Pylons and Cannons are left alone, and once any
+  Cannon near our bases has finished, only enemy probes are still chased (§4.2 "If a Cannon
+  completes: stop the probe attack").
 - Zerglings in a mineral line (POOL_12 active): LING_DEFENSE_PROBES_PER_LING probes per
   Zergling within LING_DEFENSE_RADIUS of a mineral line, no chasing beyond it.
 - `on_structure_damaged`: cancels our unfinished structure once its HP falls below
@@ -148,8 +150,11 @@ class WorkerDefense:
             if s.is_visible and any(s.distance_to(c) < CANNON_RUSH_RADIUS for c in centres)
         ]
         slots: list[tuple[Unit, int]] = []
+        # §4.2 "If a Cannon completes: stop the probe attack": once any Cannon near our bases is
+        # finished, probes leave the structures alone (only the enemy probe is still chased)
+        cannon_done = any(s.type_id == UnitTypeId.PHOTONCANNON and s.is_ready for s in near)
         for s in near:
-            if s.is_ready or self.planner.cannon_covers(s.position, s.radius):
+            if cannon_done or s.is_ready or self.planner.cannon_covers(s.position, s.radius):
                 continue
             if s.type_id == UnitTypeId.PHOTONCANNON:
                 slots.append((s, CANNON_PROBES_PER_CANNON))

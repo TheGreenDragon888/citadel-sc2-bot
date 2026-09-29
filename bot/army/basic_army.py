@@ -25,6 +25,8 @@ from bot.constants import (
     ARMY_CLEAR_STRUCTURES_SUPPLY,
     ARMY_DEFEND_RADIUS,
     ARMY_DIRECT_ATTACK_MARGIN,
+    ARMY_ENGAGE_RATIO,
+    ARMY_HOLD_LEASH,
     ARMY_RECALL_FRACTION,
     ARMY_STATUS_EVERY_S,
     ARMY_SUPPLY_PER_CANNON,
@@ -145,7 +147,9 @@ class BasicArmy:
         With a leash, only enemies near the hold point or inside the main. While attacking,
         only enemy army units with at least `ARMY_RECALL_FRACTION` of our army supply call the
         army back (a structure, worker or trickle near home would flip its target back and
-        forth)."""
+        forth). While gathering, the army doesn't go out to a force it has less than
+        `ARMY_ENGAGE_RATIO` of the supply of, unless it is inside the main or at the hold point
+        (units made one at a time died one at a time to proxy Marines in test games)."""
         bot = self.bot
         best: Optional[tuple[float, Unit]] = None
         start_z = bot.get_terrain_z_height(bot.start_location)
@@ -183,16 +187,31 @@ class BasicArmy:
                 d = enemy.distance_to(home)
                 if d < radius and (best is None or d < best[0]):
                     best = (d, enemy)
-        if best is not None and attacking:
+        if best is None:
+            return None
+        near = [
+            e for e in bot.enemy_units
+            if not e.is_memory and e.type_id not in HARMLESS and e.type_id not in WORKER_TYPES
+            and any(e.distance_to(h) < ARMY_DEFEND_RADIUS for h in homes)
+        ]
+        enemy_supply = sum(bot.calculate_supply_cost(e.type_id) for e in near)
+        if attacking:
             # a trickle of units at home is left to new production; a real attack recalls
-            near = [
-                e for e in bot.enemy_units
-                if not e.is_memory and e.type_id not in HARMLESS and e.type_id not in WORKER_TYPES
-                and any(e.distance_to(h) < ARMY_DEFEND_RADIUS for h in homes)
-            ]
-            if sum(bot.calculate_supply_cost(e.type_id) for e in near) < ARMY_RECALL_FRACTION * army_supply:
+            if enemy_supply < ARMY_RECALL_FRACTION * army_supply:
                 return None
-        return best[1] if best else None
+        else:
+            # don't feed units one by one into a bigger force: wait at the hold point / rally
+            # (near the Batteries) unless the enemy is inside the main or at the hold point
+            target = best[1]
+            inside = (
+                target.distance_to(bot.start_location) <= MAIN_RADIUS
+                and abs(bot.get_terrain_z_height(target) - start_z) < SAME_LEVEL_Z
+            )
+            anchor = self.hold_point if self.hold_point is not None else self._rally_point()
+            at_anchor = target.distance_to(anchor) <= ARMY_HOLD_LEASH
+            if army_supply < ARMY_ENGAGE_RATIO * enemy_supply and not inside and not at_anchor:
+                return None
+        return best[1]
 
     def _rally_point(self) -> Point2:
         bot = self.bot

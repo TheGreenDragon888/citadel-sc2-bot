@@ -354,6 +354,9 @@ ARMY_STATUS_EVERY_S: float = 60.0  # ARMY status log line
 ARMY_DIRECT_ATTACK_MARGIN: float = 4.0  # this close beyond weapon range: attack a structure directly
 # while attacking, enemies near our bases call the army back only with this share of its supply
 ARMY_RECALL_FRACTION: float = 0.3
+# while gathering, go out to enemies near our bases only with this share of their supply
+# (inside the main or at the hold point the army always fights, next to its Batteries)
+ARMY_ENGAGE_RATIO: float = 0.8
 
 # §4.8 ramp wall fallback
 WALL_RAMP_MAX_DIST: float = 30.0  # ramp top farther than this from our start: use a choke
