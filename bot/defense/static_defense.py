@@ -36,6 +36,8 @@ from bot.constants import (
     SAME_LEVEL_Z,
 )
 from bot.geometry import in_map
+from bot.intel.threat_flags import Threat
+from bot.macro.economy import ReserveForPending
 from bot.macro.production import reserve_for
 
 if TYPE_CHECKING:
@@ -44,6 +46,10 @@ if TYPE_CHECKING:
 
     from bot.defense.defense_planner import DefensePlan, DefensePlanner
 
+# our structures whose waiting build orders hold probe production during the 12-pool plan
+DEFENSE_STRUCTURES: tuple[UnitTypeId, ...] = (
+    UnitTypeId.GATEWAY, UnitTypeId.CYBERNETICSCORE, UnitTypeId.SHIELDBATTERY,
+)
 # enemy structures that make a spot deadly for a builder (on_worker_died)
 STATIC_DEFENSE: frozenset[UnitTypeId] = frozenset(
     {UnitTypeId.PHOTONCANNON, UnitTypeId.BUNKER, UnitTypeId.SPINECRAWLER, UnitTypeId.PLANETARYFORTRESS}
@@ -92,6 +98,11 @@ class StaticDefense:
             )
             if gates < plan.gateways_needed and bot.can_afford(UnitTypeId.GATEWAY):
                 out.append(BuildStructure(bot.start_location, UnitTypeId.GATEWAY))
+        if Threat.POOL_12 in plan.active:
+            # a defense structure a probe is waiting to place comes before more probes (Defense >
+            # Economy, §3): in 12-pool test games the Core and 2nd Gateway orders waited 28 s and
+            # 43 s for money while the Nexus trained probes
+            out += [ReserveForPending(t) for t in DEFENSE_STRUCTURES]
         return out
 
     # -- main batteries near the ramp ----------------------------------------------------------------

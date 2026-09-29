@@ -471,6 +471,7 @@ CANNON_COVER_EXTRA: float = 1.0  # safety margin on a finished Cannon's range
 LING_DEFENSE_RADIUS: float = 9.0  # §4.2 "lings in the mineral line": this close to a mineral line
 LING_DEFENSE_PROBES_PER_LING: int = 2
 LING_DEFENSE_MAX: int = 16
+LING_DEFENSE_PULL_RADIUS: float = 15.0  # only probes this close to the lings (and on their level)
 POOL_12_UNITS_BEFORE_EXPAND: int = 3  # §4.2: resume the Nexus at >= 3 units ...
 POOL_12_LING_CLEAR_RADIUS: float = 20.0  # ... and no lings within 20
 POOL_12_GATE_HOLD_S: float = 10.0  # that condition must hold (or fail) this long to switch

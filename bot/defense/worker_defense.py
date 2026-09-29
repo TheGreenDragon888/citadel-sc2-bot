@@ -43,6 +43,7 @@ from bot.constants import (
     CANNON_RUSH_RADIUS,
     LING_DEFENSE_MAX,
     LING_DEFENSE_PROBES_PER_LING,
+    LING_DEFENSE_PULL_RADIUS,
     LING_DEFENSE_RADIUS,
     SAME_LEVEL_Z,
     WORKER_RUSH_END_AT,
@@ -229,11 +230,21 @@ class WorkerDefense:
         if not lings:
             return
         count = min(LING_DEFENSE_MAX, LING_DEFENSE_PROBES_PER_LING * len(lings))
-        free = [p for p in self._free_probes(wanted) if p.tag not in wanted]
-        free.sort(key=lambda p: (-hp(p), min(p.distance_to(z) for z in lings)))
+
+        # only probes of that base: on the lings' level and near them (with our natural up,
+        # main probes were pulled down to its mineral line through the wall gap in a test game)
+        def reachable(p: Unit) -> list[Unit]:
+            z = bot.get_terrain_z_height(p)
+            return [
+                e for e in lings
+                if p.distance_to(e) < LING_DEFENSE_PULL_RADIUS and abs(bot.get_terrain_z_height(e) - z) < SAME_LEVEL_Z
+            ]
+
+        free = [(p, r) for p in self._free_probes(wanted) if p.tag not in wanted and (r := reachable(p))]
+        free.sort(key=lambda pr: (-hp(pr[0]), min(pr[0].distance_to(z) for z in pr[1])))
         self._log_once(f"lings{len(lings)}", f"probes vs {len(lings)} Zerglings in the mineral line")
-        for probe in free[:count]:
-            wanted[probe.tag] = self._pick_target(probe, lings).tag
+        for probe, targets in free[:count]:
+            wanted[probe.tag] = self._pick_target(probe, targets).tag
 
     # -- cancel structures about to die ------------------------------------------------------------------
 
