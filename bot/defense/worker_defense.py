@@ -33,6 +33,7 @@ from bot.constants import (
     BRIDGE_HOME_RADIUS,
     CANCEL_HEALTH_FRACTION,
     CANCEL_HEALTH_MIN,
+    CANNON_NEARLY_DONE,
     CANNON_PROBES_ON_PROBES_MAX,
     CANNON_PROBES_PER_CANNON,
     CANNON_PROBES_PER_ENEMY_PROBE,
@@ -153,8 +154,14 @@ class WorkerDefense:
         # §4.2 "If a Cannon completes: stop the probe attack": once any Cannon near our bases is
         # finished, probes leave the structures alone (only the enemy probe is still chased)
         cannon_done = any(s.type_id == UnitTypeId.PHOTONCANNON and s.is_ready for s in near)
+        # a Cannon this far along finishes before probes kill what is next to it (Citadel)
+        nearly_done = [
+            s for s in near if s.type_id == UnitTypeId.PHOTONCANNON and s.build_progress >= CANNON_NEARLY_DONE
+        ]
         for s in near:
             if cannon_done or s.is_ready or self.planner.cannon_covers(s.position, s.radius):
+                continue
+            if any(s.distance_to(c) <= c.ground_range + c.radius + s.radius + 1 for c in nearly_done):
                 continue
             if s.type_id == UnitTypeId.PHOTONCANNON:
                 slots.append((s, CANNON_PROBES_PER_CANNON))

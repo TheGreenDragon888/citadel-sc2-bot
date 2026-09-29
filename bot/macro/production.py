@@ -6,6 +6,7 @@ mix needs), plus the §4.5.1 upgrade order through ares's UpgradeController. The
 the combat-sim checks of the mix come later.
 """
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
 from ares.behaviors.macro import ProductionController, SpawnController, UpgradeController
@@ -31,6 +32,25 @@ if TYPE_CHECKING:
     from ares.behaviors.behavior import Behavior
 
     from bot.defense.defense_planner import DefensePlan
+
+
+@dataclass
+class ReserveForUnit:
+    """Holds the rest of a MacroPlan (structures, probes) while fewer than `wanted` Gateway units
+    exist, a Gateway could make `unit` now, and it can't be afforded yet (§4.2 "the first
+    Zealot is top priority"; in 12-pool test games probes and buildings kept taking the minerals
+    and the wall Zealot came after the first Zerglings)."""
+
+    unit: UnitTypeId
+    wanted: int
+
+    def execute(self, ai: "AresBot", config: dict, mediator) -> bool:
+        have = sum(len(mediator.get_own_army_dict[t]) for t in GATEWAY_UNITS) + ai.unit_pending(self.unit)
+        if have >= self.wanted or ai.can_afford(self.unit):
+            return False
+        return any(
+            g.is_ready and g.is_idle for g in mediator.get_own_structures_dict[UnitTypeId.GATEWAY]
+        ) or bool(mediator.get_own_structures_dict[UnitTypeId.WARPGATE])
 
 
 class Production:
@@ -79,6 +99,8 @@ class Production:
         unit = next((u for u in plan.unit_priority if bot.tech_ready_for_unit(u)), None)
         if unit is not None:
             out.append(SpawnController({unit: {"proportion": 1.0, "priority": 0}}, freeflow_mode=True))
+            if plan.reserve_units:
+                out.append(ReserveForUnit(unit, plan.reserve_units))
         if plan.all_gateways_producing:
             gateway_mix = {u: info for u, info in self.composition(tech_ready_only=True).items() if u in GATEWAY_UNITS}
             if gateway_mix:

@@ -42,6 +42,7 @@ from bot.constants import (
     POOL_12_HOLD_OFFSET,
     POOL_12_MAIN_BATTERIES,
     POOL_12_PUSH_SUPPLY,
+    POOL_12_RESERVE_UNITS,
     POOL_12_UNITS_BEFORE_EXPAND,
     PROXY_GATEWAYS,
     PROXY_MAIN_BATTERIES,
@@ -96,6 +97,9 @@ class DefensePlan:
     # enemy near our bases), so a ramp hold doesn't run out through the wall
     army_leash: Optional[float] = None
     hold_tech: bool = False  # timed tech (Robo, Stargate, Forge, upgrades) waits
+    # other spending waits (probes included) while fewer Gateway units than this exist and the
+    # first priority unit can be made but not yet afforded
+    reserve_units: int = 0
 
     def summary(self) -> str:
         if not self.active:
@@ -240,6 +244,7 @@ class DefensePlanner:
     def _plan_worker_rush(self, plan: DefensePlan, army: list) -> None:
         plan.allow_expand = False
         plan.unit_priority.append(UnitTypeId.ZEALOT)
+        plan.reserve_units = max(plan.reserve_units, 1)  # §4.2 "the first Zealot is top priority"
         plan.gateways_needed = max(plan.gateways_needed, 1)
         plan.probe_pull = max(plan.probe_pull, len(self.bot.workers) - WORKER_RUSH_KEEP_MINING)
 
@@ -273,6 +278,10 @@ class DefensePlanner:
             # Citadel: units before tech until the Nexus may resume (Defense > Economy, §3)
             plan.hold_tech = True
         plan.gateways_needed = max(plan.gateways_needed, POOL_12_GATEWAYS)  # Citadel
+        # Citadel: the wall-gap Zealot before anything else, and chrono on it (it arrived after
+        # the first Zerglings in test games)
+        plan.reserve_units = max(plan.reserve_units, POOL_12_RESERVE_UNITS)
+        plan.chrono_gateways = True
         # a Zealot for the wall gap first, then Adepts (ranged, bonus vs light) behind the wall
         has_zealot = any(u.type_id == UnitTypeId.ZEALOT for u in army)
         plan.unit_priority += (
@@ -291,8 +300,8 @@ class DefensePlanner:
     def _plan_proxy(self, plan: DefensePlan, army: list) -> None:
         if len(army) < PROXY_UNITS_BEFORE_EXPAND:
             plan.allow_expand = False
-        if self._army_supply(army) < DEFENSE_TECH_AFTER_SUPPLY:
-            plan.hold_tech = True  # Citadel: Gateway units before the Robo
+        if self._army_supply(army) < DEFENSE_TECH_AFTER_SUPPLY and Threat.CANNON_RUSH not in plan.active:
+            plan.hold_tech = True  # Citadel: Gateway units before the Robo (not vs Cannons)
         plan.gateways_needed = max(plan.gateways_needed, PROXY_GATEWAYS)
         plan.batteries_needed["main"] = max(plan.batteries_needed["main"], PROXY_MAIN_BATTERIES)
         plan.unit_priority += (
@@ -308,8 +317,12 @@ class DefensePlanner:
             plan.army_hold_point = self._natural_hold()
 
     def _plan_one_base_allin(self, plan: DefensePlan, army: list) -> None:
-        if self._army_supply(army) < DEFENSE_TECH_AFTER_SUPPLY and not self.roaches_seen:
-            plan.hold_tech = True  # Citadel: Gateway units first (the Robo stays vs Roaches)
+        if (
+            self._army_supply(army) < DEFENSE_TECH_AFTER_SUPPLY
+            and not self.roaches_seen
+            and Threat.CANNON_RUSH not in plan.active
+        ):
+            plan.hold_tech = True  # Citadel: Gateway units first (the Robo stays vs Roaches, Cannons)
         where = "natural" if self._our_natural() is not None else "main"
         plan.batteries_needed[where] = max(plan.batteries_needed[where], ONE_BASE_BATTERIES)
         plan.allow_third = False

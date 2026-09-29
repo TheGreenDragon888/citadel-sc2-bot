@@ -421,6 +421,9 @@ CANNON_PROBE_UNTIL_S: float = 180.0
 CANNON_PROBE_LINGER_S: float = 10.0
 # 12-pool (§4.2): Zerglings seen before 2:20
 EARLY_LINGS_UNTIL_S: float = 140.0
+# a Pool started by then came before any natural Hatchery could (12 workers: the earliest
+# hatch-first natural goes down at ~0:45), so no natural check is needed (Citadel)
+EARLY_POOL_CERTAIN_S: float = 40.0
 # Proxy (§4.4 rows 7 and 10), checked once the enemy main is scouted and not before 1:30
 PROXY_CHECK_FROM_S: float = 90.0
 MAIN_SAMPLE_STEP: float = 4.0  # enemy main sample-point spacing for "main scouted"
@@ -452,6 +455,7 @@ CANNON_PROBES_PER_CANNON: int = 4  # §4.2
 CANNON_PROBES_PER_ENEMY_PROBE: int = 1  # §4.2: "kill the enemy probe with 1-2 probes"
 CANNON_PROBES_ON_PROBES_MAX: int = 2
 CANNON_PULL_MAX: int = 12  # never more probes than this on a cannon rush (Citadel)
+CANNON_NEARLY_DONE: float = 0.6  # probes skip targets in range of a Cannon this far built
 CANNON_COVER_EXTRA: float = 1.0  # safety margin on a finished Cannon's range
 LING_DEFENSE_RADIUS: float = 9.0  # §4.2 "lings in the mineral line": this close to a mineral line
 LING_DEFENSE_PROBES_PER_LING: int = 2
@@ -461,6 +465,7 @@ POOL_12_LING_CLEAR_RADIUS: float = 20.0  # ... and no lings within 20
 POOL_12_GATE_HOLD_S: float = 10.0  # that condition must hold (or fail) this long to switch
 POOL_12_PUSH_SUPPLY: int = 16  # from this army supply the army holds the natural, not the ramp
 POOL_12_GATEWAYS: int = 2  # (Citadel; §4.2 names none for 12-pool)
+POOL_12_RESERVE_UNITS: int = 1  # the wall-gap Zealot waits for nothing else (Citadel)
 DEFENSE_TECH_AFTER_SUPPLY: int = 8  # proxy / one-base plans: timed tech waits below this army supply
 HOLD_SHIFT_STEP: float = 2.0  # a hold point a finished enemy Cannon covers moves this far inward ...
 HOLD_SHIFT_STEPS: int = 6  # ... at most this many times

@@ -9,7 +9,7 @@ including the §5 phase rules.
 | worker_rush | WORKER_RUSH | UNIT | >= WORKER_RUSH_MIN_WORKERS enemy workers within WORKER_RUSH_RADIUS of our main before WORKER_RUSH_UNTIL_S (§4.2 backup) |
 | cannon_structures | CANNON_RUSH | STRUCTURE | enemy Pylon/Forge/Photon Cannon within CANNON_RUSH_RADIUS of our main or natural before CANNON_RUSH_UNTIL_S |
 | cannon_probe | CANNON_RUSH | UNIT | an enemy probe inside our main for CANNON_PROBE_LINGER_S between CANNON_PROBE_FROM_S and CANNON_PROBE_UNTIL_S |
-| early_pool | POOL_12 | STRUCTURE | Spawning Pool started before the natural Hatchery (start times from build progress and game-data build times) |
+| early_pool | POOL_12 | STRUCTURE | Spawning Pool started before the natural Hatchery (start times from build progress and game-data build times; a Pool started by EARLY_POOL_CERTAIN_S needs no natural check) |
 | early_lings | POOL_12 | UNIT | Zerglings seen before EARLY_LINGS_UNTIL_S |
 | proxy_missing | PROXY | STRUCTURE | once the enemy main is scouted, not before PROXY_CHECK_FROM_S: no Barracks (T) / Gateway (P) there, or Terran SCVs <= PROXY_TERRAN_MAX_SCVS, or Protoss probes >= PROXY_PROTOSS_WORKERS_SHORT short of expected (§4.4 rows 7, 10) |
 | proxy_structure | PROXY | STRUCTURE | an enemy production structure > PROXY_FAR_FROM_MAIN from the enemy main before PROXY_DETECT_UNTIL_S |
@@ -37,6 +37,7 @@ from bot.constants import (
     CANNON_RUSH_RADIUS,
     CANNON_RUSH_UNTIL_S,
     EARLY_LINGS_UNTIL_S,
+    EARLY_POOL_CERTAIN_S,
     MAIN_RADIUS,
     MAIN_SAMPLE_STEP,
     MAIN_SCOUTED_FRACTION,
@@ -297,7 +298,13 @@ class Detectors:
                 self.nat_hatch_start = self._start_time(hatches[0])
                 logger.info(f"SCOUT natural Hatchery seen at {bot.time_formatted}, started ~{_mmss(self.nat_hatch_start)}")
         if self.pool_start is not None and not self._pool_decided:
-            if self.nat_hatch_start is not None:
+            if self.pool_start <= EARLY_POOL_CERTAIN_S:
+                # no natural Hatchery can have started this early, so the Pool came first
+                self._pool_decided = True
+                self._raise_pool(
+                    f"Spawning Pool started ~{_mmss(self.pool_start)}, before any natural Hatchery can start"
+                )
+            elif self.nat_hatch_start is not None:
                 self._pool_decided = True
                 if self.pool_start < self.nat_hatch_start:
                     self._raise_pool(f"Spawning Pool started ~{_mmss(self.pool_start)}, natural Hatchery ~{_mmss(self.nat_hatch_start)}")
