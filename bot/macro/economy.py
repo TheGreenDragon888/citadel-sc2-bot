@@ -5,9 +5,11 @@ and the natural itself; `CitadelBot` only adds these behaviors once the opener i
 Chrono runs from the first step, because the openers in protoss_builds.yml have no chrono steps.
 """
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
 from ares.behaviors.macro import BuildWorkers, ExpansionController, GasBuildingController, Mining
+from ares.consts import ID, TARGET, TIME_ORDER_COMMENCED
 from loguru import logger
 from sc2.ids.ability_id import AbilityId
 from sc2.ids.buff_id import BuffId
@@ -21,6 +23,7 @@ from bot.constants import (
     GAS_FLOAT_LOW,
     MAX_BASES,
     PROBE_TARGET,
+    RESERVE_FOR_PENDING_MAX_S,
     WORKERS_PER_GAS_FLOATING,
 )
 
@@ -28,6 +31,31 @@ if TYPE_CHECKING:
     from ares import AresBot
 
 CHRONO: AbilityId = AbilityId.EFFECT_CHRONOBOOSTENERGYCOST
+
+
+@dataclass
+class ReserveForPending:
+    """Holds the rest of a MacroPlan while a probe waits at a build spot for money.
+
+    ares's ExpansionController sends a probe as soon as it decides to expand, then counts that
+    order as pending and stops holding money (`expansion_controller.py`, `execute`), so
+    everything after it keeps spending and the probe can wait for minutes (a worker-rush test
+    game sat at one base until 10:00 with the probe parked at the natural).
+    """
+
+    type_id: UnitTypeId
+
+    def execute(self, ai: "AresBot", config: dict, mediator) -> bool:
+        """True (hold) while an order for `type_id` younger than RESERVE_FOR_PENDING_MAX_S waits
+        for money; an older one is likely stuck and shouldn't starve everything else."""
+        if ai.can_afford(self.type_id):
+            return False
+        return any(
+            info[ID] == self.type_id
+            and info[TARGET] is not None
+            and ai.time - info[TIME_ORDER_COMMENCED] <= RESERVE_FOR_PENDING_MAX_S
+            for info in mediator.get_building_tracker_dict.values()
+        )
 
 
 class Economy:

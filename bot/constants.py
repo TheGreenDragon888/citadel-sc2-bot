@@ -163,6 +163,8 @@ GAS_PER_BASE_AFTER_SCHEDULE: int = 2
 GAS_FLOAT_HIGH: int = 700
 GAS_FLOAT_LOW: int = 300
 WORKERS_PER_GAS_FLOATING: int = 1
+# A probe waiting at an expansion holds the macro plan's later spending for at most this long
+RESERVE_FOR_PENDING_MAX_S: float = 45.0
 
 # §4.1 chrono: Nexus probes until the Core is ready, then Warp Gate research. After that
 # (Citadel's choice, not in the spec): the first busy structure type in this order.
@@ -350,6 +352,8 @@ HUNT_GRID_STEP: float = 20.0  # spacing of the structure-hunt grid over the play
 ORDER_REFRESH_S: float = 3.0  # don't re-issue the same order to a unit more often (§6 APM)
 ARMY_STATUS_EVERY_S: float = 60.0  # ARMY status log line
 ARMY_DIRECT_ATTACK_MARGIN: float = 4.0  # this close beyond weapon range: attack a structure directly
+# while attacking, enemies near our bases call the army back only with this share of its supply
+ARMY_RECALL_FRACTION: float = 0.3
 
 # §4.8 ramp wall fallback
 WALL_RAMP_MAX_DIST: float = 30.0  # ramp top farther than this from our start: use a choke
@@ -468,5 +472,9 @@ ARMY_CLEAR_STRUCTURES_SUPPLY: int = 8
 ARMY_SUPPLY_PER_CANNON: int = 6
 NATURAL_HOLD_OFFSET: float = 6.0  # hold point: natural moved this far toward the enemy
 MAIN_BATTERY_RAMP_DIST: float = 6.0  # main batteries within this of the ramp top, main level
+# ... but clear of the path from the ramp top and the wall gap into the main (this long, and
+# this far to each side of it, plus the building's own half-size)
+RAMP_CORRIDOR_LENGTH: float = 6.0
+RAMP_CORRIDOR_HALF_WIDTH: float = 1.5
 CANCEL_HEALTH_MIN: float = 50.0  # cancel our unfinished structure below max(this, fraction x max HP)
 CANCEL_HEALTH_FRACTION: float = 0.09  # (ares's own unused rule, building_manager.py:690-700)

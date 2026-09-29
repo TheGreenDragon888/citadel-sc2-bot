@@ -5,6 +5,7 @@ from ares import AresBot
 from ares.behaviors.macro import MacroPlan
 from loguru import logger
 from sc2.data import Result
+from sc2.ids.unit_typeid import UnitTypeId
 from sc2.unit import Unit
 
 from bot.army.basic_army import BasicArmy
@@ -25,7 +26,7 @@ from bot.intel.detectors import Detectors
 from bot.intel.scout_planner import NaturalScout
 from bot.intel.threat_flags import FlagStore
 from bot.macro.build_executor import BuildExecutor
-from bot.macro.economy import Economy
+from bot.macro.economy import Economy, ReserveForPending
 from bot.macro.production import Production
 from bot.macro.supply import supply_behavior
 from bot.ruleset import detect_ruleset
@@ -145,14 +146,16 @@ class CitadelBot(AresBot):
         """After the opener. A MacroPlan stops at the first behavior that acts (or, for
         Pylon timing and a prioritised expansion, that is still waiting for money), so the
         order below is the spending priority: supply, the DefensePlan's structures and units
-        (Defense > Economy, §3), probes, timed opener steps, gas, bases, then army production
-        (skipped while a timed step is waiting for money)."""
+        (Defense > Economy, §3), probes, a Nexus a probe is waiting to build, timed opener
+        steps, gas, bases, then army production (skipped while a timed step is waiting for
+        money)."""
         executor = self.executor
         plan = MacroPlan()
         plan.add(supply_behavior(self, other_bases=not self.planner.plan.hold_wall_gap))
         for behavior in defense:
             plan.add(behavior)
         plan.add(self.economy.worker_behavior())
+        plan.add(ReserveForPending(UnitTypeId.NEXUS))  # a probe waiting at an expansion
         for behavior in executor.behaviors():
             plan.add(behavior)
         plan.add(self.economy.gas_behavior(executor.gas_target()))

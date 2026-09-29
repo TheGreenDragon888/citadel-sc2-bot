@@ -25,6 +25,7 @@ from bot.constants import (
     ARMY_CLEAR_STRUCTURES_SUPPLY,
     ARMY_DEFEND_RADIUS,
     ARMY_DIRECT_ATTACK_MARGIN,
+    ARMY_RECALL_FRACTION,
     ARMY_STATUS_EVERY_S,
     ARMY_SUPPLY_PER_CANNON,
     ARMY_WORKER_THREAT_RADIUS,
@@ -142,8 +143,9 @@ class BasicArmy:
         structures (proxy Pylons, Cannons) once the army has `ARMY_CLEAR_STRUCTURES_SUPPLY`, and
         `ARMY_SUPPLY_PER_CANNON` per finished Cannon near our bases.
         With a leash, only enemies near the hold point or inside the main. While attacking,
-        only enemy army units call the army back (a structure or worker near home would flip
-        its target back and forth)."""
+        only enemy army units with at least `ARMY_RECALL_FRACTION` of our army supply call the
+        army back (a structure, worker or trickle near home would flip its target back and
+        forth)."""
         bot = self.bot
         best: Optional[tuple[float, Unit]] = None
         start_z = bot.get_terrain_z_height(bot.start_location)
@@ -181,6 +183,15 @@ class BasicArmy:
                 d = enemy.distance_to(home)
                 if d < radius and (best is None or d < best[0]):
                     best = (d, enemy)
+        if best is not None and attacking:
+            # a trickle of units at home is left to new production; a real attack recalls
+            near = [
+                e for e in bot.enemy_units
+                if not e.is_memory and e.type_id not in HARMLESS and e.type_id not in WORKER_TYPES
+                and any(e.distance_to(h) < ARMY_DEFEND_RADIUS for h in homes)
+            ]
+            if sum(bot.calculate_supply_cost(e.type_id) for e in near) < ARMY_RECALL_FRACTION * army_supply:
+                return None
         return best[1] if best else None
 
     def _rally_point(self) -> Point2:
