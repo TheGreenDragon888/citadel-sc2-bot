@@ -171,6 +171,10 @@ class BuildExecutor:
             return False
         if item.where == "nat" and plan.hold_wall_gap:
             return False  # the probe couldn't get past our own gap holder
+        if item.where == "nat" and not self._have_natural():
+            # a Pylon/Battery for a natural we don't have: with rush Cannons there, every
+            # probe sent died on the way in test games
+            return False
         early = item.early_if is not None and CONDITIONS[item.early_if](bot)
         if bot.time < item.at_s and not early:
             return False
@@ -178,6 +182,10 @@ class BuildExecutor:
             if item.only_if_until_s is None or bot.time < item.only_if_until_s:
                 return False
         return True
+
+    def _have_natural(self) -> bool:
+        nat: Point2 = self.bot.mediator.get_own_nat
+        return any(th.distance_to(nat) < 3 for th in self.bot.townhalls)
 
     def _count(self, item: ScheduleItem) -> int:
         bot = self.bot
