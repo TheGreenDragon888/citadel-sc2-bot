@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Optional
 
 from loguru import logger
 
+from sc2.ids.unit_typeid import UnitTypeId
+
 from bot.constants import METRIC_TIMES_S
 
 if TYPE_CHECKING:
@@ -29,6 +31,11 @@ class Telemetry:
         self.step_count: int = 0
         self.step_total_ms: float = 0.0
         self.step_max_ms: float = 0.0
+        self.probes_lost: int = 0
+
+    def on_own_unit_destroyed(self, type_id) -> None:
+        if type_id == UnitTypeId.PROBE:
+            self.probes_lost += 1
 
     def record_step_time(self, started: float) -> None:
         """`started` is `time.perf_counter()` at the start of `on_step`."""
@@ -60,6 +67,7 @@ class Telemetry:
         bot = self.bot
         snap = {
             "probes": len(bot.workers),
+            "probes_lost": self.probes_lost,
             "bases": len(bot.ready_townhalls),
             "townhalls": len(bot.townhalls),  # includes ones under construction
             "gas": len(bot.gas_buildings),

@@ -115,9 +115,13 @@ class CitadelBot(AresBot):
         self.register_behavior(plan)
 
     async def on_unit_destroyed(self, unit_tag: int) -> None:
+        # python-sc2 still holds last step's own units here, so the type is known
+        own = self._units_previous_map.get(unit_tag)
         await super(CitadelBot, self).on_unit_destroyed(unit_tag)
         if self.army is not None:
             self.army.forget(unit_tag)
+        if own is not None and self.telemetry is not None:
+            self.telemetry.on_own_unit_destroyed(own.type_id)
 
     async def on_end(self, game_result: Result) -> None:
         if self.telemetry is not None:
