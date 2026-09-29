@@ -6,9 +6,11 @@ from ares.behaviors.macro import MacroPlan, Mining
 from loguru import logger
 from sc2.data import Result
 
-from bot.constants import MACRO_EVERY_STEPS, OPENER_TIMEOUT_S, PROBE_TARGET
+from bot.army.basic_army import BasicArmy
+from bot.constants import ARMY_EVERY_STEPS, MACRO_EVERY_STEPS, OPENER_TIMEOUT_S, PROBE_TARGET
 from bot.macro.build_executor import BuildExecutor
 from bot.macro.economy import Economy
+from bot.macro.production import Production
 from bot.macro.supply import supply_behavior
 from bot.ruleset import detect_ruleset
 from bot.telemetry.logger import Telemetry
@@ -30,6 +32,8 @@ class CitadelBot(AresBot):
         self.economy: Optional[Economy] = None
         self.executor: Optional[BuildExecutor] = None
         self.telemetry: Optional[Telemetry] = None
+        self.production: Optional[Production] = None
+        self.army: Optional[BasicArmy] = None
 
     async def on_start(self) -> None:
         # §4.0: loop-0 state is parsed here, before ares picks an opener in super().on_start()
@@ -46,6 +50,8 @@ class CitadelBot(AresBot):
         self.economy = Economy(self)
         self.executor = BuildExecutor(self, self.opener)
         self.telemetry = Telemetry(self)
+        self.production = Production(self)
+        self.army = BasicArmy(self)
 
     async def on_step(self, iteration: int) -> None:
         started = time.perf_counter()
@@ -65,13 +71,17 @@ class CitadelBot(AresBot):
             if self.build_order_runner.build_completed:
                 self._register_macro_plan()
 
+        if iteration % ARMY_EVERY_STEPS == 0:
+            self.army.step()
+
         self.telemetry.step()
         self.telemetry.record_step_time(started)
 
     def _register_macro_plan(self) -> None:
         """After the opener. A MacroPlan stops at the first behavior that acts (or, for
         AutoSupply and a prioritised expansion, that is still waiting for money), so the
-        order below is the spending priority: supply, probes, timed opener steps, gas, bases."""
+        order below is the spending priority: supply, probes, timed opener steps, gas, bases,
+        then army production (skipped while a timed step is waiting for money)."""
         executor = self.executor
         plan = MacroPlan()
         plan.add(supply_behavior(self))
@@ -81,7 +91,15 @@ class CitadelBot(AresBot):
         plan.add(self.economy.gas_behavior(executor.gas_target()))
         bases = executor.bases_target()
         plan.add(self.economy.expansion_behavior(bases, prioritize=not executor.finished))
+        if not executor.waiting_for_money:
+            for behavior in self.production.behaviors():
+                plan.add(behavior)
         self.register_behavior(plan)
+
+    async def on_unit_destroyed(self, unit_tag: int) -> None:
+        await super(CitadelBot, self).on_unit_destroyed(unit_tag)
+        if self.army is not None:
+            self.army.forget(unit_tag)
 
     async def on_end(self, game_result: Result) -> None:
         if self.telemetry is not None:

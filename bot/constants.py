@@ -145,6 +145,12 @@ ARMY_EVERY_STEPS: int = 4
 # Citadel's macro rules take over (a stuck step would otherwise stall the whole build).
 OPENER_TIMEOUT_S: float = 240.0
 
+# Pylon timing after the opener (macro/supply.py): keep this much free supply, counting what
+# Pylons (and a nearly finished Nexus) will add, per ready Nexus and production structure
+SUPPLY_BUFFER_PER_PRODUCER: int = 3
+SUPPLY_MIN_BUFFER: int = 6
+SUPPLY_MAX_PYLONS_AT_ONCE: int = 4  # Pylons ordered but not yet started, at most
+
 # Gas buildings after each opener's timed schedule is finished: this many per ready base
 GAS_PER_BASE_AFTER_SCHEDULE: int = 2
 
@@ -290,6 +296,9 @@ ARMY_PRIORITY: dict[UnitTypeId, int] = {
     UnitTypeId.ZEALOT: 3, UnitTypeId.SENTRY: 4,
 }
 OBSERVER_COUNT: int = 2  # §4.5.1 "Observer 2 fixed"
+# At this many banked minerals, also warp in Gateway units without waiting on higher-priority
+# units that are short of gas
+MINERAL_FLOAT_BANK: int = 700
 # ProductionController (adds Gateways/Robos and the tech they need) starts after the schedules
 PRODUCTION_CONTROLLER_START_S: float = 330.0
 MAX_PRODUCTION_STRUCTURES: int = 12
