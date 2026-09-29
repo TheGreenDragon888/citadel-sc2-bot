@@ -41,6 +41,17 @@ Openers are in `protoss_builds.yml` (ares build runner); their timed steps are
 `./data/<opponent_id>-protoss.json` (`None-protoss.json` in local games) and uses it to pick the
 next opener. Delete `./data` to start local selection from scratch.
 
+## Threats and defense (M2)
+
+Every 8 steps `bot/intel/` turns what the bot sees into threat flags (DESIGN.md §4.2, §5): the
+ares intel flags (`ares_bridge.py`), Citadel's own detectors (`detectors.py`) and the enemy
+natural check by the scouting probe (`scout_planner.py`). `bot/defense/defense_planner.py`
+merges the active flags into one plan that the macro, army and worker code follow. Game logs
+show `FLAG raise` / `FLAG expire` and `PLAN` lines, and the end of game lists every flag.
+
+Test opponents for the M2 cheeses are in `scripts/test_bots/` (plain python-sc2, not in the
+ladder zip): `worker_rush`, `cannon_rush` (SharpCannons-style), `twelve_pool`, `proxy_rax`.
+
 ## Commands
 
 | Task | Command |
@@ -53,5 +64,7 @@ next opener. Delete `./data` to start local selection from scratch.
 | Ramp wall helpers on both spawns of every pool map | `poetry run python scripts/check_ramp_walls.py` |
 | Forced ramp wall fallback (§4.8) | `poetry run python scripts/test_wall_fallback.py --case ramp` (or `--case choke`) |
 | Combat-sim static-defense test | `poetry run python scripts/test_can_win_fight.py` |
+| M2 acceptance batch, one per cheese bot | `poetry run python scripts/run_matches.py --opponent worker_rush --map all --total 10` (also `cannon_rush`, `twelve_pool`, `proxy_rax`) |
+| ThreatFlag expiry rules (§5), no game | `poetry run python scripts/test_threat_flags.py` |
 | Build the ladder zip | `poetry run python scripts/create_ladder_zip.py` |
 | Check the zip layout | `unzip -l publish/*.zip \| head` (`run.py` must be at the top level) |

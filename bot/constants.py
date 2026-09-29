@@ -150,9 +150,19 @@ OPENER_TIMEOUT_S: float = 240.0
 SUPPLY_BUFFER_PER_PRODUCER: int = 3
 SUPPLY_MIN_BUFFER: int = 6
 SUPPLY_MAX_PYLONS_AT_ONCE: int = 4  # Pylons ordered but not yet started, at most
+# When ares has no Pylon spot left (macro/supply.py), a free tile at least this far from ...
+PYLON_FALLBACK_MINERAL_CLEARANCE: float = 3.5  # ... any mineral field of that base
+PYLON_FALLBACK_RAMP_CLEARANCE: float = 5.0  # ... the main ramp top
+PYLON_FALLBACK_CANNON_CLEARANCE: float = 9.0  # ... any enemy Photon Cannon
+PYLON_STUCK_S: float = 25.0  # a Pylon order not started after this doesn't count as on its way
 
 # Gas buildings after each opener's timed schedule is finished: this many per ready base
 GAS_PER_BASE_AFTER_SCHEDULE: int = 2
+# Gas float (macro/economy.py): from GAS_FLOAT_HIGH banked, this many probes per gas building,
+# until the bank is below GAS_FLOAT_LOW (M2, Citadel)
+GAS_FLOAT_HIGH: int = 700
+GAS_FLOAT_LOW: int = 300
+WORKERS_PER_GAS_FLOATING: int = 1
 
 # §4.1 chrono: Nexus probes until the Core is ready, then Warp Gate research. After that
 # (Citadel's choice, not in the spec): the first busy structure type in this order.
@@ -338,6 +348,8 @@ ARMY_RALLY_OFFSET: float = 8.0  # rally this far from the newest base toward the
 HUNT_VISIT_RADIUS: float = 7.0  # a structure-hunt point counts as visited this close
 HUNT_GRID_STEP: float = 20.0  # spacing of the structure-hunt grid over the playable area
 ORDER_REFRESH_S: float = 3.0  # don't re-issue the same order to a unit more often (§6 APM)
+ARMY_STATUS_EVERY_S: float = 60.0  # ARMY status log line
+ARMY_DIRECT_ATTACK_MARGIN: float = 4.0  # this close beyond weapon range: attack a structure directly
 
 # §4.8 ramp wall fallback
 WALL_RAMP_MAX_DIST: float = 30.0  # ramp top farther than this from our start: use a choke
@@ -385,6 +397,7 @@ POOL_12_PHASE_END_S: float = 240.0
 
 # §4.2 detectors (bot/intel/detectors.py, ares_bridge.py)
 BRIDGE_HOME_RADIUS: float = 30.0  # "near our bases" for confirming units
+BRIDGE_RAISE_UNTIL_S: float = 330.0  # ares flags with no time window raise flags until then
 SAME_LEVEL_Z: float = 0.5  # terrain heights closer than this are the same level
 MAIN_RADIUS: float = 22.0  # a main base: within this of its start location, on its level
 # Worker rush (§4.2 local backup): >= 5 enemy workers within 30 of our main before 2:00
@@ -438,12 +451,21 @@ LING_DEFENSE_PROBES_PER_LING: int = 2
 LING_DEFENSE_MAX: int = 12
 POOL_12_UNITS_BEFORE_EXPAND: int = 3  # §4.2: resume the Nexus at >= 3 units ...
 POOL_12_LING_CLEAR_RADIUS: float = 20.0  # ... and no lings within 20
+POOL_12_GATE_HOLD_S: float = 10.0  # that condition must hold (or fail) this long to switch
+POOL_12_PUSH_SUPPLY: int = 16  # from this army supply the army holds the natural, not the ramp
 POOL_12_MAIN_BATTERIES: int = 1
 PROXY_UNITS_BEFORE_EXPAND: int = 2  # §4.2: skip the natural until 2 units are out
 PROXY_GATEWAYS: int = 2
 PROXY_MAIN_BATTERIES: int = 1
 ONE_BASE_BATTERIES: int = 3  # §4.2 "2-3"; §5's phase rule counts 3
 RAMP_HOLD_OFFSET: float = 2.0  # hold point: ramp top moved this far toward the main
+POOL_12_HOLD_OFFSET: float = 4.0  # 12-pool: the army waits this far inside, behind the wall gap
+ARMY_HOLD_LEASH: float = 8.0  # ramp holds: engage only enemies this close to the hold point ...
+# ... or inside our main. Lone enemy workers this close to a townhall are army targets too,
+# and enemy structures near our townhalls once the army has this much supply.
+ARMY_WORKER_THREAT_RADIUS: float = 12.0
+ARMY_CLEAR_STRUCTURES_SUPPLY: int = 8
+ARMY_SUPPLY_PER_CANNON: int = 6
 NATURAL_HOLD_OFFSET: float = 6.0  # hold point: natural moved this far toward the enemy
 MAIN_BATTERY_RAMP_DIST: float = 6.0  # main batteries within this of the ramp top, main level
 CANCEL_HEALTH_MIN: float = 50.0  # cancel our unfinished structure below max(this, fraction x max HP)

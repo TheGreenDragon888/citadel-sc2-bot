@@ -7,14 +7,22 @@ Chrono runs from the first step, because the openers in protoss_builds.yml have 
 
 from typing import TYPE_CHECKING, Optional
 
-from ares.behaviors.macro import BuildWorkers, ExpansionController, GasBuildingController
+from ares.behaviors.macro import BuildWorkers, ExpansionController, GasBuildingController, Mining
+from loguru import logger
 from sc2.ids.ability_id import AbilityId
 from sc2.ids.buff_id import BuffId
 from sc2.ids.unit_typeid import UnitTypeId
 from sc2.ids.upgrade_id import UpgradeId
 from sc2.unit import Unit
 
-from bot.constants import CHRONO_AFTER_WARPGATE, MAX_BASES, PROBE_TARGET
+from bot.constants import (
+    CHRONO_AFTER_WARPGATE,
+    GAS_FLOAT_HIGH,
+    GAS_FLOAT_LOW,
+    MAX_BASES,
+    PROBE_TARGET,
+    WORKERS_PER_GAS_FLOATING,
+)
 
 if TYPE_CHECKING:
     from ares import AresBot
@@ -25,6 +33,20 @@ CHRONO: AbilityId = AbilityId.EFFECT_CHRONOBOOSTENERGYCOST
 class Economy:
     def __init__(self, bot: "AresBot"):
         self.bot = bot
+        self.gas_floating: bool = False
+
+    def mining_behavior(self) -> Mining:
+        """ares's Mining (speed mining included). While at least `GAS_FLOAT_HIGH` gas is banked,
+        only `WORKERS_PER_GAS_FLOATING` probes per gas building; back to 3 below `GAS_FLOAT_LOW`
+        (defense plans make mineral-only units, and a one-base bot starves on minerals)."""
+        vespene = self.bot.vespene
+        if not self.gas_floating and vespene >= GAS_FLOAT_HIGH:
+            self.gas_floating = True
+            logger.info(f"GAS {vespene} banked at {self.bot.time_formatted}: {WORKERS_PER_GAS_FLOATING} probe(s) per gas")
+        elif self.gas_floating and vespene < GAS_FLOAT_LOW:
+            self.gas_floating = False
+            logger.info(f"GAS {vespene} banked at {self.bot.time_formatted}: 3 probes per gas again")
+        return Mining(workers_per_gas=WORKERS_PER_GAS_FLOATING if self.gas_floating else 3)
 
     @staticmethod
     def worker_behavior() -> BuildWorkers:

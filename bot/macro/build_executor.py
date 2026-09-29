@@ -69,6 +69,13 @@ CONDITIONS: dict[str, Callable[["AresBot"], bool]] = {
 }
 
 
+# what DefensePlan.hold_tech keeps waiting (everything but Pylons, Gateways, Batteries and gas)
+TECH_ITEMS: frozenset = frozenset(
+    {
+        UnitTypeId.ROBOTICSFACILITY, UnitTypeId.STARGATE, UnitTypeId.FORGE, UnitTypeId.TWILIGHTCOUNCIL,
+        UnitTypeId.OBSERVER, UnitTypeId.ORACLE, UpgradeId.PROTOSSGROUNDWEAPONSLEVEL1,
+    }
+)
 # structures and upgrades that need a Forge; §4.2 one-base delays the Forge
 NEEDS_FORGE: frozenset = frozenset(
     {
@@ -157,8 +164,13 @@ class BuildExecutor:
 
     def _active(self, item: ScheduleItem) -> bool:
         bot = self.bot
-        if item.type_id in NEEDS_FORGE and not self.planner.plan.allow_forge:
+        plan = self.planner.plan
+        if item.type_id in NEEDS_FORGE and not plan.allow_forge:
             return False
+        if item.type_id in TECH_ITEMS and plan.hold_tech:
+            return False
+        if item.where == "nat" and plan.hold_wall_gap:
+            return False  # the probe couldn't get past our own gap holder
         early = item.early_if is not None and CONDITIONS[item.early_if](bot)
         if bot.time < item.at_s and not early:
             return False

@@ -663,3 +663,73 @@ acting, which stops everything after them:
   and about 1:50–2:04 at 23/31. The 22 Pylon only goes down at ~1:46 once the Nexus, Core and gas
   are paid for; a 21 trigger changed nothing. Removing it would need a Pylon before the Core,
   which changes the spec's build.
+
+## M2 findings
+
+Found while building M2 (ares bridge, detectors, ThreatFlag expiry, defense plans). Source lines
+are for the versions at the top of this file.
+
+**ares's own-army cache includes workers (M1 bug, fixed in M2).**
+`mediator.get_own_army` is UnitCacheManager's `own_army`, which gets every own unit whose type
+is not in `UNITS_TO_IGNORE` (`ares-sc2/src/ares/managers/unit_cache_manager.py:365-367`), and
+that set is empty (`ares-sc2/src/ares/consts.py:908`); `_prepare_units` stores every own
+non-structure there (`ares-sc2/src/ares/main.py:718-720`). M1's `BasicArmy` iterated it, so it
+gave probes attack-move orders whenever its target changed and counted them as army supply
+(an "army supply 145" attack at 14:20 in a test game was ~80 without probes). `BasicArmy` now
+leaves workers out.
+
+**Building tracker.**
+- ares drops a build order only after 120 s (`BUILDING_WORKER_TIMEOUT`,
+  `ares-sc2/src/ares/managers/building_manager.py:67`, checked at `:229-234`).
+- A dead builder's order goes to a new worker with the same target (`:393-411`), so a spot an
+  enemy Cannon covers keeps drawing probes; a spot that can't be placed is re-requested
+  (`:369-377`).
+- Citadel: `static_defense.py` moves tracked orders whose target an enemy Cannon covers to a new
+  ares placement (as ares does for a blocked spot), and `supply.py` stops counting a Pylon order
+  that hasn't started after `PYLON_STUCK_S` as on its way. **Runtime** (cannon rush, natural
+  variant, PylonAIE_v4): before the fix one Pylon order sat 55 s at (93, 181) next to the rush
+  Cannons while minerals reached 960 at 47/47 supply; after it, `DEFENSE PYLON order moved from
+  (93, 181) to (78, 172)`.
+- ares's Pylon spots are the ones it computed at start (`placement_manager.py:900`,
+  `_find_placements_for_base_location`); a one-base bot ran out of them at 62/70 supply.
+  `supply.py` falls back to a free tile it finds itself.
+
+**Placement table.** `mediator.get_placements_dict` is a property returning the live dict
+(`ares-sc2/src/ares/managers/manager_mediator.py:1664`); its `available` flag is what ares's
+placement search filters on (`ares-sc2/src/ares/managers/placement_manager.py:697-715`).
+`static_defense.py` marks spots in a Cannon's range unavailable and restores them when the
+Cannon is gone. `BUILDING_SIZE_ENUM_TO_RADIUS` is in `ares.consts` (`consts.py:198`);
+`STRUCTURE_TO_BUILDING_SIZE` is in `ares.dicts.structure_to_building_size` (`:9`), not
+`ares.consts`.
+
+**ares never cancels a dying structure.** `BuildingManager.on_structure_took_damage` would
+cancel below max(50, 9% of max HP) (`ares-sc2/src/ares/managers/building_manager.py:688-701`),
+but the hub's `on_unit_took_damage` is an empty method
+(`ares-sc2/src/ares/managers/hub.py:306-314`), so it never runs. Citadel's
+`WorkerDefense.on_structure_damaged` applies the same rule from `CitadelBot.on_unit_took_damage`.
+python-sc2 fires `on_unit_took_damage` for own units and structures
+(`sc2/bot_ai_internal.py:917`, `:952`) and `on_unit_destroyed` for every tag in the previous
+step's map, enemies included (`sc2/bot_ai_internal.py:980-982`), which §5 rule (a) needs.
+
+**Worker scout lifecycle.** The `worker_scout` step queues moves around the enemy main and
+gives the probe `BUILD_RUNNER_SCOUT` (`ares-sc2/src/ares/build_runner/build_order_runner.py:446-455`);
+once idle, ares hands it back to `GATHERING` before 390 s
+(`ares-sc2/src/ares/main.py:419-429`), inside `AresBot.on_step`, before Citadel's code.
+`bot/intel/scout_planner.py` notices the role change and takes it back as `SCOUTING`
+(`UnitRole.SCOUTING`, `ares-sc2/src/ares/consts.py:536`) to watch the enemy natural.
+
+**Roles and mining.** `mediator.assign_role(tag=, role=)` and
+`mediator.get_units_from_role(role=, unit_type=)`
+(`ares-sc2/src/ares/managers/unit_role_manager.py:168`, `:242`). ares's `Mining` only moves
+`GATHERING` workers (`ares-sc2/src/ares/behaviors/macro/mining.py:88-92`), so pulled probes get
+`UnitRole.DEFENDING` (`consts.py:503`) and are handed back as `GATHERING`. With
+`self_defence_active`, mining workers hit enemies in range when their tile is unsafe
+(`mining.py:115-165`, `:516-527`). `Mining(workers_per_gas=n)` sets the gas saturation through
+`mediator.set_workers_per_gas`; ares pulls one worker per update when a gas building has more
+(`ares-sc2/src/ares/managers/resource_manager.py:519-534`).
+
+**Build runner and walls.** Wall placement (`@ ramp`) is skipped while any enemy unit is within
+10 of the ramp top (`ares-sc2/src/ares/build_runner/build_order_runner.py:618-625`).
+
+**python-sc2 memory flag.** `Unit.is_memory` is True for a Unit object older than the current
+game loop (`sc2/unit.py:476-479`), which is how ares's ghosts show up in `enemy_units`.

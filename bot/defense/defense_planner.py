@@ -29,11 +29,15 @@ from sc2.ids.unit_typeid import UnitTypeId
 from sc2.position import Point2
 
 from bot.constants import (
+    ARMY_HOLD_LEASH,
     CANNON_COVER_EXTRA,
     NATURAL_HOLD_OFFSET,
     ONE_BASE_BATTERIES,
     POOL_12_LING_CLEAR_RADIUS,
+    POOL_12_GATE_HOLD_S,
+    POOL_12_HOLD_OFFSET,
     POOL_12_MAIN_BATTERIES,
+    POOL_12_PUSH_SUPPLY,
     POOL_12_UNITS_BEFORE_EXPAND,
     PROXY_GATEWAYS,
     PROXY_MAIN_BATTERIES,
@@ -80,8 +84,14 @@ class DefensePlan:
     unit_priority: list[UnitTypeId] = field(default_factory=list)  # made before the normal mix
     all_gateways_producing: bool = False
     chrono_gateways: bool = False
-    hold_wall_gap: bool = False  # the first Zealot/Adept holds the ramp wall gap
+    # the first Zealot/Adept holds the ramp wall gap; nothing of ours gets through it meanwhile,
+    # so natural structures wait and Pylons stay in the main
+    hold_wall_gap: bool = False
     cancel_natural: bool = False  # a finished enemy Cannon covers our natural
+    # with a hold point: engage only enemies within this of it or inside the main (None: any
+    # enemy near our bases), so a ramp hold doesn't run out through the wall
+    army_leash: Optional[float] = None
+    hold_tech: bool = False  # timed tech (Robo, Stargate, Forge, upgrades) waits
 
     def summary(self) -> str:
         if not self.active:
@@ -108,6 +118,8 @@ class DefensePlan:
             parts.append("wall gap held")
         if self.cancel_natural:
             parts.append("cancel natural")
+        if self.hold_tech:
+            parts.append("tech waits")
         return " ".join(parts)
 
 
@@ -120,6 +132,10 @@ class DefensePlanner:
         self.opener_ended_by: Optional[str] = None
         self.reapers_seen: bool = False
         self.roaches_seen: bool = False
+        # POOL_12 expansion gate with hysteresis (Citadel): switches only after its condition
+        # has held for POOL_12_GATE_HOLD_S
+        self._pool_expand_ok: bool = False
+        self._pool_gate_since: float = 0.0
 
     # -- policy for new flags ------------------------------------------------------------------
 
@@ -183,9 +199,9 @@ class DefensePlanner:
 
     # -- helpers ---------------------------------------------------------------------------------
 
-    def _ramp_hold(self) -> Point2:
+    def _ramp_hold(self, offset: float = RAMP_HOLD_OFFSET) -> Point2:
         bot = self.bot
-        return bot.main_base_ramp.top_center.towards(bot.start_location, RAMP_HOLD_OFFSET)
+        return bot.main_base_ramp.top_center.towards(bot.start_location, offset)
 
     def _natural_hold(self) -> Point2:
         bot = self.bot
@@ -226,16 +242,39 @@ class DefensePlanner:
 
     def _plan_pool_12(self, plan: DefensePlan, army: list) -> None:
         bot = self.bot
+        # §4.2: resume the Nexus at >= 3 units and no lings within 20 (of our bases or the
+        # natural spot, where the Nexus would go)
+        homes = [th.position for th in bot.townhalls] + [bot.mediator.get_own_nat]
         lings_near = [
             e for e in bot.enemy_units
             if e.type_id == UnitTypeId.ZERGLING
-            and any(e.distance_to(th) < POOL_12_LING_CLEAR_RADIUS for th in bot.townhalls)
+            and any(e.distance_to(h) < POOL_12_LING_CLEAR_RADIUS for h in homes)
         ]
-        if len(army) < POOL_12_UNITS_BEFORE_EXPAND or lings_near:
+        ok_now = len(army) >= POOL_12_UNITS_BEFORE_EXPAND and not lings_near
+        if ok_now == self._pool_expand_ok:
+            self._pool_gate_since = bot.time
+        elif bot.time - self._pool_gate_since >= POOL_12_GATE_HOLD_S:
+            self._pool_expand_ok = ok_now
+            self._pool_gate_since = bot.time
+        if not self._pool_expand_ok:
             plan.allow_expand = False
-        plan.unit_priority += [UnitTypeId.ZEALOT, UnitTypeId.ADEPT]
-        plan.hold_wall_gap = True
+            # Citadel: units before tech until the Nexus may resume (Defense > Economy, §3)
+            plan.hold_tech = True
+        # a Zealot for the wall gap first, then Adepts (ranged, bonus vs light) behind the wall
+        has_zealot = any(u.type_id == UnitTypeId.ZEALOT for u in army)
+        plan.unit_priority += (
+            [UnitTypeId.ADEPT, UnitTypeId.ZEALOT] if has_zealot else [UnitTypeId.ZEALOT, UnitTypeId.ADEPT]
+        )
         plan.batteries_needed["main"] = max(plan.batteries_needed["main"], POOL_12_MAIN_BATTERIES)
+        # the army waits behind the wall and the Battery, not outside it, until it is strong
+        # enough to hold the natural; then the gap holder steps aside so it can get out (Citadel)
+        supply = sum(bot.calculate_supply_cost(u.type_id) for u in army)
+        if supply < POOL_12_PUSH_SUPPLY:
+            plan.hold_wall_gap = True
+            plan.army_hold_point = self._ramp_hold(POOL_12_HOLD_OFFSET)
+            plan.army_leash = ARMY_HOLD_LEASH
+        elif plan.army_hold_point is None:
+            plan.army_hold_point = self._natural_hold()
 
     def _plan_proxy(self, plan: DefensePlan, army: list) -> None:
         if len(army) < PROXY_UNITS_BEFORE_EXPAND:
@@ -250,6 +289,7 @@ class DefensePlanner:
         # the natural is held instead so it isn't left alone (Citadel)
         if len(army) < PROXY_UNITS_BEFORE_EXPAND or self._our_natural() is None:
             plan.army_hold_point = self._ramp_hold()
+            plan.army_leash = ARMY_HOLD_LEASH
         elif plan.army_hold_point is None:
             plan.army_hold_point = self._natural_hold()
 
@@ -264,3 +304,4 @@ class DefensePlanner:
         plan.unit_priority += [UnitTypeId.STALKER, UnitTypeId.ZEALOT]
         if plan.army_hold_point is None or where == "natural":
             plan.army_hold_point = self._natural_hold() if where == "natural" else self._ramp_hold()
+            plan.army_leash = None if where == "natural" else ARMY_HOLD_LEASH

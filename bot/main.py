@@ -2,7 +2,7 @@ import time
 from typing import Optional
 
 from ares import AresBot
-from ares.behaviors.macro import MacroPlan, Mining
+from ares.behaviors.macro import MacroPlan
 from loguru import logger
 from sc2.data import Result
 from sc2.unit import Unit
@@ -97,7 +97,7 @@ class CitadelBot(AresBot):
         started = time.perf_counter()
         await super(CitadelBot, self).on_step(iteration)
         # ares only moves workers that a Mining behavior tells to mine; register it every step
-        self.register_behavior(Mining())
+        self.register_behavior(self.economy.mining_behavior())
 
         if not self.build_order_runner.build_completed and self.time > OPENER_TIMEOUT_S:
             logger.warning(
@@ -135,6 +135,7 @@ class CitadelBot(AresBot):
             self.army.excluded_tags = {holder} if holder is not None else set()
             plan.pinned_unit_tags = self.army.excluded_tags | set(self.worker_defense.jobs)
             self.army.hold_point = plan.army_hold_point
+            self.army.leash = plan.army_leash
             self.army.step()
 
         self.telemetry.step()
@@ -148,7 +149,7 @@ class CitadelBot(AresBot):
         (skipped while a timed step is waiting for money)."""
         executor = self.executor
         plan = MacroPlan()
-        plan.add(supply_behavior(self))
+        plan.add(supply_behavior(self, other_bases=not self.planner.plan.hold_wall_gap))
         for behavior in defense:
             plan.add(behavior)
         plan.add(self.economy.worker_behavior())

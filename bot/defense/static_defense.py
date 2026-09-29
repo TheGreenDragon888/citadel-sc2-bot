@@ -15,7 +15,8 @@
 from typing import TYPE_CHECKING, Optional
 
 from ares.behaviors.macro import BuildStructure
-from ares.consts import BUILDING_SIZE_ENUM_TO_RADIUS
+from ares.consts import BUILDING_SIZE_ENUM_TO_RADIUS, ID, TARGET
+from ares.dicts.structure_to_building_size import STRUCTURE_TO_BUILDING_SIZE
 from cython_extensions import cy_pylon_matrix_covers
 from loguru import logger
 from sc2.ids.ability_id import AbilityId
@@ -52,6 +53,7 @@ class StaticDefense:
     def step(self, plan: "DefensePlan") -> None:
         """Direct actions: main batteries, cancelling the natural, cannon-range placements."""
         self._block_cannon_range()
+        self._retarget_builds_in_cannon_range()
         if plan.batteries_needed.get("main", 0):
             self._main_batteries(plan.batteries_needed["main"])
         if plan.cancel_natural:
@@ -153,6 +155,30 @@ class StaticDefense:
             if th.distance_to(nat) < 3 and not th.is_ready:
                 logger.info(f"DEFENSE cancelling the natural Nexus at {bot.time_formatted}: a finished Cannon covers it")
                 th(AbilityId.CANCEL_BUILDINPROGRESS)
+
+    def _retarget_builds_in_cannon_range(self) -> None:
+        """A build order placed before an enemy Cannon was seen can point into its range; ares
+        would keep sending probes there. Give it a new ares placement instead, as ares itself
+        does for a blocked spot (`building_manager.py:383-390`)."""
+        bot = self.bot
+        cannons = [c for c in bot.enemy_structures if c.type_id == UnitTypeId.PHOTONCANNON]
+        if not cannons:
+            return
+        for info in bot.mediator.get_building_tracker_dict.values():
+            target = info.get(TARGET)
+            structure_id = info.get(ID)
+            if not isinstance(target, Point2) or structure_id not in STRUCTURE_TO_BUILDING_SIZE:
+                continue
+            radius = BUILDING_SIZE_ENUM_TO_RADIUS[STRUCTURE_TO_BUILDING_SIZE[structure_id]]
+            if not any(target.distance_to(c) <= c.ground_range + c.radius + radius + CANNON_COVER_EXTRA for c in cannons):
+                continue
+            new = bot.mediator.request_building_placement(base_location=bot.start_location, structure_type=structure_id)
+            if new is not None:
+                info[TARGET] = new
+                logger.info(
+                    f"DEFENSE {structure_id.name} order moved from {target.rounded} to {new.rounded}: "
+                    f"an enemy Cannon covers it ({bot.time_formatted})"
+                )
 
     def _block_cannon_range(self) -> None:
         bot = self.bot

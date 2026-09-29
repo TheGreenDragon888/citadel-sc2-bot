@@ -94,7 +94,7 @@ class Production:
         comp = self.composition()  # full mix: ProductionController techs toward all of it
         buildable = self.composition(tech_ready_only=True)
         out: list["Behavior"] = []
-        if plan.allow_forge and bot.time >= UPGRADES_START_S and (upgrade := self._next_upgrade()) is not None:
+        if plan.allow_forge and not plan.hold_tech and bot.time >= UPGRADES_START_S and (upgrade := self._next_upgrade()) is not None:
             # one at a time, in §4.5.1 order: given the whole list, UpgradeController starts every
             # tech building at once (a Hard-Zerg loss had Forge, Twilight and Robo Bay at 5:00)
             out.append(UpgradeController([upgrade], base_location=bot.start_location))
@@ -117,7 +117,7 @@ class Production:
             gateway_mix = {u: info for u, info in buildable.items() if u in GATEWAY_UNITS}
             if gateway_mix:
                 out.append(SpawnController(gateway_mix, freeflow_mode=True))
-        if schedule_finished or bot.time >= PRODUCTION_CONTROLLER_START_S:
+        if (schedule_finished or bot.time >= PRODUCTION_CONTROLLER_START_S) and not plan.hold_tech:
             out.append(
                 ProductionController(
                     comp,

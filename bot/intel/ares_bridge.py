@@ -6,9 +6,14 @@ are lazy properties that only update (and set their latches) when read (§11.1).
 
 A True ares flag raises an ARES-evidence flag that expires like its basis (§5):
 - unit-based flags as UNIT evidence, confirmed each tick that a matching enemy unit is visible
-  (the ares boolean itself often never resets, so it can't be the confirmation). After the flag
-  expires it is raised again only when the ares flag is True and matching units are visible.
+  within BRIDGE_HOME_RADIUS of our bases (the ares boolean itself often never resets, so it
+  can't be the confirmation, and units far away are not a threat to us yet). After the flag
+  expires it is raised again only when the ares flag is True and such units are there.
 - ares's four-gate flag (a Gateway count) as STRUCTURE evidence, with the Gateways as tags.
+A flag is raised (or raised again) only inside the ares flag's own time window
+(`constants.ARES_INTEL`), or before `BRIDGE_RAISE_UNTIL_S` for flags ares can raise at any
+time (the reaper flag): a latched flag would otherwise re-raise its plan for the whole game
+whenever a matching unit shows up.
 """
 
 from dataclasses import dataclass
@@ -18,7 +23,7 @@ from loguru import logger
 from sc2.ids.unit_typeid import UnitTypeId
 from sc2.position import Point2
 
-from bot.constants import BRIDGE_HOME_RADIUS
+from bot.constants import ARES_INTEL, BRIDGE_HOME_RADIUS, BRIDGE_RAISE_UNTIL_S, WORKER_RUSH_CONFIRM_MIN
 from bot.intel.threat_flags import Evidence, FlagStore, Threat
 
 if TYPE_CHECKING:
@@ -34,11 +39,16 @@ class Bridge:
     expires_as: Evidence
     # visible enemy units of these types confirm a UNIT flag (STRUCTURE: these are the evidence)
     evidence_types: frozenset[UnitTypeId]
-    near_home_only: bool = False  # confirming units must be within BRIDGE_HOME_RADIUS of our bases
+    near_home_only: bool = True  # confirming units must be within BRIDGE_HOME_RADIUS of our bases
+    min_units: int = 1  # fewer matching units than this neither confirm nor re-raise the flag
 
 
 BRIDGES: tuple[Bridge, ...] = (
-    Bridge("get_enemy_worker_rushed", (Threat.WORKER_RUSH,), Evidence.UNIT, WORKERS, near_home_only=True),
+    # §4.2 ends the worker-rush pull at <= 1 enemy worker near our base
+    Bridge(
+        "get_enemy_worker_rushed", (Threat.WORKER_RUSH,), Evidence.UNIT, WORKERS,
+        min_units=WORKER_RUSH_CONFIRM_MIN,
+    ),
     Bridge("get_enemy_ling_rushed", (Threat.POOL_12,), Evidence.UNIT, frozenset({UnitTypeId.ZERGLING})),
     Bridge(
         "get_enemy_roach_rushed", (Threat.ONE_BASE_ALLIN,), Evidence.UNIT,
@@ -88,6 +98,8 @@ class AresBridge:
                 self.seen_true.add(bridge.accessor)
                 logger.info(f"ARES {bridge.accessor} True at {bot.time_formatted}")
             evidence = self._evidence(bridge)
+            if len(evidence) < bridge.min_units:
+                evidence = []
             for threat in bridge.threats:
                 source = source_of(bridge)
                 active = self.flags.get(threat, source) is not None
@@ -95,7 +107,7 @@ class AresBridge:
                     if evidence:
                         self.flags.confirm(threat, source, now, **self._tags_positions(bridge, evidence))
                     continue
-                if not value:
+                if not value or now > self._raise_until(bridge):
                     continue
                 raised_before = any(r.threat == threat and r.source == source for r in self.flags.history)
                 if raised_before and bridge.expires_as == Evidence.UNIT and not evidence:
@@ -114,6 +126,11 @@ class AresBridge:
             if latch not in self.seen_true and getattr(mediator, latch):
                 self.seen_true.add(latch)
                 logger.info(f"ARES {latch} True at {bot.time_formatted}")
+
+    @staticmethod
+    def _raise_until(bridge: Bridge) -> float:
+        window = ARES_INTEL[bridge.accessor].window_s
+        return window[1] if window is not None else BRIDGE_RAISE_UNTIL_S
 
     def _evidence(self, bridge: Bridge) -> list:
         bot = self.bot
