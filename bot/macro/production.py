@@ -35,12 +35,22 @@ class Production:
     def __init__(self, bot: "AresBot"):
         self.bot = bot
 
-    def composition(self) -> dict[UnitTypeId, dict[str, float]]:
+    def composition(self, tech_ready_only: bool = False) -> dict[UnitTypeId, dict[str, float]]:
         """ares composition dict for the enemy race; vs Random, the vs-T mix until the race is
-        seen (§4.1 treats Random like Terran until then)."""
+        seen (§4.1 treats Random like Terran until then).
+
+        `tech_ready_only` keeps only units whose tech is ready and rescales their shares. ares's
+        SpawnController fills each unit up to its share of the current army, so a unit that
+        can't be built yet (a Colossus before the Robotics Bay) otherwise leaves the rest of the
+        production idle once the buildable units reach their shares.
+        """
         race = self.bot.enemy_race
         key = race.name if race in (Race.Terran, Race.Zerg, Race.Protoss) else Race.Terran.name
         shares = ARMY_COMPOSITION_PCT[key]
+        if tech_ready_only:
+            ready = {u: pct for u, pct in shares.items() if self.bot.tech_ready_for_unit(u)}
+            if ready:
+                shares = ready
         total = sum(shares.values())
         return {
             unit: {"proportion": pct / total, "priority": ARMY_PRIORITY[unit]}
@@ -63,7 +73,8 @@ class Production:
         ProductionController (more Gateways/Robos and their tech) starts once the opener's timed
         schedule is finished, or at `PRODUCTION_CONTROLLER_START_S` at the latest."""
         bot = self.bot
-        comp = self.composition()
+        comp = self.composition()  # full mix: ProductionController techs toward all of it
+        buildable = self.composition(tech_ready_only=True)
         out: list["Behavior"] = []
         if bot.time >= UPGRADES_START_S and (upgrade := self._next_upgrade()) is not None:
             # one at a time, in §4.5.1 order: given the whole list, UpgradeController starts every
@@ -80,12 +91,12 @@ class Production:
                     maximum=OBSERVER_COUNT - observers,
                 )
             )
-        out.append(SpawnController(comp))
+        out.append(SpawnController(buildable))
         # ares's SpawnController stops at the first unit it can't afford (ares-sc2
         # behaviors/macro/spawn_controller.py), so while it saves gas for a Colossus or Immortal no
         # Gateway unit is made. Spend a mineral float on the Gateway share of the mix meanwhile.
         if bot.minerals >= MINERAL_FLOAT_BANK:
-            gateway_mix = {u: info for u, info in comp.items() if u in GATEWAY_UNITS}
+            gateway_mix = {u: info for u, info in buildable.items() if u in GATEWAY_UNITS}
             if gateway_mix:
                 out.append(SpawnController(gateway_mix, freeflow_mode=True))
         if schedule_finished or bot.time >= PRODUCTION_CONTROLLER_START_S:
