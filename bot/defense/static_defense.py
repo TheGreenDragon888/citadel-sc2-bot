@@ -97,10 +97,10 @@ class StaticDefense:
     # -- main batteries near the ramp ----------------------------------------------------------------
 
     def _reserve_unmet(self, plan: "DefensePlan") -> bool:
-        """The plan's reserved first Gateway unit isn't out yet: direct Battery/Pylon orders wait
-        like the MacroPlan does (`ReserveForUnit`)."""
+        """The plan's reserve holds the MacroPlan (`ReserveForUnit`): direct Battery/Pylon orders
+        wait too."""
         reserve = reserve_for(self.bot, plan)
-        return reserve is not None and reserve.unmet(self.bot, self.bot.mediator)
+        return reserve is not None and reserve.holds(self.bot, self.bot.mediator)
 
     def _count_near(self, type_id: UnitTypeId, point: Point2, radius: float) -> int:
         return sum(1 for s in self.bot.mediator.get_own_structures_dict[type_id] if s.distance_to(point) <= radius)

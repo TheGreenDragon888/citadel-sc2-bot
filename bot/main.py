@@ -98,10 +98,14 @@ class CitadelBot(AresBot):
     async def on_step(self, iteration: int) -> None:
         started = time.perf_counter()
         await super(CitadelBot, self).on_step(iteration)
-        # ares only moves workers that a Mining behavior tells to mine; register it every step
-        # no long-distance mining while rush Cannons may cover other bases' minerals (§4.2)
+        # ares only moves workers that a Mining behavior tells to mine; register it every step.
+        # No long-distance mining while rush Cannons may cover other bases' minerals (§4.2), or
+        # while our unit holds the wall gap (the probes would walk out past it into the lings)
+        plan = self.planner.plan
         self.register_behavior(
-            self.economy.mining_behavior(long_distance=Threat.CANNON_RUSH not in self.planner.plan.active)
+            self.economy.mining_behavior(
+                long_distance=Threat.CANNON_RUSH not in plan.active and not plan.hold_wall_gap
+            )
         )
 
         if not self.build_order_runner.build_completed and self.time > OPENER_TIMEOUT_S:

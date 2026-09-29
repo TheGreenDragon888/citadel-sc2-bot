@@ -64,8 +64,11 @@ class ReserveForUnit:
             g.is_ready and g.is_idle for g in mediator.get_own_structures_dict[UnitTypeId.GATEWAY]
         ) or bool(mediator.get_own_structures_dict[UnitTypeId.WARPGATE])
 
-    def execute(self, ai: "AresBot", config: dict, mediator) -> bool:
+    def holds(self, ai: "AresBot", mediator) -> bool:
         return not ai.can_afford(self.unit) and self.unmet(ai, mediator)
+
+    def execute(self, ai: "AresBot", config: dict, mediator) -> bool:
+        return self.holds(ai, mediator)
 
 
 def reserve_for(bot: "AresBot", plan: "DefensePlan") -> Optional[ReserveForUnit]:

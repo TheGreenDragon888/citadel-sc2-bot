@@ -44,6 +44,7 @@ from bot.constants import (
     LING_DEFENSE_MAX,
     LING_DEFENSE_PROBES_PER_LING,
     LING_DEFENSE_RADIUS,
+    SAME_LEVEL_Z,
     WORKER_RUSH_END_AT,
     WORKER_RUSH_KEEP_MINING,
     WORKER_RUSH_SWAP_HP,
@@ -210,15 +211,20 @@ class WorkerDefense:
 
     def _lings_in_mineral_line(self, wanted: dict[int, int]) -> None:
         bot = self.bot
-        lines: list[Point2] = []
+        lines: list[tuple[Point2, float]] = []  # mineral line, its base's terrain height
         for th in bot.townhalls.ready:
             fields = bot.mineral_field.closer_than(10, th)
             if fields:
-                lines.append(fields.center.towards(th.position, 2))
+                lines.append((fields.center.towards(th.position, 2), bot.get_terrain_z_height(th)))
+        # only lings on the base's own level: ones below the cliff next to the main's mineral
+        # line pulled probes out through the wall gap in a Magannatha test game
         lings = [
             e for e in bot.enemy_units
             if e.type_id == UnitTypeId.ZERGLING and not e.is_memory
-            and any(e.distance_to(line) < LING_DEFENSE_RADIUS for line in lines)
+            and any(
+                e.distance_to(line) < LING_DEFENSE_RADIUS and abs(bot.get_terrain_z_height(e) - z) < SAME_LEVEL_Z
+                for line, z in lines
+            )
         ]
         if not lings:
             return

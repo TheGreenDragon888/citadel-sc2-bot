@@ -476,7 +476,9 @@ POOL_12_LING_CLEAR_RADIUS: float = 20.0  # ... and no lings within 20
 POOL_12_GATE_HOLD_S: float = 10.0  # that condition must hold (or fail) this long to switch
 POOL_12_PUSH_SUPPLY: int = 16  # from this army supply the army holds the natural, not the ramp
 POOL_12_GATEWAYS: int = 2  # (Citadel; §4.2 names none for 12-pool)
-POOL_12_RESERVE_UNITS: int = 1  # the wall-gap Zealot waits for nothing else (Citadel)
+# the first Gateway units wait for nothing else (Citadel): with 1, the second unit came 78 s
+# after the wall Zealot in a Magannatha test game while probes and buildings took the money
+POOL_12_RESERVE_UNITS: int = 3
 DEFENSE_TECH_AFTER_SUPPLY: int = 8  # proxy / one-base plans: timed tech waits below this army supply
 HOLD_SHIFT_STEP: float = 2.0  # a hold point a finished enemy Cannon covers moves this far inward ...
 HOLD_SHIFT_STEPS: int = 6  # ... at most this many times
