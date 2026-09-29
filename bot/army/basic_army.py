@@ -164,6 +164,11 @@ class BasicArmy:
         strong_enough = army_supply >= max(ARMY_CLEAR_STRUCTURES_SUPPLY, ARMY_SUPPLY_PER_CANNON * len(cannons))
         if not attacking and strong_enough:
             candidates += [s for s in bot.enemy_structures if s.is_visible]
+        elif not attacking:
+            # a finished Cannon that can hit one of our townhalls is a target as soon as the army
+            # has ARMY_SUPPLY_PER_CANNON for each Cannon covering it: waiting for the supply to
+            # clear every structure let one Cannon kill a main Nexus in a test game
+            candidates += [c for c in self._sieging(cannons) if army_supply >= ARMY_SUPPLY_PER_CANNON * self._covering(c, cannons)]
         for enemy in candidates:
             if enemy.type_id in HARMLESS or getattr(enemy, "is_memory", False):
                 continue
@@ -216,6 +221,20 @@ class BasicArmy:
             if army_supply < ARMY_ENGAGE_RATIO * enemy_supply and not inside and not at_anchor:
                 return None
         return best[1]
+
+    def _sieging(self, cannons: list[Unit]) -> list[Unit]:
+        """Visible finished Cannons that can hit one of our ready townhalls."""
+        homes = self.bot.townhalls.ready
+        return [
+            c for c in cannons
+            if c.is_visible
+            and any(c.distance_to(th.position) <= c.ground_range + c.radius + th.radius for th in homes)
+        ]
+
+    @staticmethod
+    def _covering(target: Unit, cannons: list[Unit]) -> int:
+        """Finished Cannons (the target included) that can hit a unit attacking `target`."""
+        return sum(1 for c in cannons if c.distance_to(target.position) <= c.ground_range + c.radius + target.radius + 1)
 
     def _rally_point(self) -> Point2:
         bot = self.bot

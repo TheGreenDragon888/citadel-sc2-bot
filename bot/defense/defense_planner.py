@@ -34,6 +34,7 @@ from sc2.position import Point2
 from bot.constants import (
     ARMY_HOLD_LEASH,
     CANNON_COVER_EXTRA,
+    CANNON_SIEGE_RESERVE_UNITS,
     DEFENSE_TECH_AFTER_SUPPLY,
     EXPANSION_RETRY_S,
     HOLD_SHIFT_STEP,
@@ -271,6 +272,12 @@ class DefensePlanner:
                 # expansion, and in test games every probe sent there died passing the Cannons
                 plan.cancel_natural = True
                 plan.allow_expand = False
+            if any(self.cannon_covers(th.position, NEXUS_RADIUS) for th in self.bot.townhalls):
+                # Citadel: a Cannon shooting one of our Nexuses is killed before anything else;
+                # in a test game one Cannon killed the main Nexus while 400 minerals waited for
+                # a natural Nexus and probes kept being made
+                plan.allow_expand = False
+                plan.reserve_units = max(plan.reserve_units, CANNON_SIEGE_RESERVE_UNITS)
 
     def _plan_pool_12(self, plan: DefensePlan, army: list) -> None:
         bot = self.bot
