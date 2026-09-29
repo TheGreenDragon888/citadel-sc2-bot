@@ -9,15 +9,24 @@ the combat-sim checks of the mix come later.
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
-from ares.behaviors.macro import ProductionController, SpawnController, UpgradeController
+from ares.behaviors.macro import (
+    ProductionController,
+    SpawnController,
+    UpgradeController,
+)
 from ares.consts import GATEWAY_UNITS
+from loguru import logger
 from sc2.data import Race
+from sc2.ids.ability_id import AbilityId
 from sc2.ids.unit_typeid import UnitTypeId
 from sc2.ids.upgrade_id import UpgradeId
+from sc2.position import Point2
 
 from bot.constants import (
     ARMY_COMPOSITION_PCT,
     ARMY_PRIORITY,
+    GATEWAY_POWER_RETRY_S,
+    GATEWAY_POWER_SEARCH,
     MAX_PRODUCTION_STRUCTURES,
     MINERAL_FLOAT_BANK,
     OBSERVER_COUNT,
@@ -26,6 +35,7 @@ from bot.constants import (
     UPGRADES_VS_P,
     UPGRADES_VS_ZT,
 )
+from bot.geometry import in_map
 
 if TYPE_CHECKING:
     from ares import AresBot
@@ -56,6 +66,49 @@ class ReserveForUnit:
 class Production:
     def __init__(self, bot: "AresBot"):
         self.bot = bot
+        self._power_ordered: dict[int, float] = {}  # Gateway tag -> time a Pylon was ordered for it
+
+    def gateway_upkeep(self) -> None:
+        """Once Warp Gate is researched, ares's SpawnController makes nothing while any ready,
+        idle Gateway exists, waiting for it to morph (`spawn_controller.py`, start of
+        `execute`). An unpowered Gateway (its Pylon killed) never morphs, which froze all
+        production in test games. Morph powered idle Gateways, and put a Pylon next to
+        unpowered ones."""
+        bot = self.bot
+        if UpgradeId.WARPGATERESEARCH not in bot.state.upgrades:
+            return
+        for gate in bot.mediator.get_own_structures_dict[UnitTypeId.GATEWAY]:
+            if not gate.is_ready or not gate.is_idle:
+                continue
+            if gate.is_powered:
+                gate(AbilityId.MORPH_WARPGATE)
+                continue
+            if bot.time - self._power_ordered.get(gate.tag, -GATEWAY_POWER_RETRY_S) < GATEWAY_POWER_RETRY_S:
+                continue
+            spot = self._pylon_spot_near(gate.position)
+            if spot is None or not bot.can_afford(UnitTypeId.PYLON):
+                continue
+            worker = bot.mediator.select_worker(target_position=spot, force_close=True)
+            if worker is not None and bot.mediator.build_with_specific_worker(
+                worker=worker, structure_type=UnitTypeId.PYLON, pos=spot
+            ):
+                self._power_ordered[gate.tag] = bot.time
+                logger.info(f"PRODUCTION Gateway at {gate.position.rounded} unpowered: Pylon at {spot.rounded} ({bot.time_formatted})")
+
+    def _pylon_spot_near(self, point: Point2) -> Optional[Point2]:
+        bot = self.bot
+        cx, cy = round(point.x), round(point.y)
+        spots = [
+            Point2((cx + dx, cy + dy))
+            for dx in range(-GATEWAY_POWER_SEARCH, GATEWAY_POWER_SEARCH + 1)
+            for dy in range(-GATEWAY_POWER_SEARCH, GATEWAY_POWER_SEARCH + 1)
+        ]
+        spots = [
+            p for p in spots
+            if in_map(bot, p) and p.distance_to(point) <= GATEWAY_POWER_SEARCH
+            and bot.mediator.can_place_structure(position=p, structure_type=UnitTypeId.PYLON)
+        ]
+        return min(spots, key=lambda p: p.distance_to(point), default=None)
 
     def composition(self, tech_ready_only: bool = False) -> dict[UnitTypeId, dict[str, float]]:
         """ares composition dict for the enemy race; vs Random, the vs-T mix until the race is

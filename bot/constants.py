@@ -321,6 +321,10 @@ OBSERVER_COUNT: int = 2  # §4.5.1 "Observer 2 fixed"
 # At this many banked minerals, also warp in Gateway units without waiting on higher-priority
 # units that are short of gas
 MINERAL_FLOAT_BANK: int = 700
+# An unpowered idle Gateway blocks ares's SpawnController after Warp Gate: a Pylon within this
+# many tiles of it, re-ordered at most this often
+GATEWAY_POWER_SEARCH: int = 5
+GATEWAY_POWER_RETRY_S: float = 30.0
 # ProductionController (adds Gateways/Robos and the tech they need) starts when the opener's
 # timed schedule is finished, or at this time at the latest
 PRODUCTION_CONTROLLER_START_S: float = 330.0
