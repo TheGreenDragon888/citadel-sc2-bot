@@ -416,10 +416,16 @@ class Detectors:
         bot = self.bot
         now = bot.time
         phase: dict[Threat, str] = {}
+        # "our townhalls" includes the natural's spot: a natural cancelled under Cannons would
+        # otherwise end the flag while the Cannons still stand there (Citadel)
+        bases = [th.position for th in bot.townhalls] + [bot.mediator.get_own_nat]
         if now > CANNON_RUSH_PHASE_END_S and not any(
-            s.distance_to(th) < CANNON_RUSH_PHASE_RADIUS for s in bot.enemy_structures for th in bot.townhalls
+            s.distance_to(b) < CANNON_RUSH_PHASE_RADIUS for s in bot.enemy_structures for b in bases
         ):
-            phase[Threat.CANNON_RUSH] = f"time > {_mmss(CANNON_RUSH_PHASE_END_S)}, no enemy structure within {CANNON_RUSH_PHASE_RADIUS:g} of our townhalls"
+            phase[Threat.CANNON_RUSH] = (
+                f"time > {_mmss(CANNON_RUSH_PHASE_END_S)}, no enemy structure within "
+                f"{CANNON_RUSH_PHASE_RADIUS:g} of our townhalls or natural"
+            )
         if now > PROXY_PHASE_END_S and not self.far_production():
             phase[Threat.PROXY] = f"time > {_mmss(PROXY_PHASE_END_S)}, no proxy structure known"
         if self.natural_townhall_seen_at is not None:

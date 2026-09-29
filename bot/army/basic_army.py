@@ -195,6 +195,10 @@ class BasicArmy:
             and any(e.distance_to(h) < ARMY_DEFEND_RADIUS for h in homes)
         ]
         enemy_supply = sum(bot.calculate_supply_cost(e.type_id) for e in near)
+        # finished Cannons that cover the target fight too
+        enemy_supply += ARMY_SUPPLY_PER_CANNON * sum(
+            1 for c in cannons if best[1].distance_to(c) <= c.ground_range + c.radius + 3
+        )
         if attacking:
             # a trickle of units at home is left to new production; a real attack recalls
             if enemy_supply < ARMY_RECALL_FRACTION * army_supply:
