@@ -1,0 +1,173 @@
+# Citadel openers for the ares build runner (docs/DESIGN.md §4.1, 12-worker ruleset).
+#
+# ares loads this file in `on_before_start`. How it picks an opener (docs/VERIFY_NOTES.md §11.4):
+#   - `BuildChoices` is matched by opponent id, then by the enemy race name.
+#   - Rule: repeat the build after a win, move to the next one after a loss or tie; once every
+#     build in the list has `MinGamesWinrateBased` games, pick the best winrate over each
+#     build's last 10 games.
+#   - Results are saved to ./data/<opponent_id>-protoss.json (`None-protoss.json` locally).
+#
+# Only the supply-triggered start of each opener is here: the runner has no time triggers.
+# The timed steps (Robotics Facility at 2:50, 3rd Nexus at 4:45, ...) are the per-opener
+# schedules in bot/constants.py, run by bot/macro/build_executor.py once the opener completes.
+#
+# Chrono is not in these lists: bot/macro/economy.py chronos Nexus probes until the
+# Cybernetics Core finishes, then Warp Gate research (§4.1).
+#
+# `ConstantWorkerProductionTill` must equal bot/constants.py PROBE_TARGET (checked at start-up).
+
+UseData: True  # Overwrites `UseData:` in `config.yml`
+
+# ares stores this value but never reads it: the selection rule above applies either way.
+BuildSelection: WinrateBased
+MinGamesWinrateBased: 3
+
+BuildChoices:
+    Terran:
+        Cycle:
+            - A_Standard
+            - A2_Safe
+    Zerg:
+        Cycle:
+            - B_PvZ
+            - B2_PvZSafe
+    Protoss:
+        Cycle:
+            - C_2GateRobo
+            - C2_1GateExpand
+    # Race unknown at start: A with a Stalker instead of the Adept (§4.1 A, step 8)
+    Random:
+        Cycle:
+            - A_vRandom
+            - A2_vRandom
+    # Used instead of the above when `Debug: True` in config.yml
+    test_123:
+        Cycle:
+            - A_Standard
+
+Builds:
+    # A. "Citadel Standard" (vs T): MC 1 Gate FE
+    A_Standard:
+        ConstantWorkerProductionTill: 66
+        AutoSupplyAtSupply: 23
+        OpeningBuildOrder:
+            - 14 pylon @ ramp
+            - 16 gate @ ramp
+            - 16 worker_scout
+            - 17 gas
+            - 20 expand
+            - 20 core @ ramp
+            - 21 gas
+            - 22 pylon
+            - 22 warpgateresearch
+            - 22 adept
+
+    # A2. Safe (vs T): same opening; the 2nd Gateway at 2:30 and 3rd Nexus at 5:30 are timed steps
+    A2_Safe:
+        ConstantWorkerProductionTill: 66
+        AutoSupplyAtSupply: 23
+        OpeningBuildOrder:
+            - 14 pylon @ ramp
+            - 16 gate @ ramp
+            - 16 worker_scout
+            - 17 gas
+            - 20 expand
+            - 20 core @ ramp
+            - 21 gas
+            - 22 pylon
+            - 22 warpgateresearch
+            - 22 adept
+
+    # B. PvZ: A up to the Core, then 1 Adept and Warp Gate; Stargate etc. are timed steps
+    B_PvZ:
+        ConstantWorkerProductionTill: 66
+        AutoSupplyAtSupply: 23
+        OpeningBuildOrder:
+            - 14 pylon @ ramp
+            - 16 gate @ ramp
+            - 16 worker_scout
+            - 17 gas
+            - 20 expand
+            - 20 core @ ramp
+            - 21 gas
+            - 22 pylon
+            - 22 warpgateresearch
+            - 22 adept
+
+    # B2. PvZ safe: same opening; Robotics Facility instead of the Stargate (timed steps)
+    B2_PvZSafe:
+        ConstantWorkerProductionTill: 66
+        AutoSupplyAtSupply: 23
+        OpeningBuildOrder:
+            - 14 pylon @ ramp
+            - 16 gate @ ramp
+            - 16 worker_scout
+            - 17 gas
+            - 20 expand
+            - 20 core @ ramp
+            - 21 gas
+            - 22 pylon
+            - 22 warpgateresearch
+            - 22 adept
+
+    # C. PvP 2 Gate Robo: the 2nd Gateway (2:20), Robo (2:50) and Nexus (3:10) are timed steps
+    C_2GateRobo:
+        ConstantWorkerProductionTill: 66
+        AutoSupplyAtSupply: 22
+        OpeningBuildOrder:
+            - 14 pylon @ ramp
+            - 16 gate @ ramp
+            - 16 worker_scout
+            - 17 gas
+            - 18 gas
+            - 19 core @ ramp
+            - 21 pylon
+            - 22 warpgateresearch
+            - 22 stalker
+
+    # C2. PvP 1-gate expand (vs macro opponents): 23 Nexus here; Robo etc. are timed steps
+    C2_1GateExpand:
+        ConstantWorkerProductionTill: 66
+        AutoSupplyAtSupply: 22
+        OpeningBuildOrder:
+            - 14 pylon @ ramp
+            - 16 gate @ ramp
+            - 16 worker_scout
+            - 17 gas
+            - 18 gas
+            - 19 core @ ramp
+            - 21 pylon
+            - 22 warpgateresearch
+            - 22 stalker
+            - 23 expand
+
+    # A and A2 vs Random: a Stalker instead of the Adept
+    A_vRandom:
+        ConstantWorkerProductionTill: 66
+        AutoSupplyAtSupply: 23
+        OpeningBuildOrder:
+            - 14 pylon @ ramp
+            - 16 gate @ ramp
+            - 16 worker_scout
+            - 17 gas
+            - 20 expand
+            - 20 core @ ramp
+            - 21 gas
+            - 22 pylon
+            - 22 warpgateresearch
+            - 22 stalker
+
+    A2_vRandom:
+        ConstantWorkerProductionTill: 66
+        AutoSupplyAtSupply: 23
+        OpeningBuildOrder:
+            - 14 pylon @ ramp
+            - 16 gate @ ramp
+            - 16 worker_scout
+            - 17 gas
+            - 20 expand
+            - 20 core @ ramp
+            - 21 gas
+            - 22 pylon
+            - 22 warpgateresearch
+            - 22 stalker
