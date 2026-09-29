@@ -163,7 +163,10 @@ class BasicArmy:
         ]
         strong_enough = army_supply >= max(ARMY_CLEAR_STRUCTURES_SUPPLY, ARMY_SUPPLY_PER_CANNON * len(cannons))
         if not attacking and strong_enough:
-            candidates += [s for s in bot.enemy_structures if s.is_visible]
+            # snapshots too (the loop below keeps only those near our bases): Cannons at our
+            # natural out of vision were never attacked in a test game that tied at 60:00; the
+            # engine drops a snapshot once its spot is seen empty
+            candidates += list(bot.enemy_structures)
         elif not attacking:
             # a finished Cannon that can hit one of our townhalls is a target as soon as the army
             # has ARMY_SUPPLY_PER_CANNON for each Cannon covering it: waiting for the supply to
