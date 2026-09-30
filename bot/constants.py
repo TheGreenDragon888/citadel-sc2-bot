@@ -696,3 +696,9 @@ ENGAGE_STATIC_RADIUS: float = 15.0
 DECISION_EVERY_STEPS: int = 16
 # §4.5.2 "Reinforcements rally in groups of >= 8 supply; never trickle them in"
 REINFORCE_MIN_SUPPLY: int = 8
+# §4.7 end-game and the 60-minute tie
+END_GAME_FROM_S: float = 2400.0  # 40:00: structure hunt; no launch while our army value is behind
+END_GAME_HUNT_UNSEEN_S: float = 60.0  # hunt when no enemy structure has been seen for this long
+END_GAME_ATTACK_FROM_S: float = 2700.0  # 45:00: ATTACK_START drops to END_GAME_ATTACK_START ...
+END_GAME_ATTACK_START: int = 6
+END_GAME_VALUE_RATIO: float = 1.2  # ... if our army value is >= this x the enemy's remembered army
