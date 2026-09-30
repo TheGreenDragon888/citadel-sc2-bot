@@ -9,6 +9,7 @@ from sc2.ids.unit_typeid import UnitTypeId
 from sc2.unit import Unit
 
 from bot.army.army import Army
+from bot.army.endgame import EndGame
 from bot.constants import (
     ARMY_EVERY_STEPS,
     INTEL_EVERY_STEPS,
@@ -51,6 +52,7 @@ class CitadelBot(AresBot):
         self.telemetry: Optional[Telemetry] = None
         self.production: Optional[Production] = None
         self.army: Optional[Army] = None  # M4: squads, EngagementResult gates (§4.5.2)
+        self.endgame: Optional[EndGame] = None  # M4: §4.7 end-game rules
         self.wall: Optional[WallFallback] = None
         self.wall_ok: Optional[bool] = None
         self.pylon_fallback_scan_at: Optional[float] = None  # macro/supply.py
@@ -87,13 +89,14 @@ class CitadelBot(AresBot):
         self.bridge = AresBridge(self, self.flags, self.planner.override_for)
         self.detectors = Detectors(self, self.flags, self.planner.override_for)
         self.telemetry = Telemetry(self)
-        self.scouts = ScoutPlanner(self, self.detectors, self.flags, self.telemetry)
+        self.endgame = EndGame(self)
+        self.scouts = ScoutPlanner(self, self.detectors, self.flags, self.telemetry, self.endgame)
         self.static_defense = StaticDefense(self, self.planner)
         self.worker_defense = WorkerDefense(self, self.planner)
         self.economy = Economy(self)
         self.executor = BuildExecutor(self, self.opener, self.planner)
         self.production = Production(self)
-        self.army = Army(self)
+        self.army = Army(self, self.endgame)
 
     async def on_step(self, iteration: int) -> None:
         started = time.perf_counter()
@@ -153,6 +156,7 @@ class CitadelBot(AresBot):
             plan.pinned_unit_tags = self.army.held_tags | self.scouts.tags | set(self.worker_defense.jobs)
             self.army.hold_point = plan.army_hold_point
             self.army.leash = plan.army_leash
+            self.endgame.update()
             self.army.step(iteration)
         self.army.micro(iteration)  # §3 step 5: squad micro every step
 

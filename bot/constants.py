@@ -706,3 +706,5 @@ REGROUP_FRACTION: float = 0.25  # the main group waits while other groups hold t
 REINFORCE_JOIN_RADIUS: float = 12.0  # a reinforcement group this close to the ATTACK squad's main group joins it
 BATTERY_COVER_RADIUS: float = 8.0  # a fight this close to a ready Shield Battery of ours is "inside the battery radius"
 OBSERVER_WITH_ARMY_FROM_S: float = 360.0  # §4.3 "from 6:00 travels with the army": one Observer
+END_GAME_CORNER_INSET: float = 4.0  # hunt points at the playable area's corners, this far inside
+END_GAME_POINTS_PER_TRIP: int = 8  # hunt points per Observer trip (a unit scout comes back after UNIT_SCOUT_MAX_S)

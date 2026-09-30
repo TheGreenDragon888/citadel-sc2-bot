@@ -53,6 +53,7 @@ from bot.constants import (
     ADEPT_SCOUT_PVZ_S,
     EXPANSION_CHECK_EVERY_S,
     EXPANSION_CHECK_FROM_S,
+    END_GAME_POINTS_PER_TRIP,
     EXPANSION_CHECK_MAX,
     EXPANSION_FRESH_S,
     HALLUCINATION_AT_S,
@@ -114,6 +115,7 @@ from bot.intel.threat_flags import FlagStore, Threat
 if TYPE_CHECKING:
     from ares import AresBot
 
+    from bot.army.endgame import EndGame
     from bot.intel.detectors import Detectors
     from bot.telemetry.logger import Telemetry
 
@@ -134,8 +136,12 @@ def _ring(centre: Point2, radius: float, count: int) -> list[Point2]:
 
 
 class ScoutPlanner:
-    def __init__(self, bot: "AresBot", detectors: "Detectors", flags: FlagStore, telemetry: "Telemetry"):
+    def __init__(
+        self, bot: "AresBot", detectors: "Detectors", flags: FlagStore, telemetry: "Telemetry",
+        endgame: Optional["EndGame"] = None,
+    ):
         self.bot = bot
+        self.endgame = endgame  # §4.7 structure hunt (M4)
         self.detectors = detectors
         self.flags = flags
         self.telemetry = telemetry
@@ -173,6 +179,7 @@ class ScoutPlanner:
         self._take_build_runner_scouts()
         self._schedule_probes()
         self._schedule_units()
+        self._end_game_hunt()
         self._hallucinate()
         for tag, task in list(self.tasks.items()):
             unit = bot.unit_tag_dict.get(tag)
@@ -457,16 +464,38 @@ class ScoutPlanner:
             task = LookTask(self, observers[0].tag, "rescout", [bot.enemy_start_locations[0]])
             self._give(task, observers[0], "enemy main unseen")
 
+    def _hunt_points_free(self) -> list[Point2]:
+        """§4.7 hunt points no hunt task is on its way to yet."""
+        taken = {
+            p for task in self.tasks.values()
+            if task.name in ("structure_hunt", "hallucinated_phoenix") for p in task.route.points
+        }
+        return [p for p in self.endgame.unvisited() if p not in taken]
+
+    def _end_game_hunt(self) -> None:
+        """§4.7: each free Observer takes the next END_GAME_POINTS_PER_TRIP hunt points."""
+        if self.endgame is None or not self.endgame.hunting:
+            return
+        for unit in self._free_observers():
+            points = self._hunt_points_free()
+            if not points:
+                return
+            route = nearest_order(unit.position, points)[:END_GAME_POINTS_PER_TRIP]
+            self._give(LookTask(self, unit.tag, "structure_hunt", route), unit, "end-game structure hunt")
+
     def _hallucinate(self) -> None:
         """§4.3 hallucination rule; only a Sentry that already exists (user decision)."""
         bot = self.bot
         now = bot.time
+        hunting = self.endgame is not None and self.endgame.hunting
         if self._phoenix_wanted_since is not None:
             new = [u for u in bot.units(UnitTypeId.PHOENIX) if u.is_hallucination and u.tag not in self.tasks]
             if new:
                 self._phoenix_wanted_since = None
                 enemy_nat: Point2 = bot.mediator.get_enemy_nat
                 route = [bot.enemy_start_locations[0], enemy_nat, enemy_nat.towards(self.home_point(), PHOENIX_AWAY_DIST)]
+                if hunting and (points := self._hunt_points_free()):
+                    route = nearest_order(new[0].position, points)[:END_GAME_POINTS_PER_TRIP]  # §4.7
                 self._give(PhoenixTask(self, new[0].tag, route), new[0], "hallucination")
             elif now - self._phoenix_wanted_since > 2.0:
                 self._phoenix_wanted_since = None
@@ -480,7 +509,9 @@ class ScoutPlanner:
         seen = self.detectors.main_seen_at
         stale_after = HALLUCINATION_STALE_S.get(race, HALLUCINATION_STALE_DEFAULT_S)
         why = None
-        if race in HALLUCINATION_AT_S and now >= HALLUCINATION_AT_S[race] and "matchup_phoenix" not in self.sent:
+        if hunting:
+            why = "end-game structure hunt"
+        elif race in HALLUCINATION_AT_S and now >= HALLUCINATION_AT_S[race] and "matchup_phoenix" not in self.sent:
             self.sent.add("matchup_phoenix")
             why = f"{race} schedule"
         elif now >= HALLUCINATION_FROM_S and (seen is None or now - seen > stale_after):

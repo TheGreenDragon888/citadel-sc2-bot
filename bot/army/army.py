@@ -80,6 +80,8 @@ from bot.constants import (
 if TYPE_CHECKING:
     from ares import AresBot
 
+    from bot.army.endgame import EndGame
+
 # enemy units that never make a home threat
 HARMLESS: frozenset[UnitTypeId] = frozenset(
     {
@@ -105,8 +107,9 @@ FIGHT, HOLD, RETREAT, MOVE = "fight", "hold", "retreat", "move"
 
 
 class Army:
-    def __init__(self, bot: "AresBot"):
+    def __init__(self, bot: "AresBot", endgame: Optional["EndGame"] = None):
         self.bot = bot
+        self.endgame = endgame  # §4.7
         self.engagement = Engagement(bot)
         self.decision = AttackDecision()
         self.squads = Squads(bot)
@@ -411,12 +414,15 @@ class Army:
         bot = self.bot
         if self._target_tag is not None:
             kept = bot.enemy_structures.find_by_tag(self._target_tag)
-            if kept is not None and not kept.is_flying:
+            if kept is not None and (not kept.is_flying or (self.endgame is not None and self.endgame.hunting)):
                 return kept.position
             self._target_tag = None
         grounded = [s for s in bot.enemy_structures if not s.is_flying]
         townhalls = [s for s in grounded if s.type_id in TOWNHALL_TYPES]
         pool = townhalls or grounded
+        if not pool and self.endgame is not None and self.endgame.hunting and any(u.can_attack_air for u in units):
+            # §4.7: lifted Terran buildings, for the units that can shoot up
+            pool = [s for s in bot.enemy_structures if s.is_flying]
         if pool:
             chosen = min(pool, key=lambda s: s.distance_to(center))
             self._target_tag = chosen.tag
@@ -437,11 +443,17 @@ class Army:
         return self._hunt_points[0]
 
     def _build_hunt_points(self) -> list[Point2]:
-        """Enemy start, enemy-side expansions, all other expansions, then a map grid."""
+        """Enemy start, enemy-side expansions, all other expansions, region centres, then a map
+        grid (ground points only)."""
         bot = self.bot
         points: list[Point2] = [bot.enemy_start_locations[0]]
         points += [p for p, _ in bot.mediator.get_enemy_expansions]
         points += sorted(bot.expansion_locations_list, key=lambda p: p.distance_to(bot.enemy_start_locations[0]))
+        # §4.7 region centres the army can walk to (islands are the Observers')
+        points += [
+            c for r in bot.mediator.get_map_data_object.regions.values()
+            if bot.in_pathing_grid(c := Point2(r.center))
+        ]
         area = bot.game_info.playable_area
         x = area.x + HUNT_GRID_STEP / 2
         while x < area.x + area.width:
