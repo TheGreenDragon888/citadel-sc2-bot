@@ -59,6 +59,7 @@ from bot.constants import (
     ATTACK_SQUAD_RADIUS,
     ATTACK_START_SUPPLY,
     BATTERY_COVER_RADIUS,
+    CLEAR_STATIC_LEVEL,
     DECISION_EVERY_STEPS,
     DEFEND_ENGAGE,
     ENGAGE_STATIC_RADIUS,
@@ -345,9 +346,9 @@ class Army:
         """The enemy nearest one of our bases (M2 rules): army units within ARMY_DEFEND_RADIUS;
         workers within ARMY_WORKER_THREAT_RADIUS (a rush is worker_defense.py's job, a lone worker
         left behind is the army's); enemy structures once the squad has ARMY_CLEAR_STRUCTURES_SUPPLY
-        and can beat the finished Cannons near our bases (>= ATTACK_CONTINUE), and before that a
-        finished Cannon that can hit one of our townhalls once the squad can beat the Cannons
-        covering it. With the leash, only enemies near the hold point or inside the main."""
+        and beats the finished Cannons near our bases and the units around them at
+        CLEAR_STATIC_LEVEL, and before that a finished Cannon that can hit one of our townhalls once
+        the squad beats the Cannons covering it (and those units) at that level. With the leash, only enemies near the hold point or inside the main."""
         bot = self.bot
         homes = self._homes()
         cannons = [
@@ -356,8 +357,10 @@ class Army:
             and any(s.distance_to(h) < ARMY_DEFEND_RADIUS for h in homes)
         ]
         supply = self._supply(defenders)
+        # the Cannons fight together with the enemy units around them
+        guards = self.engagement.enemies_near([c.position for c in cannons]) if cannons else []
         strong_enough = supply >= ARMY_CLEAR_STRUCTURES_SUPPLY and (
-            not cannons or self.engagement.level(defenders, cannons, ENEMY_DEFENDS) >= ATTACK_CONTINUE
+            not cannons or self.engagement.level(defenders, cannons + guards, ENEMY_DEFENDS) >= CLEAR_STATIC_LEVEL
         )
         candidates = [e for e in bot.enemy_units if not e.is_memory]
         if strong_enough:
@@ -370,7 +373,7 @@ class Army:
             # waited to clear every structure)
             for c in self._sieging(cannons):
                 covering = [o for o in cannons if o.distance_to(c.position) <= o.ground_range + o.radius + c.radius + 1]
-                if self.engagement.level(defenders, covering, ENEMY_DEFENDS) >= ATTACK_CONTINUE:
+                if self.engagement.level(defenders, covering + guards, ENEMY_DEFENDS) >= CLEAR_STATIC_LEVEL:
                     candidates.append(c)
         best: Optional[tuple[float, Unit]] = None
         for enemy in candidates:

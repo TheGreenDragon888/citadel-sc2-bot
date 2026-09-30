@@ -704,6 +704,10 @@ RETREAT_DONE_RADIUS: float = 8.0  # a retreating unit this close to the defensiv
 ATTACK_SQUAD_RADIUS: float = 10.0  # ares squad radius: ATTACK units farther apart form separate groups
 REGROUP_FRACTION: float = 0.25  # the main group waits while other groups hold this share of the squad's supply
 REINFORCE_JOIN_RADIUS: float = 12.0  # a reinforcement group this close to the ATTACK squad's main group joins it
+# enemy static defense near our bases (cannon rush) is attacked at this level, not ATTACK_CONTINUE:
+# M2's "6 supply per finished Cannon" (3 Stalkers each) reads 7-8 (6 Stalkers vs 3 Cannons = 5,
+# 12 vs 3 = 9), and at 5 the M4 army fed 4 units into rush Cannons (cannon_rush Ultralove game 2)
+CLEAR_STATIC_LEVEL: int = 7
 BATTERY_COVER_RADIUS: float = 8.0  # a fight this close to a ready Shield Battery of ours is "inside the battery radius"
 OBSERVER_WITH_ARMY_FROM_S: float = 360.0  # §4.3 "from 6:00 travels with the army": one Observer
 END_GAME_CORNER_INSET: float = 4.0  # hunt points at the playable area's corners, this far inside

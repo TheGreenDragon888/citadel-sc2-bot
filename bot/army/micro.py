@@ -20,7 +20,7 @@ from sc2.ids.unit_typeid import UnitTypeId
 from sc2.position import Point2
 from sc2.unit import Unit
 
-from bot.army.engagement import WORKERS
+from bot.army.engagement import WORKERS, is_static_defense
 from bot.constants import KITE_RANGE_MARGIN, MOVE_REISSUE_DIST
 
 if TYPE_CHECKING:
@@ -55,8 +55,13 @@ def fight(bot: "AresBot", unit: Unit, enemies: Sequence[Unit], fallback: Point2)
     if not targets:
         move(unit, fallback, attack=True)
         return
-    # units that can fight back before workers and structures (§4.6 priorities are M5's)
-    fighters = [e for e in targets if not e.is_structure and e.type_id not in WORKERS and (e.can_attack_ground or e.can_attack_air)]
+    # what can fight back (units, and finished static defense) before workers and other structures
+    # (§4.6 priorities are M5's)
+    fighters = [
+        e for e in targets
+        if e.type_id not in WORKERS and (e.can_attack_ground or e.can_attack_air)
+        and (not e.is_structure or is_static_defense(e))
+    ]
     for group in (fighters, targets):
         if group and ShootTargetInRange(unit=unit, targets=group).execute(bot, bot.config, bot.mediator):
             return
