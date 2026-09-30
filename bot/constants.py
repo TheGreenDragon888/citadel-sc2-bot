@@ -660,3 +660,8 @@ PHOENIX_AWAY_DIST: float = 20.0  # after the natural, the Phoenix flies this far
 # built (M3: cannon-rush test games lost probes that walked past finished Cannons)
 SCOUT_STATIC_MARGIN: float = 3.0
 SCOUT_STATIC_STEP: float = 4.0  # a scout inside that margin moves this far straight away
+# a one-off matchup scout (Adept shade, Stalker poke, Oracle) not started this long after its time
+# (a defense plan held the units) is skipped; any unit scout comes back after UNIT_SCOUT_MAX_S
+# (M3: 12-pool test games started the 3:00 PvZ Adept shade at 9:48-12:42)
+UNIT_SCOUT_LATE_S: float = 90.0
+UNIT_SCOUT_MAX_S: float = 120.0

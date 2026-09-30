@@ -90,6 +90,8 @@ from bot.constants import (
     RESCOUT_STALE_S,
     SAME_LEVEL_Z,
     STALKER_POKE_AFTER_CORE_S,
+    UNIT_SCOUT_LATE_S,
+    UNIT_SCOUT_MAX_S,
 )
 from bot.geometry import in_map
 from bot.intel.detectors import MAIN_PRODUCTION
@@ -104,6 +106,7 @@ from bot.intel.scout_tasks import (
     PostTask,
     ProbeLookTask,
     ScoutTask,
+    UnitTask,
     nearest_neighbour_order as nearest_order,
 )
 from bot.intel.threat_flags import FlagStore, Threat
@@ -175,6 +178,11 @@ class ScoutPlanner:
             unit = bot.unit_tag_dict.get(tag)
             if unit is None:
                 continue  # dead ones are removed in on_unit_destroyed
+            if (
+                isinstance(task, UnitTask) and not isinstance(task, PostTask)
+                and bot.time - task.started_at > UNIT_SCOUT_MAX_S
+            ):
+                task.go_back(f"out for {UNIT_SCOUT_MAX_S:g} s")
             result = task.step(unit)
             if result is not None:
                 self._finish(task, unit, *result)
@@ -303,6 +311,18 @@ class ScoutPlanner:
             observers = observers[1:]  # §4.3: from 6:00 one travels with the army
         return observers
 
+    def _due(self, name: str, due_at: Optional[float]) -> bool:
+        """A one-off task `name` is due now: its time has come, it hasn't been given yet, and it
+        isn't more than UNIT_SCOUT_LATE_S late (then it is skipped for good)."""
+        now = self.bot.time
+        if name in self.sent or due_at is None or now < due_at:
+            return False
+        if now > due_at + UNIT_SCOUT_LATE_S:
+            self.sent.add(name)
+            logger.info(f"SCOUT {name} skipped at {self.bot.time_formatted}: more than {UNIT_SCOUT_LATE_S:g} s late")
+            return False
+        return True
+
     def _give(self, task: ScoutTask, unit: Unit, why: str) -> None:
         logger.info(f"SCOUT {task.name}: {unit.type_id.name} {unit.tag} at {self.bot.time_formatted} ({why})")
         self._start(task, unit)
@@ -329,27 +349,25 @@ class ScoutPlanner:
                     else LookTask(self, unit.tag, "aggro_rescout", [enemy_nat, bot.mediator.get_enemy_ramp.top_center, enemy_main])
                 )
                 self._give(task, unit, "UNKNOWN_AGGRO re-scout")
-        if not self._units_needed_home():
-            core = self.core_done_at
-            if "adept_shade" not in self.sent and (
-                (race == Race.Terran and core is not None and now >= core + ADEPT_SCOUT_AFTER_CORE_S)
-                or (race == Race.Zerg and now >= ADEPT_SCOUT_PVZ_S)
-            ):
-                if units := self._free_units(frozenset({UnitTypeId.ADEPT})):
-                    self.sent.add("adept_shade")
-                    self._give(AdeptShadeTask(self, units[0].tag, enemy_main), units[0], f"{race.name} schedule")
-            if (
-                "stalker_poke" not in self.sent and race == Race.Protoss
-                and core is not None and now >= core + STALKER_POKE_AFTER_CORE_S
-            ):
-                if units := self._free_units(frozenset({UnitTypeId.STALKER})):
-                    self.sent.add("stalker_poke")
-                    self._give(LookTask(self, units[0].tag, "stalker_poke", [enemy_nat]), units[0], "PvP schedule")
-            if "oracle" not in self.sent and race == Race.Zerg and now >= ORACLE_SCOUT_S:
-                if units := self._free_units(frozenset({UnitTypeId.ORACLE})):
-                    self.sent.add("oracle")
-                    route = [enemy_nat, enemy_main, bot.mediator.get_enemy_third]
-                    self._give(OracleTask(self, units[0].tag, route), units[0], "PvZ schedule")
+        core = self.core_done_at
+        after_core = (lambda delay: core + delay if core is not None else None)
+        # one-off matchup scouts: (task, unit type, when, how)
+        one_offs = (
+            ("adept_shade", UnitTypeId.ADEPT,
+             after_core(ADEPT_SCOUT_AFTER_CORE_S) if race == Race.Terran else (ADEPT_SCOUT_PVZ_S if race == Race.Zerg else None),
+             lambda tag: AdeptShadeTask(self, tag, enemy_main)),
+            ("stalker_poke", UnitTypeId.STALKER,
+             after_core(STALKER_POKE_AFTER_CORE_S) if race == Race.Protoss else None,
+             lambda tag: LookTask(self, tag, "stalker_poke", [enemy_nat])),
+            ("oracle", UnitTypeId.ORACLE,
+             ORACLE_SCOUT_S if race == Race.Zerg else None,
+             lambda tag: OracleTask(self, tag, [enemy_nat, enemy_main, bot.mediator.get_enemy_third])),
+        )
+        held = self._units_needed_home()  # the clock keeps running while the units are held
+        for name, type_id, due_at, make in one_offs:
+            if self._due(name, due_at) and not held and (units := self._free_units(frozenset({type_id}))):
+                self.sent.add(name)
+                self._give(make(units[0].tag), units[0], f"{race.name} schedule")
         # Observers
         robo = self.robo_done_at
         if "observer_post" not in self.sent and robo is not None and now < OBSERVER_POST_UNTIL_S:
