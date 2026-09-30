@@ -11,6 +11,10 @@ Examples:
 
 `--opponent` plays one of the scripted cheese bots in scripts/test_bots/ instead of the built-in
 AI (M2 acceptance: >= 8/10 wins against each).
+
+M3 columns: `scouts` is scouting tasks lost before 4:00 / tasks given (Telemetry scout records);
+`flag` (with --opponent) is the M3 "correct flag" check (scripts/m3_checks.py): the bot's expected
+threat raised by its deadline and no threat outside its allowed list.
 """
 
 import argparse
@@ -41,8 +45,15 @@ from sc2.main import _host_game, _join_game, run_game  # noqa: E402
 from sc2.portconfig import Portconfig  # noqa: E402
 from sc2.player import Bot, Computer  # noqa: E402
 
-from bot.constants import LADDER_TIE_GAME_SECONDS, M1_PROBES_AT_6_MIN  # noqa: E402
+from bot.constants import (  # noqa: E402
+    LADDER_TIE_GAME_SECONDS,
+    M1_PROBES_AT_6_MIN,
+    M3_FLAG_RATE,
+    M3_SCOUT_SAFE_RATE,
+    SCOUT_LOSS_CHECK_S,
+)
 from bot.main import CitadelBot  # noqa: E402
+from scripts.m3_checks import flag_check  # noqa: E402
 from scripts.test_bots import TEST_BOTS  # noqa: E402
 
 M2_WIN_RATE: float = 0.8  # M2 acceptance: >= 8/10 against each cheese bot
@@ -270,6 +281,15 @@ def main() -> int:
             if flag_store is not None
             else ""
         )
+        scouts_lost = scout_tasks = None
+        task_outcomes: Counter = Counter()
+        if telemetry is not None:
+            scouts_lost = len(telemetry.scouts_lost_before(SCOUT_LOSS_CHECK_S))
+            scout_tasks = len(telemetry.scouts)
+            task_outcomes = Counter((r.task, r.outcome or "active") for r in telemetry.scouts)
+        flag_ok = flag_why = None
+        if args.opponent and flag_store is not None:
+            flag_ok, flag_why = flag_check(args.opponent, [(r.threat.name, r.raised_at) for r in flag_store.history])
         rows.append(
             {
                 "i": i,
@@ -282,6 +302,11 @@ def main() -> int:
                 "outcome": outcome,
                 "variant": getattr(opponent_bot, "variant", None),
                 "flags": flags,
+                "scouts_lost": scouts_lost,
+                "scout_tasks": scout_tasks,
+                "task_outcomes": task_outcomes,
+                "flag_ok": flag_ok,
+                "flag_why": flag_why,
                 "game_s": game_seconds,
                 "real_s": time.perf_counter() - started,
                 "error": error,
@@ -308,6 +333,10 @@ def main() -> int:
         )
         if r["variant"]:
             line += f"  variant={r['variant']}"
+        if r["scout_tasks"] is not None:
+            line += f"  scouts={r['scouts_lost']}/{r['scout_tasks']}"
+        if r["flag_ok"] is not None:
+            line += f"  flag={'ok' if r['flag_ok'] else 'MISS'} ({r['flag_why']})"
         line += f"  flags={r['flags'] or '-'}"
         print(line + (f"  {r['error']}" if r["error"] else ""))
     print(
@@ -324,7 +353,33 @@ def main() -> int:
             f"(min {min(probes)}, median {statistics.median(probes):g}, max {max(probes)}; "
             f"{len(rows) - len(probes)} games without a 6:00 snapshot)"
         )
+    # M3: scouting tasks and "no scout lost before 4:00"
+    outcomes: Counter = Counter()
+    for r in rows:
+        outcomes.update(r["task_outcomes"])
+    if outcomes:
+        tasks = sorted({task for task, _ in outcomes})
+        print(
+            "scout tasks (outcome counts over all games): "
+            + "; ".join(
+                f"{task} " + ",".join(f"{o}={n}" for (t, o), n in sorted(outcomes.items()) if t == task) for task in tasks
+            )
+        )
+    measured = [r for r in rows if r["scouts_lost"] is not None and r["outcome"] != CRASH]
+    if measured:
+        safe = sum(r["scouts_lost"] == 0 for r in measured)
+        needed = -(-M3_SCOUT_SAFE_RATE * len(rows) // 1)
+        print(
+            f"M3 no scout lost before {format_game_time(SCOUT_LOSS_CHECK_S)}: {safe}/{len(rows)} games "
+            f"(>= {needed:.0f} needed): {'PASS' if safe >= needed else 'FAIL'}"
+        )
     if args.opponent:
+        correct = sum(bool(r["flag_ok"]) for r in rows)
+        needed = -(-M3_FLAG_RATE * len(rows) // 1)
+        print(
+            f"M3 correct flag vs {args.opponent}: {correct}/{len(rows)} games "
+            f"(>= {needed:.0f} needed): {'PASS' if correct >= needed else 'FAIL'}"
+        )
         needed = -(-M2_WIN_RATE * len(rows) // 1)
         ok = counts[Result.Victory.name] >= needed and not counts[CRASH]
         print(

@@ -529,3 +529,28 @@ BUILDER_DANGER_RADIUS: float = 12.0
 # building_manager.py:697-699) cancels a freshly placed Pylon at its first hit.
 CANCEL_EXPECTED_FRACTION: float = 0.3
 BUILD_START_HP_FRACTION: float = 0.1  # the game's: a new structure starts at 10% HP and shield
+
+
+# ---------------------------------------------------------------------------------------------
+# M3: scout planner (DESIGN.md §4.3), scouting-based flags (§4.4 rows 3 and 15), scout metrics
+# ---------------------------------------------------------------------------------------------
+
+# §8 "first enemy aggression time" (telemetry): the first visible enemy non-worker unit this
+# close to one of our townhalls, this many enemy workers that close, or an enemy structure
+# within CANNON_RUSH_RADIUS of our main/natural
+AGGRESSION_RADIUS: float = 30.0
+AGGRESSION_WORKERS: int = 3
+# M3 acceptance: a scout lost before this game time counts against "no scout lost before 4:00"
+SCOUT_LOSS_CHECK_S: float = 240.0
+
+# M3 acceptance (user decision): per scripted cheese bot, the flag that must be raised, the game
+# second it must be raised by (before the cheese reaches us), and the other threats that may also
+# be raised in the game. Any other threat raised in the game is a false flag.
+M3_EXPECTED_FLAGS: dict[str, tuple[str, float, Tuple[str, ...]]] = {
+    "worker_rush": ("WORKER_RUSH", 60.0, ("UNKNOWN_AGGRO",)),
+    "cannon_rush": ("CANNON_RUSH", 90.0, ("UNKNOWN_AGGRO",)),
+    "twelve_pool": ("POOL_12", 105.0, ("ONE_BASE_ALLIN", "UNKNOWN_AGGRO")),
+    "proxy_rax": ("PROXY", 120.0, ("ONE_BASE_ALLIN", "UNKNOWN_AGGRO")),
+}
+M3_FLAG_RATE: float = 0.8  # correct flag in >= 80% of each bot's games
+M3_SCOUT_SAFE_RATE: float = 0.7  # no scout lost before 4:00 in >= 70% of games
