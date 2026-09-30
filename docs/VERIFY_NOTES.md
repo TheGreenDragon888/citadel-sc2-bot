@@ -783,3 +783,45 @@ M2 decided as below. Every value is in `bot/constants.py`.
 | Army | Recall from an attack only if enemies at home have ≥ `ARMY_RECALL_FRACTION` of our supply; don't engage at home below `ARMY_ENGAGE_RATIO` of enemy supply (finished Cannons count `ARMY_SUPPLY_PER_CANNON`); structures near our bases are targets from `ARMY_CLEAR_STRUCTURES_SUPPLY` | Units fed into Cannons and Marines one at a time |
 | Production | `gateway_upkeep` morphs powered idle Gateways and powers unpowered ones | ares's SpawnController makes nothing while any ready idle Gateway exists after Warp Gate |
 | Cancel rule | HP + shield below `CANCEL_EXPECTED_FRACTION` of the undamaged value at the current build progress | ares's rule cancels new Pylons at their first hit |
+
+## M2 acceptance evidence
+
+Acceptance (DESIGN.md §7): at least 8/10 wins against each of the worker-rush, SharpCannons-style,
+12-pool and proxy test bots. Each batch is 10 games, one per pool map in order
+(`MagannathaAIE_v2, UltraloveAIE_v2, LeyLinesAIE_v3, TorchesAIE_v4, PylonAIE_v4,
+PersephoneAIE_v4, IncorporealAIE_v4`, then the first three again), opponent seed 100 + game
+number, 60:00 game limit:
+
+```
+poetry run python scripts/run_matches.py --opponent <bot> --map all --total 10 --seed 100
+```
+
+The batches ran on commit d3ae640. A container restart stopped them before the last games; those
+were resumed with the same maps and seeds (e.g. games 8-10 of `cannon_rush` with
+`--map MagannathaAIE_v2 UltraloveAIE_v2 LeyLinesAIE_v3 --total 3 --seed 107`, since game `i`
+of a run uses seed `--seed + i`). The final code (cb092d1) differs from d3ae640 only in the
+§4.4 worker-count rule of the proxy check, which never decides a flag against these bots: none
+of them has a Barracks or Gateway in its main at 1:30, so their PROXY flags come from the
+"no production" part either way.
+
+| Test bot | Wins | Losses | Crashes | Result |
+|---|---|---|---|---|
+| `worker_rush` | 10 | 0 | 0 | PASS |
+| `cannon_rush` (natural and main variants) | 9 | 1 (game 6, Persephone, main variant) | 0 | PASS |
+| `twelve_pool` | 8 | 2 (game 4 Torches, game 10 Ley Lines) | 0 | PASS |
+| `proxy_rax` (third and center variants) | 10 | 0 | 0 | PASS |
+
+The losses:
+- **Cannon rush, Persephone, main variant, seed 106** (lost in two of three runs): the rusher's
+  first Cannon finishes next to our main Nexus by 2:00 and six more follow by 3:00. §4.2 stops
+  the probe attack once a Cannon completes, the Cannons also cover our second Gateway, and the
+  Nexus dies before 4:00.
+- **12-pool, Torches and Ley Lines**: the opener's natural Nexus was already placed when POOL_12
+  was raised (1:20-1:21), so it was kept (§4.2 cancels or delays it only "if it is not yet
+  started"). When it finished, ares's Mining sent probes out through the wall gap to its
+  minerals (gathering probes pass through units), and the lings killed them there.
+
+Other checks on the final code:
+- `poetry run python scripts/test_threat_flags.py`: 20/20 passed.
+- Ladder zip: `poetry run python scripts/create_ladder_zip.py` builds `publish/Citadel.zip`
+  (366 files) with `run.py`, `config.yml` and `ladder.py` at the top level.
