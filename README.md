@@ -52,6 +52,16 @@ show `FLAG raise` / `FLAG expire` and `PLAN` lines, and the end of game lists ev
 Test opponents for the M2 cheeses are in `scripts/test_bots/` (plain python-sc2, not in the
 ladder zip): `worker_rush`, `cannon_rush` (SharpCannons-style), `twelve_pool`, `proxy_rax`.
 
+## Army (M4)
+
+`bot/army/` runs the squads (DEFEND at home, ATTACK, REINFORCE groups, the scout planner's
+SCOUT units) on Citadel's `EngagementResult` (DESIGN.md §4.5.2): the combat simulator's result
+with our shields counted and the defender set (`engagement.py`), the attack/retreat state machine
+with its hysteresis and end-game gates (`attack_decision.py`), home defense and targets
+(`army.py`), per-step micro (`micro.py`) and the §4.7 structure hunt (`endgame.py`). Game logs
+show `ENGAGE` lines at each launch/retreat/recall, `DEFEND` lines when the home-defense decision
+changes, and `ENDGAME` lines.
+
 ## Commands
 
 | Task | Command |
@@ -72,5 +82,9 @@ ladder zip): `worker_rush`, `cannon_rush` (SharpCannons-style), `twelve_pool`, `
 | M3 scout losses vs the built-in AI | `poetry run python scripts/run_matches.py --difficulty Harder --race Terran Zerg Protoss --map all --total 21` |
 | M3 "correct flag" check, no game | `poetry run python scripts/test_m3_checks.py` |
 | Scouting abilities in game (Adept shade, Hallucination, Pulsar Beam, detection) | `poetry run python scripts/test_scout_abilities.py` |
+| M4 acceptance: 10 VeryHard games per race; the summary's `M4 wins per race` line needs ≥ 7/10 for each race, and each game prints `engage=` (launches/retreats/recalls), `value=` (army value lost/killed) and `step=` (mean/p99/max ms) | `poetry run python scripts/run_matches.py --difficulty VeryHard --race Terran --map all --total 10` (also `Zerg`, `Protoss`) |
+| Attack/retreat gates, hysteresis and the §4.7 45:00 rule, no game | `poetry run python scripts/test_attack_decision.py` |
+| Citadel's EngagementResult in game (shields counted, defender set) | `poetry run python scripts/test_engagement.py` |
+| §4.7 structure hunt, staged with shortened thresholds | `poetry run python scripts/test_endgame.py` |
 | Build the ladder zip | `poetry run python scripts/create_ladder_zip.py` |
 | Check the zip layout | `unzip -l publish/*.zip \| head` (`run.py` must be at the top level) |
