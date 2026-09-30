@@ -168,9 +168,9 @@ class Engagement:
         """EngagementResult value (0-10) of `own` fighting `enemy`."""
         own = [u for u in own if is_fighter(u) or (u.is_structure and u.can_attack)]
         if not own:
-            return EngagementResult.LOSS_EMPHATIC if enemy else EngagementResult.TIE
+            return int(EngagementResult.LOSS_EMPHATIC if enemy else EngagementResult.TIE)
         if not enemy:
-            return EngagementResult.VICTORY_EMPHATIC
+            return int(EngagementResult.VICTORY_EMPHATIC)
         if defender == WE_DEFEND and any(u.is_structure for u in enemy):
             # neither side would walk in: the simulator would call it on health alone
             defender = ENEMY_DEFENDS

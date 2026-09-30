@@ -349,23 +349,16 @@ UPGRADES_VS_P: Tuple[UpgradeId, ...] = (
     UpgradeId.PROTOSSGROUNDARMORSLEVEL2,
 )
 
-# M1 scaffolding (bot/army/basic_army.py), replaced by squads and EngagementResult gates in M4
-ARMY_ATTACK_SUPPLY: int = 150  # §4.5.2 ATTACK_START's supply gate
-ARMY_ALWAYS_ATTACK_SUPPLY: int = 190  # §4.5.2 ATTACK_START_MAX's supply gate
-ARMY_RETREAT_FRACTION: float = 0.5  # retreat when army supply < this x supply at launch
-ARMY_RELAUNCH_WAIT_S: float = 45.0  # §4.5.2: no re-launch for 45 s after a retreat
-ARMY_DEFEND_RADIUS: float = 22.0  # enemies this close to a townhall pull the army home
-ARMY_RALLY_OFFSET: float = 8.0  # rally this far from the newest base toward the enemy
+# Army (bot/army/army.py): home defense radii, rally point, structure hunt, status log
+ARMY_DEFEND_RADIUS: float = 22.0  # enemies this close to a townhall (or the natural spot) are a home threat
+ARMY_RALLY_OFFSET: float = 8.0  # defensive position: the newest base moved this far toward the enemy
 HUNT_VISIT_RADIUS: float = 7.0  # a structure-hunt point counts as visited this close
 HUNT_GRID_STEP: float = 20.0  # spacing of the structure-hunt grid over the playable area
-ORDER_REFRESH_S: float = 3.0  # don't re-issue the same order to a unit more often (§6 APM)
 ARMY_STATUS_EVERY_S: float = 60.0  # ARMY status log line
-ARMY_DIRECT_ATTACK_MARGIN: float = 4.0  # this close beyond weapon range: attack a structure directly
-# while attacking, enemies near our bases call the army back only with this share of its supply
+ORDER_REFRESH_S: float = 3.0  # don't re-issue the same order to a unit more often (§6 APM; wall holder)
+# while the ATTACK squad is out, a home threat the DEFEND squad can't hold recalls it only if the
+# enemies there are worth at least this share of the ATTACK squad's value (M2: supply)
 ARMY_RECALL_FRACTION: float = 0.3
-# while gathering, go out to enemies near our bases only with this share of their supply
-# (inside the main or at the hold point the army always fights, next to its Batteries)
-ARMY_ENGAGE_RATIO: float = 0.8
 
 # §4.8 ramp wall fallback
 WALL_RAMP_MAX_DIST: float = 30.0  # ramp top farther than this from our start: use a choke
@@ -506,7 +499,6 @@ ARMY_HOLD_LEASH: float = 8.0  # ramp holds: engage only enemies this close to th
 # and enemy structures near our townhalls once the army has this much supply.
 ARMY_WORKER_THREAT_RADIUS: float = 12.0
 ARMY_CLEAR_STRUCTURES_SUPPLY: int = 8
-ARMY_SUPPLY_PER_CANNON: int = 6
 NATURAL_HOLD_OFFSET: float = 6.0  # hold point: natural moved this far toward the enemy
 MAIN_BATTERY_RAMP_DIST: float = 6.0  # main batteries within this of the ramp top, main level
 # ... but clear of the path from the ramp top and the wall gap into the main (this long, and
@@ -634,7 +626,7 @@ OBSERVER_AFTER_ROBO_S: float = 30.0
 OBSERVER_PATH_FRACTION: float = 0.35  # PvT post: this far from the enemy natural toward ours
 OBSERVER_CHOKE_STANDOFF: float = 14.0  # PvP post: this far from the enemy natural toward ours
 OBSERVER_DETECTED_BACKOFF: float = 6.0  # a detected Observer moves this far back toward our natural
-OBSERVER_POST_UNTIL_S: float = 360.0  # §4.3 "from 6:00 travels with the army" (BasicArmy moves free Observers with it)
+OBSERVER_POST_UNTIL_S: float = 360.0  # §4.3 "from 6:00 travels with the army" (the army claims one, OBSERVER_WITH_ARMY_FROM_S)
 HOME_OBSERVER_OFFSET: float = 8.0  # home Observer: our natural moved this far toward our main
 # §4.3 "4:30, then every 60 s: visit each unscouted enemy expansion location" (Observer, else probe)
 EXPANSION_CHECK_FROM_S: float = 270.0
@@ -702,3 +694,15 @@ END_GAME_HUNT_UNSEEN_S: float = 60.0  # hunt when no enemy structure has been se
 END_GAME_ATTACK_FROM_S: float = 2700.0  # 45:00: ATTACK_START drops to END_GAME_ATTACK_START ...
 END_GAME_ATTACK_START: int = 6
 END_GAME_VALUE_RATIO: float = 1.2  # ... if our army value is >= this x the enemy's remembered army
+# Squads and micro (bot/army/army.py, micro.py; Citadel's choices where §4.5.2 is silent)
+MICRO_RADIUS: float = 12.0  # a unit with a visible enemy this close gets per-step combat control
+KITE_RANGE_MARGIN: float = 1.5  # a kiter steps back while the closest threat is this far beyond our reach
+MOVE_REISSUE_DIST: float = 2.0  # a move/attack-move to within this of the current order target is not re-issued
+HOLD_RADIUS: float = 6.0  # units holding a point walk back to it once farther than this
+HOLD_ENGAGE_RADIUS: float = 12.0  # ... and fight enemies this close to it (the defense plan's leash if set)
+RETREAT_DONE_RADIUS: float = 8.0  # a retreating unit this close to the defensive position holds there
+ATTACK_SQUAD_RADIUS: float = 10.0  # ares squad radius: ATTACK units farther apart form separate groups
+REGROUP_FRACTION: float = 0.25  # the main group waits while other groups hold this share of the squad's supply
+REINFORCE_JOIN_RADIUS: float = 12.0  # a reinforcement group this close to the ATTACK squad's main group joins it
+BATTERY_COVER_RADIUS: float = 8.0  # a fight this close to a ready Shield Battery of ours is "inside the battery radius"
+OBSERVER_WITH_ARMY_FROM_S: float = 360.0  # §4.3 "from 6:00 travels with the army": one Observer

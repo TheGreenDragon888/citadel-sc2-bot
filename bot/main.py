@@ -8,7 +8,7 @@ from sc2.data import Result
 from sc2.ids.unit_typeid import UnitTypeId
 from sc2.unit import Unit
 
-from bot.army.basic_army import BasicArmy
+from bot.army.army import Army
 from bot.constants import (
     ARMY_EVERY_STEPS,
     INTEL_EVERY_STEPS,
@@ -50,7 +50,7 @@ class CitadelBot(AresBot):
         self.executor: Optional[BuildExecutor] = None
         self.telemetry: Optional[Telemetry] = None
         self.production: Optional[Production] = None
-        self.army: Optional[BasicArmy] = None
+        self.army: Optional[Army] = None  # M4: squads, EngagementResult gates (§4.5.2)
         self.wall: Optional[WallFallback] = None
         self.wall_ok: Optional[bool] = None
         self.pylon_fallback_scan_at: Optional[float] = None  # macro/supply.py
@@ -93,7 +93,7 @@ class CitadelBot(AresBot):
         self.economy = Economy(self)
         self.executor = BuildExecutor(self, self.opener, self.planner)
         self.production = Production(self)
-        self.army = BasicArmy(self)
+        self.army = Army(self)
 
     async def on_step(self, iteration: int) -> None:
         started = time.perf_counter()
@@ -124,7 +124,8 @@ class CitadelBot(AresBot):
             self.planner.update()
         plan = self.planner.plan
         if iteration % MACRO_EVERY_STEPS == 0:
-            self.scouts.step(pinned=self.army.excluded_tags | plan.pinned_unit_tags)  # §3 step 4
+            # §3 step 4; the ATTACK/REINFORCE squads and the army's Observer are not free to scout
+            self.scouts.step(pinned=self.army.held_tags | plan.pinned_unit_tags | self.army.busy_tags)
         self.worker_defense.step(plan)  # §3 step 5: every step
 
         if iteration % MACRO_EVERY_STEPS == 0:
@@ -147,11 +148,13 @@ class CitadelBot(AresBot):
         if iteration % ARMY_EVERY_STEPS == 0:
             holder = self.wall.step(hold_gap=plan.hold_wall_gap)
             # the wall-gap holder and scouts are controlled elsewhere
-            self.army.excluded_tags = ({holder} if holder is not None else set()) | self.scouts.tags
-            plan.pinned_unit_tags = self.army.excluded_tags | set(self.worker_defense.jobs)
+            self.army.held_tags = {holder} if holder is not None else set()
+            self.army.scout_tags = self.scouts.tags
+            plan.pinned_unit_tags = self.army.held_tags | self.scouts.tags | set(self.worker_defense.jobs)
             self.army.hold_point = plan.army_hold_point
             self.army.leash = plan.army_leash
-            self.army.step()
+            self.army.step(iteration)
+        self.army.micro(iteration)  # §3 step 5: squad micro every step
 
         self.telemetry.step()
         self.telemetry.record_step_time(started)

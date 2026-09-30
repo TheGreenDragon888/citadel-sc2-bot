@@ -30,8 +30,8 @@ Unit scouts (§4.3 per-matchup rows; combat units only while no M2 defense threa
 - §5 re-scout trigger: stale STRUCTURE evidence (`FlagStore.stale`) is looked at by a free
   Observer, or by a probe when it is on our side of the map; an enemy main unseen for
   MAIN_STALE_S after MAIN_STALE_FROM_S by a free Observer (or a Phoenix, above).
-From OBSERVER_POST_UNTIL_S one Observer is left to the army, which moves it with the army (§4.3
-"From 6:00 Observer travels with the army").
+From OBSERVER_WITH_ARMY_FROM_S the army claims one Observer and moves it with the army (§4.3 "From
+6:00 Observer travels with the army"); it is pinned, so it is not free here.
 
 Units stay under a task's control until it ends; `tags` lists them so the army leaves them
 alone.
@@ -306,10 +306,8 @@ class ScoutPlanner:
         return sorted(units, key=lambda u: u.distance_to(nat))
 
     def _free_observers(self) -> list[Unit]:
-        observers = self._free_units(frozenset({UnitTypeId.OBSERVER}))
-        if self.bot.time >= OBSERVER_POST_UNTIL_S:
-            observers = observers[1:]  # §4.3: from 6:00 one travels with the army
-        return observers
+        # §4.3 "from 6:00 travels with the army": the army claims one and pins it (bot/army/army.py)
+        return self._free_units(frozenset({UnitTypeId.OBSERVER}))
 
     def _due(self, name: str, due_at: Optional[float]) -> bool:
         """A one-off task `name` is due now: its time has come, it hasn't been given yet, and it
