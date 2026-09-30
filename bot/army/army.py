@@ -511,6 +511,11 @@ class Army:
                 self.intents[u.tag] = (RETREAT, anchor)
             elif self.defend_target is not None and is_fighter(u):
                 self.intents[u.tag] = (FIGHT, self.defend_target)
+            elif intent is not None and intent[0] == FIGHT and u.distance_to(anchor) > HOLD_ENGAGE_RADIUS:
+                # a home fight turned bad: fall back, not attack-move back through the enemy
+                # (M4 VeryHard Zerg Torches: the squad chased lings to the natural, Roaches came,
+                # and the units died fighting their way back)
+                self.intents[u.tag] = (RETREAT, anchor)
             else:
                 self.intents[u.tag] = (HOLD, anchor)
         attackers = self._fighters(Role.ATTACK)
