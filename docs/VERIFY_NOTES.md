@@ -917,3 +917,48 @@ at all. In both cases only §4.4 row 3 (the Forge in its main) gives a CANNON_RU
 | Unit scouts | Combat units are taken only while none of WORKER_RUSH, POOL_12, PROXY, ONE_BASE_ALLIN, or a non-Forge-first CANNON_RUSH is active (Defense > Scouting); never pinned units | §3 order of authority |
 | Observers | Before 6:00 posts per matchup; from 6:00 one is left to `BasicArmy`, which already moves free Observers with the army | §4.3 "travels with the army" |
 | Re-scouts | Stale STRUCTURE evidence: Observer, or a probe if on our side (within 45 of our natural); stale main (60 s, after 3:00): Observer; Hallucination as §4.3 | §5 re-scout trigger |
+
+## M3 acceptance evidence
+
+Acceptance (DESIGN.md §7 M3, user decisions): the correct flag logged in ≥ 80% of scripted-cheese
+games, meaning each test bot's expected flag is raised by its deadline and no flag outside its
+allowed list is raised (`M3_EXPECTED_FLAGS`, checked by `scripts/m3_checks.py`, tested offline by
+`scripts/test_m3_checks.py`, 13/13); and no scout lost before 4:00 in ≥ 70% of games, over the
+40 cheese games and, separately, 21 built-in Harder games. A unit counts as a scout while it has a
+scouting task (M3 choices above). All runs on commit 95ee868, same maps and seeds as M2:
+
+```
+poetry run python scripts/run_matches.py --opponent <bot> --map all --total 10 --seed 100
+poetry run python scripts/run_matches.py --difficulty Harder --race Terran Zerg Protoss --map all --total 21
+```
+
+| Games | Correct flag | No scout lost before 4:00 | Wins (M2 check) | Crashes |
+|---|---|---|---|---|
+| `worker_rush` × 10 | 10/10 (WORKER_RUSH at 0:35-0:39) | 10/10 | 10/10 | 0 |
+| `cannon_rush` × 10 | 10/10 (CANNON_RUSH at 0:39-1:20) | 10/10 | 10/10 | 0 |
+| `twelve_pool` × 10 | 10/10 (POOL_12 at 1:08-1:24) | 10/10 | 9/10 | 0 |
+| `proxy_rax` × 10 | 10/10 (PROXY at 0:39-1:30) | 10/10 | 10/10 | 0 |
+| Built-in Harder × 21 (T/Z/P) | not part of the criterion | 21/21 | 15/21 | 0 |
+
+**Result: PASS.** Correct flag 40/40 (≥ 8/10 per bot); no scout lost before 4:00 in 40/40 cheese
+games and 21/21 built-in games (≥ 70%).
+
+Against M2's code on the same seeds (M2 logs): 25/40 cheese games kept their scout to 4:00 (the
+probe died to the rushers in 5/10 worker-rush games and to Zerglings in 10/10 12-pool games), and
+the strict flag check failed in every cannon-rush game (a false PROXY) and in half the worker-rush
+games (false CANNON_RUSH/PROXY).
+
+Scouting tasks run in the 21 built-in games (outcome counts): main probe home 21; patrol probe home
+7; Adept shade done 10, lost 3 (4:36, 4:53, 5:30); Stalker poke 7; Oracle 6 (Revelation or Drone
+beam 11 times across all runs); Observer post 14; home Observer 6; hallucinated Phoenix 27
+(Sentries exist vs Terran only); expansion checks 150 (15 probes lost, all after 5:00); re-scouts
+67. The built-in games raised no false PROXY flag (M2's known issue); POOL_12 was raised in all 7
+Zerg games (the Harder Zerg AI opened Pool first, 1:10-1:29); 2 of those were lost, after 12:50.
+
+Losses:
+- 12-pool game 10 (Ley Lines): the Pool was seen at 1:24 on the spawn with the longer route, 5 s
+  after the opener placed the natural Nexus (1:19); lings broke the wall gap at ~3:00 (the M2
+  open question in `docs/STATUS.md`).
+- Built-in Harder: six losses, all between 12:52 and 18:57 (late-game army play, M4's area).
+
+Regression checks on 95ee868 are listed in `docs/STATUS.md`.
