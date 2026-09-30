@@ -53,6 +53,19 @@ Four batches can run in parallel on a 4-core machine (about 40 minutes for 10 ga
 To stop batches, use a pattern that can't match your own shell, e.g.
 `pkill -f "opponent twelve_poo[l]"`, in a command of its own.
 
+## M3 checks on the final code (95ee868)
+
+| Check | Result |
+|---|---|
+| M3 acceptance, 4 cheese bots × 10 (seed 100) | correct flag 40/40; no scout lost before 4:00 40/40; wins 10, 10, 9, 10 (M2 check passes) |
+| M3 scout losses, built-in Harder × 21 | no scout lost before 4:00 21/21; 15/21 wins (losses 12:52-18:57) |
+| M1 regression, Hard × 10 (T/Z/P/Random) | 10/10 wins, 0 crashes; 44+ probes at 6:00 in 8/10 (41 and 42 vs Pool-first Zerg with POOL_12 holding the natural's timing) |
+| `test_threat_flags.py` / `test_m3_checks.py` | 20/20 / 13/13 |
+| `test_scout_abilities.py` | shade, Hallucination, Pulsar Beam, detection as in `VERIFY_NOTES.md` M3 findings |
+| Ladder zip | `publish/Citadel.zip`, 368 files, 5.4 MB, `run.py`/`ladder.py`/`config.yml` at the top level |
+
+Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M3 acceptance evidence".
+
 ## Carry-forward for M4 (squads, EngagementResult gates, retreat hysteresis, end-game)
 
 - **What exists.** `bot/army/basic_army.py` is M1/M2 scaffolding with supply-count gates
@@ -85,7 +98,10 @@ To stop batches, use a pattern that can't match your own shell, e.g.
   as they stand; two were caught there by the cannon bot's Stalkers after 5:40.
 - The PvT Adept shade sometimes can't reach the enemy ramp bottom safely (Bunker/Marines) and comes
   back after `UNIT_SCOUT_MAX_S` without casting.
-- Probe expansion checks from 4:30 cost a mining probe per trip and sometimes the probe.
+- Probe expansion checks from 4:30 cost a mining probe per trip and sometimes the probe (15 lost in
+  the 21 built-in Harder games, all after 5:00); an Observer is used when one is free.
+- ares's unit-based flags (marauder rush, "went reaper") still raise short ONE_BASE_ALLIN/PROXY
+  flags vs the built-in AI (seen twice in the M1 regression, each gone within a minute).
 - AIR_HARASS, DT, MACRO, TIMING_ATTACK detectors (§4.4 rows 9, 12-14, 16) are not in any
   milestone yet (user decision for M3: scouting rows 3 and 15 only); the scouts' sightings are in
   ares's memory and `enemy_structures`.
