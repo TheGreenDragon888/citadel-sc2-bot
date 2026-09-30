@@ -1043,3 +1043,46 @@ Where §4.5.2/§4.7 leave a choice open, M4 decided as below. Every value is in 
 | Micro | Every step for units with a visible enemy within `MICRO_RADIUS`: shoot the lowest-HP enemy in range that can fight back (then anything in range); between shots, kiters (Stalker, Adept, Immortal, Colossus, Sentry, Phoenix, Void Ray, Oracle) step out of danger with `KeepUnitSafe` when they out-range the closest threat; retreats path around danger. Path queries and new move orders go out once per `ARMY_EVERY_STEPS` per unit (staggered by tag) | §3 "squad micro every step"; §6 step budget |
 | Observer | From 6:00 the army claims one Observer and pins it (the scout planner no longer keeps one back itself); it follows the ATTACK squad's main group while it is out | §4.3 "travels with the army" |
 | End-game (§4.7) | "No enemy structure seen" = none in vision (snapshots don't count) for 60 s. Hunt points: every expansion, the map-analyzer region centres, the four corners (4 inside the playable area) and a 20-tile grid; free Observers take 8-point trips, a hallucinated Phoenix (existing Sentry only) takes the next points; the army's own hunt walks the ground points, and lifted Terran buildings become targets for units that can shoot up. "Behind" = our army value below the enemy's remembered army (ares's army cache: every enemy unit seen and not known dead): from 40:00 no attack launches then, not even at 190 supply | §4.7; the 30 s memory is too short for a whole-army comparison |
+
+## M4 acceptance evidence
+
+Acceptance (DESIGN.md §7 M4, user decision): at least 7/10 wins against the built-in VeryHard AI
+for each race (Terran, Zerg, Protoss), 10 games each, the 7 pool maps cycled, `RandomBuild`. All
+runs on commit d20f15b:
+
+```
+poetry run python scripts/run_matches.py --difficulty VeryHard --race Terran --map all --total 10
+poetry run python scripts/run_matches.py --difficulty VeryHard --race Zerg --map all --total 10
+poetry run python scripts/run_matches.py --difficulty VeryHard --race Protoss --map all --total 10
+```
+
+| Race | Wins | Losses | Game lengths | Main attacks (launch / retreat / recall) | Army value lost / killed |
+|---|---|---|---|---|---|
+| Terran | **10/10** | 0 | 10:12-13:17 | 13 / 1 / 2 | 28.9k / 53.8k |
+| Zerg | **9/10** | 1 (Ultralove, 25:33) | 10:36-25:33 | 21 / 4 / 8 | 58.8k / 114.6k |
+| Protoss | **10/10** | 0 | 11:12-14:23 | 12 / 1 / 1 | 28.3k / 88.1k |
+
+**Result: PASS** (≥ 7/10 for each race). 0 crashes. The `M4 wins per race` summary line printed
+PASS for each batch.
+
+- The one loss (Zerg, Ultralove): our army traded evenly for 25 minutes (22.6k lost, 28.9k
+  killed) against Mutalisks, Hydralisks, Ultralisks, Brood Lords, Swarm Hosts and Corruptors, and
+  was recalled five times by runbys; the §4.5.1 air switch (more Stalkers / Archons against
+  enemy air) is not built yet, and the vs-Z mix has no Archons (High Templar are cut).
+- Before M4 (M3's code, commit 023a64d, 7 per race on the same maps): Terran 6/7, Zerg 3/6,
+  Protoss 5/6 (19 games finished before a container restart). Its losses were the M1 army's
+  pattern: attack at 150 supply used with ~74 army supply, lose half, retreat, repeat.
+- Intermediate runs: M4's first army commit (ff19b9e) won 21/21 (7 per race); commit 5589a6c won
+  Terran 10/10, Zerg 9/10, Protoss 10/10. The changes after it (home retreat, fogged Cannons, a
+  Cannon target in its own guard) came from the cheese regression runs.
+- Step time over the 30 games (4 games in parallel on 4 cores): mean 3.4-10.9 ms per game (average
+  5.2), p99 18-55 ms (over 40 ms in 2 games), max 49-411 ms. The §6 step guard is M5's.
+
+Other M4 checks on d20f15b:
+
+| Check | Command | Result |
+|---|---|---|
+| Gates, hysteresis, relaunch wait, value rule, recall, §4.7 45:00 and 40:00 rules | `poetry run python scripts/test_attack_decision.py` | 16/16 |
+| Citadel's EngagementResult in game | `poetry run python scripts/test_engagement.py` | PASS (table in M4 findings) |
+| §4.7 structure hunt (thresholds shortened in the test) | `poetry run python scripts/test_endgame.py` | PASS: hunt on at 1:03, the Supply Depot found by the army's hunt at 0:46, the lifted Barracks found during the hunt at 1:53, Victory |
+| ThreatFlag expiry / M3 flag check | `test_threat_flags.py` / `test_m3_checks.py` | 20/20 / 13/13 |
