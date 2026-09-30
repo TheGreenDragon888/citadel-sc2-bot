@@ -58,7 +58,9 @@ Every threshold is in `bot/constants.py`.
 | M4 gates / fight levels / structure hunt | `poetry run python scripts/test_attack_decision.py`; `poetry run python scripts/test_engagement.py`; `poetry run python scripts/test_endgame.py` |
 | Ladder zip | `poetry run python scripts/create_ladder_zip.py`, then `unzip -l publish/*.zip \| head` |
 
-Four batches can run in parallel on a 4-core machine (about 40 minutes for 10 games each).
+Four batches can run in parallel on a 4-core machine (about 40-70 minutes for 10 games each).
+Each finished game prints a `ROW` line; if the container restarts mid-batch, rerun the same
+command with `--start N` (games keep their map and seed).
 To stop batches, use a pattern that can't match your own shell, e.g.
 `pkill -f "opponent twelve_poo[l]"`, in a command of its own (nothing else in that command may
 contain the matched text), then kill the orphaned `SC2_x64` clients (parent PID 1).
