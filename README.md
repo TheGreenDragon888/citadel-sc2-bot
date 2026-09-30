@@ -68,5 +68,9 @@ ladder zip): `worker_rush`, `cannon_rush` (SharpCannons-style), `twelve_pool`, `
 | One cheese variant only | add `--variant natural` or `main` (`cannon_rush`), `third` or `center` (`proxy_rax`) |
 | One-base all-in plan vs the built-in AI | `poetry run python scripts/run_matches.py --difficulty Harder --build Rush --race Terran Zerg Protoss --map all --total 3` |
 | ThreatFlag expiry rules (§5), no game | `poetry run python scripts/test_threat_flags.py` |
+| M3 acceptance: the same cheese batches print `flag=` (on-time, no false flags) and `scouts=` (lost before 4:00 / tasks) per game and two `M3 ...` summary lines | `poetry run python scripts/run_matches.py --opponent worker_rush --map all --total 10 --seed 100` |
+| M3 scout losses vs the built-in AI | `poetry run python scripts/run_matches.py --difficulty Harder --race Terran Zerg Protoss --map all --total 21` |
+| M3 "correct flag" check, no game | `poetry run python scripts/test_m3_checks.py` |
+| Scouting abilities in game (Adept shade, Hallucination, Pulsar Beam, detection) | `poetry run python scripts/test_scout_abilities.py` |
 | Build the ladder zip | `poetry run python scripts/create_ladder_zip.py` |
 | Check the zip layout | `unzip -l publish/*.zip \| head` (`run.py` must be at the top level) |
