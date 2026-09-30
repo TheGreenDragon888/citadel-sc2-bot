@@ -135,6 +135,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int, default=None, help="seed for the --opponent bot's random choices")
     parser.add_argument(
+        "--start",
+        type=int,
+        default=1,
+        help="first game number to play (default 1); games keep their map and seed, so a batch cut "
+        "short can be finished with the same arguments and --start",
+    )
+    parser.add_argument(
         "--build",
         choices=[b.name for b in AIBuild],
         default=AIBuild.RandomBuild.name,
@@ -219,6 +226,29 @@ def format_game_time(seconds: Optional[float]) -> str:
     return f"{int(seconds // 60):02d}:{int(seconds % 60):02d}"
 
 
+def cell(value) -> str:
+    return "-" if value is None else str(value)
+
+
+def format_row(r: dict) -> str:
+    """One game's summary row (also printed as `ROW ...` right after the game)."""
+    line = (
+        f"{r['i']:>3}  {r['map']:<18} {r['race']:<8} {r['opener']:<15} {cell(r['wall_ok']):<7} "
+        f"{cell(r['probes6']):>8} {cell(r['bases6']):>7}  {r['outcome']:<8} "
+        f"{format_game_time(r['game_s']):>6} {r['real_s']:>6.0f}s"
+    )
+    if r["variant"]:
+        line += f"  variant={r['variant']}"
+    if r["engage"] is not None:
+        line += f"  engage={r['engage']} value={r['value']} step={r['step']}"
+    if r["scout_tasks"] is not None:
+        line += f"  scouts={r['scouts_lost']}/{r['scout_tasks']}"
+    if r["flag_ok"] is not None:
+        line += f"  flag={'ok' if r['flag_ok'] else 'MISS'} ({r['flag_why']})"
+    line += f"  flags={r['flags'] or '-'}"
+    return line + (f"  {r['error']}" if r["error"] else "")
+
+
 def main() -> int:
     args = parse_args()
     bot_name, bot_race = run.load_bot_config()
@@ -235,6 +265,8 @@ def main() -> int:
 
     rows = []
     for i, (map_name, opp_race) in enumerate(zip(schedule, races), start=1):
+        if i < args.start:
+            continue
         if args.opponent:
             bot_class = TEST_BOTS[args.opponent][0]
             seed = None if args.seed is None else args.seed + i
@@ -330,13 +362,11 @@ def main() -> int:
                 "error": error,
             }
         )
+        print(f"ROW {format_row(rows[-1])}", flush=True)
 
     counts = Counter(row["outcome"] for row in rows)
     decided = counts[Result.Victory.name] + counts[Result.Defeat.name] + counts[Result.Tie.name]
     win_rate = 100 * counts[Result.Victory.name] / decided if decided else 0.0
-
-    def cell(value) -> str:
-        return "-" if value is None else str(value)
 
     print(f"\n=== Summary: {bot_name} vs {opponent}, realtime=False ===")
     print(
@@ -344,21 +374,7 @@ def main() -> int:
         f"{'probes@6':>8} {'bases@6':>7}  {'result':<8} {'game':>6} {'real':>7}"
     )
     for r in rows:
-        line = (
-            f"{r['i']:>3}  {r['map']:<18} {r['race']:<8} {r['opener']:<15} {cell(r['wall_ok']):<7} "
-            f"{cell(r['probes6']):>8} {cell(r['bases6']):>7}  {r['outcome']:<8} "
-            f"{format_game_time(r['game_s']):>6} {r['real_s']:>6.0f}s"
-        )
-        if r["variant"]:
-            line += f"  variant={r['variant']}"
-        if r["engage"] is not None:
-            line += f"  engage={r['engage']} value={r['value']} step={r['step']}"
-        if r["scout_tasks"] is not None:
-            line += f"  scouts={r['scouts_lost']}/{r['scout_tasks']}"
-        if r["flag_ok"] is not None:
-            line += f"  flag={'ok' if r['flag_ok'] else 'MISS'} ({r['flag_why']})"
-        line += f"  flags={r['flags'] or '-'}"
-        print(line + (f"  {r['error']}" if r["error"] else ""))
+        print(format_row(r))
     print(
         f"Wins {counts[Result.Victory.name]}/{len(rows)}  Losses {counts[Result.Defeat.name]}  "
         f"Ties {counts[Result.Tie.name]}  Crashes {counts[CRASH]}  "
