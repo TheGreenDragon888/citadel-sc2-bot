@@ -68,8 +68,8 @@ contain the matched text), then kill the orphaned `SC2_x64` clients (parent PID 
 | Check | Result |
 |---|---|
 | M4 acceptance, VeryHard × 10 per race | Terran 10/10, Zerg 9/10, Protoss 10/10 (≥ 7 each): PASS; 0 crashes |
-| M2/M3 regression, 4 cheese bots × 10 (seed 100) | cannon rush 8/10 wins (1 tie, 1 loss), correct flag 10/10, no scout lost 10/10; worker rush, 12-pool, proxy: rerunning after a container restart (all games won before it: 8/8, 7/7, 8/8) |
-| M1 regression, Hard × 10 (T/Z/P/Random) | rerunning after a container restart (2/2 won before it) |
+| M2/M3 regression, 4 cheese bots × 10 (seed 100) | wins: worker rush 10/10, cannon rush 8/10 (1 tie, 1 loss), 12-pool 10/10, proxy 10/10 (M2 ≥ 8/10: PASS); correct flag 40/40; no scout lost before 4:00 40/40 |
+| M1 regression, Hard × 10 (T/Z/P/Random) | 10/10 wins, 0 crashes; 44+ probes at 6:00 in 8/10 (41 and 41 vs Pool-first Zerg with POOL_12 holding the natural's timing, as in M3) |
 | `test_attack_decision.py` / `test_threat_flags.py` / `test_m3_checks.py` | 16/16 / 20/20 / 13/13 |
 | `test_engagement.py` / `test_endgame.py` | PASS / PASS |
 | Ladder zip | `publish/Citadel.zip`, 378 files, 5.5 MB, `run.py`/`ladder.py`/`config.yml` at the top level, `sc2_helper` included |

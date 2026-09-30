@@ -1086,3 +1086,18 @@ Other M4 checks on d20f15b:
 | Citadel's EngagementResult in game | `poetry run python scripts/test_engagement.py` | PASS; same levels as the M4 findings table except "6 Stalkers + 2 Cannons (defending)" 8 (8-9) instead of 9 (8-9) (the simulator's one-level noise) |
 | §4.7 structure hunt (thresholds shortened in the test) | `poetry run python scripts/test_endgame.py` | PASS: the Supply Depot found by the army's own hunt at 0:43 and destroyed at 0:49, the hunt on at 1:00, the lifted Barracks found during the hunt at 1:22, Victory |
 | ThreatFlag expiry / M3 flag check | `test_threat_flags.py` / `test_m3_checks.py` | 20/20 / 13/13 |
+
+Regression checks on d20f15b (the M4 army replaces the M1 army every earlier milestone relied on):
+
+| Check | Command | Result |
+|---|---|---|
+| M2 acceptance + M3 flag/scout checks, 4 cheese bots × 10 | `poetry run python scripts/run_matches.py --opponent <bot> --map all --total 10 --seed 100` | worker rush 10/10, cannon rush 8/10 (Ultralove natural tied at 60:00, Pylon main lost at 9:53), 12-pool 10/10, proxy 10/10: M2 PASS (≥ 8/10 each); correct flag 40/40; no scout lost before 4:00 40/40 |
+| M1 regression, Hard × 10 | `poetry run python scripts/run_matches.py --difficulty Hard --map all --total 10 --race Terran Zerg Protoss Random` | 10/10 wins; 44+ probes at 6:00 in 8/10 (41 in two Pool-first Zerg games, as in M3) |
+| Ladder zip | `poetry run python scripts/create_ladder_zip.py`; `unzip -l publish/*.zip` | 378 files, 5.5 MB; `run.py`, `ladder.py`, `config.yml` at the top level; `ares-sc2/sc2_helper` (the simulator) included |
+
+Two container restarts cut the worker-rush, 12-pool, proxy and Hard batches short (every game
+they had finished was won); they were rerun in full with `run_matches.py`'s new per-game `ROW`
+lines (and `--start` to finish a batch cut short). Cannon rush: M3 won 10/10 on the same seeds; the
+three M4 fixes from these runs are in "M4 Citadel choices" (level 7 against rush Cannons with the
+units around them, fogged Cannons counted, a Cannon target in its own guard).
+
