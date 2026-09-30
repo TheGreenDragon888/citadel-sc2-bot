@@ -126,6 +126,7 @@ class Army:
         # home defense, refreshed each decision tick
         self.defend_target: Optional[Point2] = None
         self.threat: Optional[Point2] = None
+        self.home_level: int = -1  # the DEFEND squad's level against the home threat (-1: not simulated)
         self._defend_state: str = ""
         # main attack
         self.target: Optional[Point2] = None
@@ -195,7 +196,10 @@ class Army:
             value = self.engagement.value(attackers)
             if value > 0 and self.engagement.value(near) >= ARMY_RECALL_FRACTION * value:
                 self.decision.recall(now)
-                self._log(Decision(self.decision.state, "recall", f"home threat at {self.threat.rounded} the DEFEND squad can't hold"), -1)
+                self._log(
+                    Decision(self.decision.state, "recall", f"home threat at {self.threat.rounded} the DEFEND squad can't hold"),
+                    self.home_level,
+                )
                 self._retreat_attack_squad()
                 return
         if self.decision.state == ATTACK:
@@ -310,6 +314,7 @@ class Army:
         found = self._home_threat(defenders)
         self.threat = found.position if found is not None else None
         self.defend_target = None
+        self.home_level = -1
         state = "none"
         if found is not None:
             if found.is_structure or found.type_id in WORKERS:
@@ -319,6 +324,7 @@ class Army:
             else:
                 enemy = self.engagement.enemies_near([found.position]) + self.engagement.static_defense_near(found.position)
                 level = self.engagement.level(defenders + self._own_cannons_near(found.position), enemy, WE_DEFEND)
+                self.home_level = level
                 covered = self._covered_by_battery(found.position)
                 needed = DEFEND_ENGAGE if covered else ATTACK_CONTINUE
                 if level >= needed:
