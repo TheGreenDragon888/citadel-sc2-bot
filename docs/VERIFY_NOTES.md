@@ -1083,6 +1083,6 @@ Other M4 checks on d20f15b:
 | Check | Command | Result |
 |---|---|---|
 | Gates, hysteresis, relaunch wait, value rule, recall, §4.7 45:00 and 40:00 rules | `poetry run python scripts/test_attack_decision.py` | 16/16 |
-| Citadel's EngagementResult in game | `poetry run python scripts/test_engagement.py` | PASS (table in M4 findings) |
-| §4.7 structure hunt (thresholds shortened in the test) | `poetry run python scripts/test_endgame.py` | PASS: hunt on at 1:03, the Supply Depot found by the army's hunt at 0:46, the lifted Barracks found during the hunt at 1:53, Victory |
+| Citadel's EngagementResult in game | `poetry run python scripts/test_engagement.py` | PASS; same levels as the M4 findings table except "6 Stalkers + 2 Cannons (defending)" 8 (8-9) instead of 9 (8-9) (the simulator's one-level noise) |
+| §4.7 structure hunt (thresholds shortened in the test) | `poetry run python scripts/test_endgame.py` | PASS: the Supply Depot found by the army's own hunt at 0:43 and destroyed at 0:49, the hunt on at 1:00, the lifted Barracks found during the hunt at 1:22, Victory |
 | ThreatFlag expiry / M3 flag check | `test_threat_flags.py` / `test_m3_checks.py` | 20/20 / 13/13 |
