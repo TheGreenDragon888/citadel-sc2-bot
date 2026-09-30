@@ -322,8 +322,8 @@ class Army:
                 # static defense covering the target, and the units around it, fight for it
                 # (M4 cannon_rush Ultralove: the Cannons around a Pylon near our base were just
                 # outside the "near our bases" radius, and the squad died walking in)
+                # (a Cannon target is part of its own guard)
                 guard = self.engagement.static_defense_near(found.position) + self.engagement.enemies_near([found.position])
-                guard = [g for g in guard if g.tag != found.tag]
                 level = self.engagement.level(defenders, guard, ENEMY_DEFENDS) if guard else int(EngagementResult.VICTORY_EMPHATIC)
                 self.home_level = level
                 if level >= CLEAR_STATIC_LEVEL:
