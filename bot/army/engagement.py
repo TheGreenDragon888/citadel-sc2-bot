@@ -72,10 +72,14 @@ def is_fighter(unit: Unit) -> bool:
 
 
 def is_static_defense(structure: Unit) -> bool:
-    """A finished enemy static defense structure that fights (a Cannon only while powered)."""
+    """A finished enemy static defense structure that fights (a visible Cannon only while powered;
+    a snapshot in the fog doesn't report power, so it counts as powered: M4 cannon_rush Ultralove,
+    where 8 fogged Cannons were left out and 4 units read level 10 against them)."""
     if structure.type_id not in STATIC_DEFENSE or not structure.is_ready:
         return False
-    return structure.is_powered if structure.type_id == UnitTypeId.PHOTONCANNON else True
+    if structure.type_id == UnitTypeId.PHOTONCANNON and structure.is_visible:
+        return structure.is_powered
+    return True
 
 
 def level_from_sim(won: bool, health_left: float, own_health: float, enemy_health: float) -> int:

@@ -324,8 +324,8 @@ class Army:
                 # outside the "near our bases" radius, and the squad died walking in)
                 guard = self.engagement.static_defense_near(found.position) + self.engagement.enemies_near([found.position])
                 guard = [g for g in guard if g.tag != found.tag]
-                level = self.engagement.level(defenders, guard, ENEMY_DEFENDS) if guard else EngagementResult.VICTORY_EMPHATIC
-                self.home_level = int(level)
+                level = self.engagement.level(defenders, guard, ENEMY_DEFENDS) if guard else int(EngagementResult.VICTORY_EMPHATIC)
+                self.home_level = level
                 if level >= CLEAR_STATIC_LEVEL:
                     self.defend_target, state = found.position, f"clearing {found.type_id.name} (level {level})"
                 else:
