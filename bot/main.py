@@ -23,10 +23,10 @@ from bot.defense.wall_fallback import WallFallback
 from bot.defense.worker_defense import WorkerDefense
 from bot.intel.ares_bridge import AresBridge
 from bot.intel.detectors import Detectors
-from bot.intel.scout_planner import NaturalScout
+from bot.intel.scout_planner import ScoutPlanner
 from bot.intel.threat_flags import FlagStore, Threat
 from bot.macro.build_executor import BuildExecutor
-from bot.macro.economy import Economy, ReserveForPending
+from bot.macro.economy import Economy, KeepBank, ReserveForPending
 from bot.macro.production import Production
 from bot.macro.supply import supply_behavior
 from bot.ruleset import detect_ruleset
@@ -59,7 +59,7 @@ class CitadelBot(AresBot):
         self.planner: Optional[DefensePlanner] = None
         self.bridge: Optional[AresBridge] = None
         self.detectors: Optional[Detectors] = None
-        self.nat_scout: Optional[NaturalScout] = None
+        self.scouts: Optional[ScoutPlanner] = None  # M3: §4.3 scouting schedule
         self.static_defense: Optional[StaticDefense] = None
         self.worker_defense: Optional[WorkerDefense] = None
 
@@ -86,12 +86,12 @@ class CitadelBot(AresBot):
         self.planner = DefensePlanner(self, self.flags)
         self.bridge = AresBridge(self, self.flags, self.planner.override_for)
         self.detectors = Detectors(self, self.flags, self.planner.override_for)
-        self.nat_scout = NaturalScout(self, self.detectors)
+        self.telemetry = Telemetry(self)
+        self.scouts = ScoutPlanner(self, self.detectors, self.flags, self.telemetry)
         self.static_defense = StaticDefense(self, self.planner)
         self.worker_defense = WorkerDefense(self, self.planner)
         self.economy = Economy(self)
         self.executor = BuildExecutor(self, self.opener, self.planner)
-        self.telemetry = Telemetry(self)
         self.production = Production(self)
         self.army = BasicArmy(self)
 
@@ -123,7 +123,8 @@ class CitadelBot(AresBot):
             self.flags.expire(self.time, self.detectors.expiry_context(self.supply_army))
             self.planner.update()
         plan = self.planner.plan
-        self.nat_scout.update()
+        if iteration % MACRO_EVERY_STEPS == 0:
+            self.scouts.step()  # §3 step 4
         self.worker_defense.step(plan)  # §3 step 5: every step
 
         if iteration % MACRO_EVERY_STEPS == 0:
@@ -145,7 +146,8 @@ class CitadelBot(AresBot):
 
         if iteration % ARMY_EVERY_STEPS == 0:
             holder = self.wall.step(hold_gap=plan.hold_wall_gap)
-            self.army.excluded_tags = {holder} if holder is not None else set()
+            # the wall-gap holder and scouts are controlled elsewhere
+            self.army.excluded_tags = ({holder} if holder is not None else set()) | self.scouts.tags
             plan.pinned_unit_tags = self.army.excluded_tags | set(self.worker_defense.jobs)
             self.army.hold_point = plan.army_hold_point
             self.army.leash = plan.army_leash
@@ -159,8 +161,8 @@ class CitadelBot(AresBot):
         Pylon timing and a prioritised expansion, that is still waiting for money), so the
         order below is the spending priority: supply, the DefensePlan's structures and units
         (Defense > Economy, §3), probes, a Nexus a probe is waiting to build, timed opener
-        steps, gas, bases, then army production (skipped while a timed step is waiting for
-        money)."""
+        steps, gas, bases, a mineral bank the DefensePlan asks for, then army production
+        (skipped while a timed step is waiting for money)."""
         executor = self.executor
         plan = MacroPlan()
         plan.add(supply_behavior(self, other_bases=not self.planner.plan.hold_wall_gap))
@@ -173,6 +175,8 @@ class CitadelBot(AresBot):
         plan.add(self.economy.gas_behavior(executor.gas_target()))
         bases = executor.bases_target()
         plan.add(self.economy.expansion_behavior(bases, prioritize=not executor.finished))
+        if self.planner.plan.bank_minerals:
+            plan.add(KeepBank(self.planner.plan.bank_minerals))
         if not executor.waiting_for_money:
             for behavior in self.production.behaviors(
                 schedule_finished=executor.finished, plan=self.planner.plan
@@ -190,6 +194,8 @@ class CitadelBot(AresBot):
         await super(CitadelBot, self).on_unit_destroyed(unit_tag)
         if self.army is not None:
             self.army.forget(unit_tag)
+        if self.scouts is not None:
+            self.scouts.on_unit_destroyed(unit_tag)
         if self.flags is not None:
             self.flags.on_unit_destroyed(unit_tag, self.time)  # §5 expiry rule (a)
         if own is not None and self.telemetry is not None:

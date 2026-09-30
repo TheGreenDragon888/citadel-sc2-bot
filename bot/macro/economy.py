@@ -61,6 +61,17 @@ class ReserveForPending:
 
 
 @dataclass
+class KeepBank:
+    """Holds the rest of a MacroPlan while fewer than `minerals` are banked (§4.4 row 3 "save 150
+    minerals" for the Forge-first flag)."""
+
+    minerals: int
+
+    def execute(self, ai: "AresBot", config: dict, mediator) -> bool:
+        return ai.minerals < self.minerals
+
+
+@dataclass
 class ReserveForStructure:
     """Holds the rest of a MacroPlan while `type_id` can't be afforded (the caller adds it only
     while that structure is wanted and not yet ordered)."""

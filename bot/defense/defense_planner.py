@@ -20,6 +20,10 @@ Plans (§4.2):
   main; hold the ramp top; Adepts/Zealots (Stalkers vs Reapers); chrono Gateways.
 - ONE_BASE_ALLIN: Batteries at the natural (main if none); all Gateways producing; no 3rd Nexus,
   no Forge; hold the natural; Immortals first vs Roaches.
+- UNKNOWN_AGGRO (§4.4 row 15, M3): one more Battery at the natural (main if none), no 3rd Nexus;
+  the scout planner re-scouts with the first Adept/Stalker.
+- CANNON_RUSH from §4.4 row 3's Forge-first flag alone (M3): `FORGE_FIRST_BANK` minerals stay
+  banked after the opener; the scout planner sends the patrol probe.
 """
 
 from dataclasses import dataclass, field
@@ -37,6 +41,7 @@ from bot.constants import (
     CANNON_SIEGE_RESERVE_UNITS,
     DEFENSE_TECH_AFTER_SUPPLY,
     EXPANSION_RETRY_S,
+    FORGE_FIRST_BANK,
     HOLD_SHIFT_STEP,
     HOLD_SHIFT_STEPS,
     NATURAL_HOLD_OFFSET,
@@ -53,6 +58,7 @@ from bot.constants import (
     PROXY_MAIN_BATTERIES,
     PROXY_UNITS_BEFORE_EXPAND,
     RAMP_HOLD_OFFSET,
+    UNKNOWN_AGGRO_EXTRA_BATTERIES,
     WORKER_RUSH_KEEP_MINING,
 )
 from bot.intel.threat_flags import Evidence, FlagStore, Threat
@@ -67,6 +73,7 @@ PLAN_ORDER: tuple[Threat, ...] = (
     Threat.POOL_12,
     Threat.PROXY,
     Threat.ONE_BASE_ALLIN,
+    Threat.UNKNOWN_AGGRO,  # last: its Battery is one more than the others ask for
 )
 # units that count toward "N units out" (§4.2); Observers and Oracles don't hold a ramp
 GROUND_ARMY: frozenset[UnitTypeId] = frozenset(
@@ -106,6 +113,7 @@ class DefensePlan:
     # other spending waits (probes included) while fewer Gateway units than this exist and the
     # first priority unit can be made but not yet afforded
     reserve_units: int = 0
+    bank_minerals: int = 0  # after the opener, army production waits until this much is banked
 
     def summary(self) -> str:
         if not self.active:
@@ -134,6 +142,8 @@ class DefensePlan:
             parts.append("cancel natural")
         if self.hold_tech:
             parts.append("tech waits")
+        if self.bank_minerals:
+            parts.append(f"bank={self.bank_minerals}")
         return " ".join(parts)
 
 
@@ -264,6 +274,9 @@ class DefensePlanner:
         plan.probe_pull = max(plan.probe_pull, len(self.bot.workers) - WORKER_RUSH_KEEP_MINING)
 
     def _plan_cannon_rush(self, plan: DefensePlan, army: list) -> None:
+        sources = {f.source for f in self.flags.active() if f.threat == Threat.CANNON_RUSH}
+        if sources == {"forge_first"}:
+            plan.bank_minerals = max(plan.bank_minerals, FORGE_FIRST_BANK)  # §4.4 row 3
         if self.completed_enemy_cannons():
             plan.unit_priority += [UnitTypeId.IMMORTAL, UnitTypeId.STALKER]
             nat = self.bot.mediator.get_own_nat
@@ -361,3 +374,10 @@ class DefensePlanner:
         if plan.army_hold_point is None:
             plan.army_hold_point = self._natural_hold() if at_natural else self._ramp_hold()
             plan.army_leash = None if at_natural else ARMY_HOLD_LEASH
+
+    def _plan_unknown_aggro(self, plan: DefensePlan, army: list) -> None:
+        """§4.4 row 15: "Assume the worst: +1 Battery, delay the 3rd"."""
+        at_natural = self._our_natural() is not None and not plan.hold_wall_gap
+        where = "natural" if at_natural else "main"
+        plan.batteries_needed[where] += UNKNOWN_AGGRO_EXTRA_BATTERIES
+        plan.allow_third = False

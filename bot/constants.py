@@ -460,10 +460,9 @@ NO_NATURAL_MIN_PRODUCTION: int = 3
 NO_NATURAL_SEEN_GRACE_S: float = 10.0  # the natural counts as seen at the deadline if seen this recently
 NO_NATURAL_GIVE_UP_S: float = 30.0  # natural still unseen this long after the deadline: skip the check
 NATURAL_TOWNHALL_RADIUS: float = 6.0  # an enemy townhall this close to their natural spot
-# Natural scout (§4.3 probe route, M2 part): after ares's scout circles the enemy main, it
-# watches the enemy natural from this far toward the map centre until the deadline above
+# The main probe watches the enemy natural from this far toward the map centre until the
+# no-natural deadline above (§4.3 probe route; user decision in M2)
 NAT_SCOUT_STANDOFF: float = 7.0
-NAT_SCOUT_RETREAT_HP: float = 0.5  # HP+shield fraction: below this the scout goes home
 
 # §4.2 defense plans (bot/defense/)
 WORKER_RUSH_KEEP_MINING: int = 2  # §4.2: pull all probes except 2
@@ -554,3 +553,55 @@ M3_EXPECTED_FLAGS: dict[str, tuple[str, float, Tuple[str, ...]]] = {
 }
 M3_FLAG_RATE: float = 0.8  # correct flag in >= 80% of each bot's games
 M3_SCOUT_SAFE_RATE: float = 0.7  # no scout lost before 4:00 in >= 70% of games
+
+# §4.3 scouts: every scout goes home below this HP+shield fraction
+SCOUT_RETREAT_HP: float = 0.5
+# a scout waypoint that isn't in vision this long after the scout set off for it is skipped
+SCOUT_WAYPOINT_TIMEOUT_S: float = 25.0
+# a move order to within this of the scout's current move target is not re-issued (§6 APM)
+SCOUT_REORDER_DIST: float = 1.0
+# a probe scout is home (and goes back to mining) this close to our start location, or to one of
+# our townhalls; mining orders take it through our own wall units (Citadel)
+SCOUT_HOME_RADIUS: float = 25.0
+SCOUT_HOME_TOWNHALL_RADIUS: float = 12.0
+# Main probe (§4.3 "0:40 or Gateway placement"): the opener's `worker_scout` probe is taken over at
+# once; with no such probe by this time, the planner picks one itself
+MAIN_PROBE_FALLBACK_S: float = 45.0
+# its lap around the enemy main: this many directions, at the first of these distances from the
+# enemy start location that is pathable and on the main's level
+MAIN_LAP_POINTS: int = 8
+MAIN_LAP_RADII: Tuple[float, ...] = (11.0, 14.0, 8.0, 17.0)
+# a main probe still outside the enemy main this long after setting off (a wall, e.g. Terran
+# depots) laps from where it is; the lap ends after MAIN_LAP_MAX_S either way
+MAIN_PROBE_TO_MAIN_S: float = 75.0
+MAIN_LAP_MAX_S: float = 50.0
+# a main probe that came home (or died) before the enemy main was scouted is replaced this many
+# times, up to this game time, once no rush flag is active (Citadel)
+MAIN_PROBE_RETRIES: int = 1
+MAIN_PROBE_RETRY_UNTIL_S: float = 150.0
+# §4.3 "return through the likely proxy spots (map-analyzer regions within 40 of our natural)":
+# region centres, expansion locations and a ring around our natural, at least this far apart
+PROXY_SPOT_RADIUS: float = 40.0
+PROXY_SPOT_MIN_FROM_NATURAL: float = 10.0
+PROXY_SPOT_SPACING: float = 12.0
+PROXY_RING_RADIUS: float = 28.0
+PROXY_RING_POINTS: int = 8
+# §4.3 second probe: sent between these times if the enemy main showed fewer structures than
+# expected (no Barracks/Gateway there, T/P), or when row 3's Forge-first flag is raised; it
+# patrols our natural perimeter and main edge, then goes home
+PATROL_FROM_S: float = 60.0
+PATROL_START_UNTIL_S: float = 100.0
+PATROL_FORGE_UNTIL_S: float = 180.0  # Forge-first (§4.4 row 3) starts one until then
+PATROL_NATURAL_RADIUS: float = 12.0
+PATROL_MAIN_EDGE: float = 16.0  # main-edge points this far from our start location
+PATROL_POINTS: int = 6  # per ring
+PATROL_LOOPS: int = 2
+
+# §4.4 row 3 "at 1:30": an enemy Forge with no Gateway in the Protoss main raises a weak
+# CANNON_RUSH once their natural was seen without a Nexus, or from this time without seeing it;
+# the patrol probe goes out and this many minerals stay banked
+FORGE_FIRST_UNTIL_S: float = 90.0
+FORGE_FIRST_BANK: int = 150
+# §4.4 row 15: UNKNOWN_AGGRO lasts until the enemy main is scouted, or until this time (Citadel)
+UNKNOWN_AGGRO_PHASE_END_S: float = 300.0
+UNKNOWN_AGGRO_EXTRA_BATTERIES: int = 1  # "+1 Battery"
