@@ -63,33 +63,37 @@ To stop batches, use a pattern that can't match your own shell, e.g.
 `pkill -f "opponent twelve_poo[l]"`, in a command of its own (nothing else in that command may
 contain the matched text), then kill the orphaned `SC2_x64` clients (parent PID 1).
 
-## M3 checks on the final code (95ee868)
+## M4 checks on the final code (d20f15b)
 
 | Check | Result |
 |---|---|
-| M3 acceptance, 4 cheese bots × 10 (seed 100) | correct flag 40/40; no scout lost before 4:00 40/40; wins 10, 10, 9, 10 (M2 check passes) |
-| M3 scout losses, built-in Harder × 21 | no scout lost before 4:00 21/21; 15/21 wins (losses 12:52-18:57) |
-| M1 regression, Hard × 10 (T/Z/P/Random) | 10/10 wins, 0 crashes; 44+ probes at 6:00 in 8/10 (41 and 42 vs Pool-first Zerg with POOL_12 holding the natural's timing) |
-| `test_threat_flags.py` / `test_m3_checks.py` | 20/20 / 13/13 |
-| `test_scout_abilities.py` | shade, Hallucination, Pulsar Beam, detection as in `VERIFY_NOTES.md` M3 findings |
-| Ladder zip | `publish/Citadel.zip`, 368 files, 5.4 MB, `run.py`/`ladder.py`/`config.yml` at the top level |
+| M4 acceptance, VeryHard × 10 per race | Terran 10/10, Zerg 9/10, Protoss 10/10 (≥ 7 each): PASS; 0 crashes |
+| M2/M3 regression, 4 cheese bots × 10 (seed 100) | cannon rush 8/10 wins (1 tie, 1 loss), correct flag 10/10, no scout lost 10/10; worker rush, 12-pool, proxy: rerunning after a container restart (all games won before it: 8/8, 7/7, 8/8) |
+| M1 regression, Hard × 10 (T/Z/P/Random) | rerunning after a container restart (2/2 won before it) |
+| `test_attack_decision.py` / `test_threat_flags.py` / `test_m3_checks.py` | 16/16 / 20/20 / 13/13 |
+| `test_engagement.py` / `test_endgame.py` | PASS / PASS |
+| Ladder zip | `publish/Citadel.zip`, 378 files, 5.5 MB, `run.py`/`ladder.py`/`config.yml` at the top level, `sc2_helper` included |
 
-Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M3 acceptance evidence".
+Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M4 acceptance evidence".
 
-## Carry-forward for M4 (squads, EngagementResult gates, retreat hysteresis, end-game)
+## Carry-forward for M5 (counterattack, opponent memory, telemetry, step guard)
 
-- **What exists.** `bot/army/basic_army.py` is M1/M2 scaffolding with supply-count gates
-  (`ARMY_ATTACK_SUPPLY`, `ARMY_ENGAGE_RATIO`, `ARMY_SUPPLY_PER_CANNON`, ...). M4 replaces them
-  with `mediator.can_win_fight` and the §4.5.2 thresholds; `docs/VERIFY_NOTES.md` §11.3 has the
-  `EngagementResult` members, the over-rating of Protoss wins, and the static-defence findings
-  (`timing_adjust=False` or the penalty).
-- **Units other modules control.** `CitadelBot` passes `army.excluded_tags` = the wall-gap holder
-  plus `scouts.tags`; the defense plan's `army_hold_point`/`army_leash` and `pinned_unit_tags`
-  must keep working with squads. Scouts return unit tags to the army when their task ends.
-- **Observers.** From 6:00 one free Observer is left to the army (`BasicArmy` moves free
-  Observers with its centre); M4's squads should keep one with the ATTACK squad (§4.3).
-- **Remembered enemies.** The scouts feed ares's unit memory (ghosts for 30 s, `is_memory`) and the
-  army cache; §4.5.2's inputs use those (§11.2).
+- **Squads.** `Role.HARASS` exists for the §4.6 counterattack squad and nothing is assigned to it
+  yet. `Army.busy_tags` keeps the scout planner off the ATTACK/REINFORCE squads; a HARASS squad
+  should be added there. The defense plan's pinned units never reach a squad (`held_tags`).
+- **Fight levels.** `Engagement.level(own, enemy, defender)` is the one entry point (our
+  HP+shields, defender set, 0-10); `attack_inputs(center, target)` builds the §4.5.2 enemy side.
+  §4.6's `COUNTER_START`/`COUNTER_ABORT` are not in `bot/constants.py` yet.
+- **Interactions M5 must keep.** `AttackDecision.recall` (no relaunch wait) is how defense pulls
+  the main attack home; §4.6 says the counterattack never runs during a main attack and is merged
+  into the ATTACK squad when the attack gate opens.
+- **Enemy army value.** `Army._value_ratio` uses ares's army cache (every enemy unit seen, until
+  it dies); §4.6's "seen within the last 15 s" needs `unit.age` / `is_memory` on top.
+- **Telemetry.** `Telemetry` now keeps army value lost/killed, per-step times (p99) and
+  `Army.decisions` (every launch/retreat/recall with its level); M5 writes them to `./data/logs`.
+- **Step time.** Over the 30 acceptance games (4 in parallel on 4 cores): mean 3.4-10.9 ms, p99
+  over 40 ms in 2 games (42, 55), max step 49-411 ms; a cheese game run with 6 clients on 4 cores
+  had a 1.3 s step. §6's 200 ms guard (skip non-critical modules for 16 steps) is M5's.
 
 ## Open question for the user
 
@@ -102,31 +106,38 @@ Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M3 acceptance evidence
   the Pool on entering the enemy main, so POOL_12 was raised by 1:08-1:13 in all ten M3 12-pool
   games, before the opener's Nexus; the question now only matters for a later-scouted 12-pool.
 
-## Known issues (not blocking M3)
+## Known issues (not blocking M4)
 
+- **Cannon rush 8/10 (M3: 10/10).** The Ultralove natural variant tied at 60:00 once and the Pylon
+  main variant lost once in the final run: in both the first few units were lost near the rush
+  Cannons before the army grew (the Ultralove seed won on 3d230e1; the Pylon one is the "Cannon
+  finishes next to our main Nexus" pattern below). M2's bar (≥ 8/10) still holds.
+- **Late-game Zerg.** The one VeryHard Zerg loss went to 25:33 against Mutalisks, Ultralisks,
+  Brood Lords, Swarm Hosts and Corruptors: the §4.5.1 air switch (Stalker share up vs air) isn't
+  built and the vs-Z mix has no Archons (High Templar are cut). The army was recalled home five
+  times by runbys in that game.
+- **Launch inputs are local.** §4.5.2's enemy side is what is near the squad or its target, so a
+  launch reads the target's defenders only; an enemy army elsewhere is met on the way and the
+  retreat rules handle it (first attacks lost up to half the squad in a few intermediate games).
 - A probe scout coming home while rush Cannons cover the way waits outside their reach for as long
   as they stand; two were caught there by the cannon bot's Stalkers after 5:40.
 - The PvT Adept shade sometimes can't reach the enemy ramp bottom safely (Bunker/Marines) and comes
   back after `UNIT_SCOUT_MAX_S` without casting.
-- Probe expansion checks from 4:30 cost a mining probe per trip and sometimes the probe (15 lost in
-  the 21 built-in Harder games, all after 5:00); an Observer is used when one is free.
+- Probe expansion checks from 4:30 cost a mining probe per trip and sometimes the probe; an
+  Observer is used when one is free.
 - ares's unit-based flags (marauder rush, "went reaper") still raise short ONE_BASE_ALLIN/PROXY
-  flags vs the built-in AI (seen twice in the M1 regression, each gone within a minute).
+  flags vs the built-in AI (VeryHard Terran on Torches/Ultralove raised PROXY + ONE_BASE_ALLIN at
+  1:13 and held its natural; the games were won).
 - AIR_HARASS, DT, MACRO, TIMING_ATTACK detectors (§4.4 rows 9, 12-14, 16) are not in any
-  milestone yet (user decision for M3: scouting rows 3 and 15 only); the scouts' sightings are in
-  ares's memory and `enemy_structures`.
+  milestone yet; the scouts' sightings are in ares's memory and `enemy_structures`.
 
 ## Known issues from M2
 
 - Cannon rush, main variant, Persephone (opponent seed 106): the rusher's first Cannon finishes
   next to our main Nexus by 2:00 and six more follow; §4.2 stops the probe attack once a Cannon
   completes, and the army never gets going (the Cannons also cover a Gateway). Lost in two of
-  three runs.
-- M1 Hard game 9 (Ultralove vs Terran) was lost twice on intermediate commits: the army sat idle
-  in "attack" state for minutes while a Terran tank/Banshee/Raven contain picked at our bases.
-  It won on the final commit and a debug replay of the matchup (the AI's build is random), so
-  the cause is unconfirmed. `BasicArmy` does not skip lifted (flying) Terran buildings as
-  targets, which ground units can't hit; M4 replaces this army code.
+  three M2 runs; in M4 lost once (3d230e1) and won in the final run, where the same pattern lost
+  the Pylon main-variant game.
 - §4.4's proxy rules raise PROXY vs some built-in AI builds (no production at 1:30, or few
   workers seen by a partial scout); that costs a little economy. M3's scouting should see more.
 
@@ -136,8 +147,6 @@ Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M3 acceptance evidence
   the proxy one could use the same.
 - With Zerglings loitering near our natural, POOL_12 stays active on its lings source and ares's
   expansion can stall: a Persephone 12-pool game was still on one base with 56 probes at 10:00
-  (it had 131 supply and would attack at the M1 150-supply gate).
-- `BasicArmy`'s engage rules count supply (`ARMY_SUPPLY_PER_CANNON`, `ARMY_ENGAGE_RATIO`, ...);
-  M4's `EngagementResult` gates should replace them.
+  (it had 131 supply).
 - The scripted 12-pool bot never expands or drones past 13, so it is harsher than most
   12-pools; the cannon bot builds up to 8 Cannons.
