@@ -605,3 +605,53 @@ FORGE_FIRST_BANK: int = 150
 # §4.4 row 15: UNKNOWN_AGGRO lasts until the enemy main is scouted, or until this time (Citadel)
 UNKNOWN_AGGRO_PHASE_END_S: float = 300.0
 UNKNOWN_AGGRO_EXTRA_BATTERIES: int = 1  # "+1 Battery"
+
+# §4.3 per-matchup unit scouts (scout_planner.py). Combat units are only taken while none of the
+# M2 defense threats is active (Defense > Scouting, §3), except UNKNOWN_AGGRO's own re-scout
+UNIT_SCOUT_HOME_RADIUS: float = 15.0  # a unit scout is back (the army takes it) this close to our natural or start
+# Adept shade: PvT at Core + ~40 s, PvZ at ~3:00. The Adept walks to the bottom of the enemy main
+# ramp and shades up into the main; the shade is cancelled before it ends (it lives ~7 s and the
+# Adept teleports to it when it does, docs/VERIFY_NOTES.md M3 findings)
+ADEPT_SCOUT_AFTER_CORE_S: float = 40.0
+ADEPT_SCOUT_PVZ_S: float = 180.0
+SHADE_CAST_DIST: float = 3.0  # from the enemy ramp bottom ...
+SHADE_CAST_MAX_DIST: float = 14.0  # ... or from this close once the Adept is in danger
+SHADE_CANCEL_S: float = 6.0
+SHADE_WAIT_S: float = 15.0  # at the ramp, wait this long for the shade to come off cooldown
+# PvP Stalker poke at Core + ~30 s: looks at the enemy natural, then comes back
+STALKER_POKE_AFTER_CORE_S: float = 30.0
+# PvZ Oracle at ~3:45 (only if the opener made one): over the enemy natural, main and third
+ORACLE_SCOUT_S: float = 225.0
+ORACLE_REVELATION_MIN_UNITS: int = 4  # Revelation on a clump of at least this many enemy units ...
+ORACLE_CLUMP_RADIUS: float = 5.0  # ... within this of one of them
+ORACLE_DRONE_SAFE_RADIUS: float = 10.0  # §4.3: kill Drones only if no Queen or Spore is within 10
+ORACLE_DRONE_RANGE: float = 8.0  # Drones this close to the Oracle
+ORACLE_BEAM_MIN_ENERGY: float = 50.0  # the beam costs 25 to turn on, then drains (VERIFY_NOTES M3)
+ORACLE_HARASS_MAX_S: float = 12.0
+# Observers: PvT Robo + ~30 s to the path between the enemy natural and ours; PvP Robo done to
+# outside the enemy natural choke; a 2nd one at home (PvP) once a Twilight Council is seen
+OBSERVER_AFTER_ROBO_S: float = 30.0
+OBSERVER_PATH_FRACTION: float = 0.35  # PvT post: this far from the enemy natural toward ours
+OBSERVER_CHOKE_STANDOFF: float = 14.0  # PvP post: this far from the enemy natural toward ours
+OBSERVER_DETECTED_BACKOFF: float = 6.0  # a detected Observer moves this far back toward our natural
+OBSERVER_POST_UNTIL_S: float = 360.0  # §4.3 "from 6:00 travels with the army" (BasicArmy moves free Observers with it)
+HOME_OBSERVER_OFFSET: float = 8.0  # home Observer: our natural moved this far toward our main
+# §4.3 "4:30, then every 60 s: visit each unscouted enemy expansion location" (Observer, else probe)
+EXPANSION_CHECK_FROM_S: float = 270.0
+EXPANSION_CHECK_EVERY_S: float = 60.0
+EXPANSION_FRESH_S: float = 60.0  # a location in vision this recently is not visited
+EXPANSION_CHECK_MAX: int = 5  # locations per trip
+# §5 re-scout trigger: the enemy main unseen this long after MAIN_STALE_FROM_S; stale evidence of
+# a STRUCTURE flag may go to a probe only this close to our natural (else an Observer)
+MAIN_STALE_S: float = 60.0
+MAIN_STALE_FROM_S: float = 180.0
+RESCOUT_PROBE_RADIUS: float = 45.0
+# §4.3 hallucinated Phoenix, only with a Sentry that already exists (user decision): at these
+# times per enemy race, and whenever the enemy main has been unseen for HALLUCINATION_STALE_S
+# after HALLUCINATION_FROM_S (PvT row: 90 s)
+HALLUCINATION_AT_S: dict[str, float] = {"Protoss": 270.0, "Terran": 330.0, "Zerg": 390.0}
+HALLUCINATION_FROM_S: float = 240.0
+HALLUCINATION_STALE_S: dict[str, float] = {"Terran": 90.0}
+HALLUCINATION_STALE_DEFAULT_S: float = 60.0
+HALLUCINATION_MIN_GAP_S: float = 45.0  # one Phoenix at a time (they live ~43 s)
+PHOENIX_AWAY_DIST: float = 20.0  # after the natural, the Phoenix flies this far back toward our base

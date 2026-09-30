@@ -84,6 +84,8 @@ class ExpiryContext:
     visible_enemy_tags: set[int]
     # threat -> reason, for threats whose §5 phase rule says they no longer matter
     phase_over: dict[Threat, str]
+    # (threat, source) -> reason: a phase rule for one detector's flag only (M3)
+    source_over: dict[tuple[Threat, str], str] = field(default_factory=dict)
 
 
 @dataclass
@@ -109,6 +111,9 @@ class FlagStore:
         self.history: list[FlagRecord] = []
         self._records: dict[tuple[Threat, str], FlagRecord] = {}
         self._rescout_logged: set[tuple[Threat, str]] = set()
+        # §5 re-scout trigger: STRUCTURE flags whose evidence positions have gone unseen for
+        # RESCOUT_STALE_S; the scout planner reads this (M3)
+        self.stale: dict[tuple[Threat, str], list[Position]] = {}
 
     # -- raising -------------------------------------------------------------------------------
 
@@ -226,21 +231,27 @@ class FlagStore:
         if flag.evidence_positions:
             if all(ctx.is_visible(p) for p in flag.evidence_positions):
                 flag.positions_seen_at = now
+                self.stale.pop(flag.key, None)
                 if flag.evidence_tags and not (flag.evidence_tags & ctx.visible_enemy_tags):
                     return "rule (b): evidence positions in vision, structures gone"
-            elif now - flag.positions_seen_at > RESCOUT_STALE_S and flag.key not in self._rescout_logged:
-                self._rescout_logged.add(flag.key)
-                logger.info(
-                    f"RESCOUT wanted: {flag.threat.name} ({flag.source}) evidence not seen since "
-                    f"{_mmss(flag.positions_seen_at)} (M3's scout planner acts on this)"
-                )
+            elif now - flag.positions_seen_at > RESCOUT_STALE_S:
+                self.stale[flag.key] = list(flag.evidence_positions)
+                if flag.key not in self._rescout_logged:
+                    self._rescout_logged.add(flag.key)
+                    logger.info(
+                        f"RESCOUT wanted: {flag.threat.name} ({flag.source}) evidence not seen since "
+                        f"{_mmss(flag.positions_seen_at)}"
+                    )
         if flag.threat in ctx.phase_over:
             return f"rule (c): {ctx.phase_over[flag.threat]}"
+        if flag.key in ctx.source_over:
+            return f"rule (c): {ctx.source_over[flag.key]}"
         return None
 
     def _expire(self, key: tuple[Threat, str], now: float, reason: str) -> None:
         flag = self.flags.pop(key)
         self._rescout_logged.discard(key)
+        self.stale.pop(key, None)
         record = self._records.pop(key, None)
         if record is not None:
             record.expired_at = now

@@ -119,6 +119,7 @@ class Detectors:
         self._main_samples: Optional[list[Point2]] = None
         self._main_seen: set[int] = set()
         self.main_scouted_at: Optional[float] = None
+        self.main_seen_at: Optional[float] = None  # last time the enemy start location was in vision (M3)
         self.enemy_workers_in_main: set[int] = set()
         self._workers_last_added_at: float = 0.0  # when the last new one was seen
         # created in on_start at loop 0: both sides start with as many workers as we have now
@@ -200,6 +201,8 @@ class Detectors:
         enemy_main: Point2 = bot.enemy_start_locations[0]
         if self._main_samples is None:
             self._main_samples = self._sample_main(enemy_main)
+        if bot.is_visible(enemy_main):
+            self.main_seen_at = now
         if self.main_scouted_at is None:
             for i, p in enumerate(self._main_samples):
                 if i not in self._main_seen and bot.is_visible(p):
@@ -555,8 +558,13 @@ class Detectors:
                 phase[Threat.UNKNOWN_AGGRO] = f"enemy main scouted at {_mmss(self.main_scouted_at)}"
             elif now > UNKNOWN_AGGRO_PHASE_END_S:
                 phase[Threat.UNKNOWN_AGGRO] = f"time > {_mmss(UNKNOWN_AGGRO_PHASE_END_S)}"
+        source_over: dict[tuple[Threat, str], str] = {}
+        if self.natural_townhall_seen_at is not None:
+            # §4.4 row 3: "or a Forge-first expand if the natural exists" (M3)
+            source_over[(Threat.CANNON_RUSH, "forge_first")] = "enemy natural townhall seen: a Forge-first expand"
         return ExpiryContext(
             is_visible=lambda p: bot.is_visible(Point2(p)),
             visible_enemy_tags={s.tag for s in bot.enemy_structures if s.is_visible},
             phase_over=phase,
+            source_over=source_over,
         )

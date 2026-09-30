@@ -124,7 +124,7 @@ class CitadelBot(AresBot):
             self.planner.update()
         plan = self.planner.plan
         if iteration % MACRO_EVERY_STEPS == 0:
-            self.scouts.step()  # §3 step 4
+            self.scouts.step(pinned=self.army.excluded_tags | plan.pinned_unit_tags)  # §3 step 4
         self.worker_defense.step(plan)  # §3 step 5: every step
 
         if iteration % MACRO_EVERY_STEPS == 0:
