@@ -665,3 +665,6 @@ SCOUT_STATIC_STEP: float = 4.0  # a scout inside that margin moves this far stra
 # (M3: 12-pool test games started the 3:00 PvZ Adept shade at 9:48-12:42)
 UNIT_SCOUT_LATE_S: float = 90.0
 UNIT_SCOUT_MAX_S: float = 120.0
+# a scout steps out of grid danger (KeepUnitSafe) only when hurt or when an enemy that isn't a
+# worker and can hit it is this close (M3: mining workers kept a probe out of an enemy main)
+SCOUT_DANGER_RADIUS: float = 12.0

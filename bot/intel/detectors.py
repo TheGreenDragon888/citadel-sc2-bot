@@ -225,6 +225,15 @@ class Detectors:
                 logger.info(f"SCOUT enemy natural townhall seen at {bot.time_formatted}")
             self.natural_townhall_seen_at = now
 
+    def unseen_main_points(self) -> list[Point2]:
+        """Enemy-main sample points not yet in vision (empty once the main counts as scouted)."""
+        if self.main_scouted_at is not None or self._main_samples is None:
+            return []
+        return [p for i, p in enumerate(self._main_samples) if i not in self._main_seen]
+
+    def main_seen_fraction(self) -> float:
+        return len(self._main_seen) / len(self._main_samples) if self._main_samples else 0.0
+
     def _sample_main(self, enemy_main: Point2) -> list[Point2]:
         bot = self.bot
         z = bot.get_terrain_z_height(enemy_main)

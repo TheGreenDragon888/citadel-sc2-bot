@@ -26,6 +26,7 @@ Combat and support units end their task back at our natural, where the army take
 from typing import TYPE_CHECKING, Iterable, Optional
 
 from ares.behaviors.combat.individual import KeepUnitSafe
+from ares.consts import WORKER_TYPES
 from loguru import logger
 from sc2.ids.ability_id import AbilityId
 from sc2.ids.unit_typeid import UnitTypeId
@@ -53,6 +54,7 @@ from bot.constants import (
     PATROL_LOOPS,
     SCOUT_HOME_RADIUS,
     SCOUT_HOME_TOWNHALL_RADIUS,
+    SCOUT_DANGER_RADIUS,
     SCOUT_REORDER_DIST,
     SCOUT_RETREAT_HP,
     SCOUT_STATIC_MARGIN,
@@ -120,10 +122,26 @@ class Mover:
         point = self.bot.mediator.find_path_next_point(start=unit.position, target=target, grid=self.grid(unit))
         self.move(unit, point)
 
+    def threatened(self, unit: Unit) -> bool:
+        """Hurt, or an enemy that isn't a worker and can hit it is near. Enemy workers add
+        ground-grid danger too (VERIFY_NOTES M3), and stepping away from every mining worker kept
+        a probe from seeing an enemy main in a Ley Lines test game."""
+        if unit.shield_health_percentage < 1:
+            return True
+        return any(
+            not e.is_memory and e.type_id not in WORKER_TYPES
+            and (e.can_attack_air if unit.is_flying else e.can_attack_ground)
+            and e.distance_to(unit) < SCOUT_DANGER_RADIUS
+            for e in self.bot.enemy_units
+        )
+
     def scout_to(self, unit: Unit, target: Point2) -> None:
         """Out of danger first, then toward `target`."""
-        if not self.avoid_static(unit) and not self.keep_safe(unit):
-            self.path_to(unit, target)
+        if self.avoid_static(unit):
+            return
+        if self.threatened(unit) and self.keep_safe(unit):
+            return
+        self.path_to(unit, target)
 
     def go_to(self, unit: Unit, target: Point2) -> None:
         """Toward `target` on a danger-aware path, but never into static defense's reach (a
@@ -272,8 +290,17 @@ class MainProbeTask(ProbeTask):
                 mover.path_to(unit, self.lap.points[0] if self.lap.points else bot.enemy_start_locations[0])
         if self.phase == "lap":
             point = self.lap.current(bot)
+            if point is None:
+                # an irregular main can leave too little of it seen for "scouted" (the proxy
+                # check needs it): the nearest sample points not yet seen (M3, a Ley Lines game)
+                unseen = planner.detectors.unseen_main_points()
+                point = min(unseen, key=lambda p: p.distance_to(unit), default=None)
             if point is None or Threat.PROXY in active or bot.time - self.lap_started_at > MAIN_LAP_MAX_S:
                 self.phase = "natural"
+                logger.info(
+                    f"SCOUT {self.name} {self.tag} lap done at {bot.time_formatted}: "
+                    f"{planner.detectors.main_seen_fraction():.0%} of the enemy main seen"
+                )
             else:
                 mover.scout_to(unit, point)
         if self.phase == "natural":
