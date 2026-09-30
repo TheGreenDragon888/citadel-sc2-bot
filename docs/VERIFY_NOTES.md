@@ -821,7 +821,17 @@ The losses:
   started"). When it finished, ares's Mining sent probes out through the wall gap to its
   minerals (gathering probes pass through units), and the lings killed them there.
 
-Other checks on the final code:
+Other checks on the final code (cb092d1):
+- M1 regression, `poetry run python scripts/run_matches.py --difficulty Hard --map all --total 10 --race Terran Zerg Protoss Random`:
+  10/10 wins, 0 crashes; 44+ probes at 6:00 in 9/10 games (median 57.5). The exception (41, Ley
+  Lines vs Hard Protoss) had PROXY raised by §4.4's "no Gateway in the main at 1:30", which
+  holds the expansion; the built-in AI sometimes has no production at 1:30.
+- One-base plan, `poetry run python scripts/run_matches.py --difficulty Harder --build Rush --race Terran Zerg Protoss --map all --total 3`:
+  2/3. Vs Terran, ONE_BASE_ALLIN was raised at 1:32 and 3:20 (ares marine rush) with PROXY
+  (3 SCVs seen next to 3 Barracks), the plan asked for 3 natural Batteries, no third and no
+  Forge, and the game was won. The Zerg rush was held (1 probe lost, 149 supply at 10:00);
+  that game was lost after 10:00 to Ultralisks and Brood Lords (M4's army work). Vs Protoss
+  no all-in was detected and the game was won.
 - `poetry run python scripts/test_threat_flags.py`: 20/20 passed.
 - Ladder zip: `poetry run python scripts/create_ladder_zip.py` builds `publish/Citadel.zip`
   (366 files) with `run.py`, `config.yml` and `ladder.py` at the top level.

@@ -65,7 +65,28 @@ To stop batches, use a pattern that can't match your own shell, e.g.
   before then is kept (§4.2 cancels or delays it only "if it is not yet started") and can die
   to the lings; earlier scouting in M3 moves the flag before the Nexus.
 
+## Open question for the user
+
+- **A natural Nexus started before POOL_12 is raised.** §4.2 says to "cancel or delay the natural
+  Nexus if it is not yet started", so Citadel keeps one that is already placed. Both 12-pool
+  acceptance losses came from it: the opener placed it at ~1:20, the Pool was seen at 1:20-1:21,
+  and once the Nexus finished, ares's Mining sent probes out past the wall-gap holder to its
+  minerals. Cancelling a started Nexus on the flag would refund 75% and keep probes home, but it
+  goes beyond §4.2 as written, so it waits for a decision.
+
 ## Known issues (not blocking M2)
+
+- Cannon rush, main variant, Persephone (opponent seed 106): the rusher's first Cannon finishes
+  next to our main Nexus by 2:00 and six more follow; §4.2 stops the probe attack once a Cannon
+  completes, and the army never gets going (the Cannons also cover a Gateway). Lost in two of
+  three runs.
+- M1 Hard game 9 (Ultralove vs Terran) was lost twice on intermediate commits: the army sat idle
+  in "attack" state for minutes while a Terran tank/Banshee/Raven contain picked at our bases.
+  It won on the final commit and a debug replay of the matchup (the AI's build is random), so
+  the cause is unconfirmed. `BasicArmy` does not skip lifted (flying) Terran buildings as
+  targets, which ground units can't hit; M4 replaces this army code.
+- §4.4's proxy rules raise PROXY vs some built-in AI builds (no production at 1:30, or few
+  workers seen by a partial scout); that costs a little economy. M3's scouting should see more.
 
 - The PROXY plan's expansion gate and hold point have no hysteresis: with units dying and
   being replaced they flip every few seconds (seen vs Harder Rush Terran), walking the army
