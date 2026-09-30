@@ -11,9 +11,10 @@ findings and Citadel's choices are in `docs/VERIFY_NOTES.md`.
 | M1 | Done | openers, economy, supply, 3 bases, wall fallback (`bot/macro/`, `bot/defense/wall_fallback.py`) |
 | M2 | Done (see the evidence in `docs/VERIFY_NOTES.md`, "M2 acceptance evidence") | ares bridge, detectors, ThreatFlag expiry, defense plans |
 | M3 | Done (see `docs/VERIFY_NOTES.md`, "M3 acceptance evidence") | per-matchup scout planner, §4.4 rows 3 and 15 |
-| M4 | Next | squads, `EngagementResult` gates, retreat hysteresis, end-game rules (DESIGN.md §4.5.2, §4.7, §7) |
+| M4 | Done (see `docs/VERIFY_NOTES.md`, "M4 acceptance evidence") | squads, `EngagementResult` gates, retreat hysteresis, end-game rules (`bot/army/`) |
+| M5 | Next | counterattack (§4.6), opponent memory, telemetry to `./data`, step guard (DESIGN.md §7) |
 
-## Code map (M2 and M3 additions)
+## Code map (M2-M4 additions)
 
 | File | What it does |
 |---|---|
@@ -25,11 +26,17 @@ findings and Citadel's choices are in `docs/VERIFY_NOTES.md`.
 | `bot/defense/defense_planner.py` | active flags → one `DefensePlan` (per-threat `_plan_*`), ends the ares opener on override flags |
 | `bot/defense/worker_defense.py` | probe pulls (worker rush, cannon rush, lings in a mineral line) and the cancel-when-dying rule |
 | `bot/defense/static_defense.py` | main/natural Batteries, extra Gateways, Core first vs 12-pool, Cannon-range placement blocking, build-order retargeting, dead-builder handling |
-| `bot/army/basic_army.py` | M1 scaffolding army plus hold point / leash, home-threat and don't-feed rules (M4 replaces the supply-count gates with `EngagementResult`) |
+| `bot/army/engagement.py` | M4 fight evaluation: Citadel's `EngagementResult` from the combat simulator with our HP+shields and the defender set; §4.5.2 inputs (`attack_inputs`, `enemies_near`, `static_defense_near`); unit values |
+| `bot/army/attack_decision.py` | M4 main attack state machine (§4.5.2 gates, 20 s flip hold, 40% value rule, 45 s relaunch wait, recall) and the §4.7 45:00 / 40:00 gates; no game objects |
+| `bot/army/squads.py` | M4 squad roles by tag (DEFEND, ATTACK, REINFORCE, HARASS for M5, SCOUT), mirrored as ares `UnitRole`s |
+| `bot/army/army.py` | M4 commander (replaces M1's `BasicArmy`): home defense on the simulator (M2 rules kept), launches/retreats/recalls, targets and the ground structure hunt, regroup, reinforcements, the army's Observer, per-step micro dispatch; `ENGAGE`/`DEFEND`/`ARMY` log lines |
+| `bot/army/micro.py` | M4 per-unit control on ares behaviors (focus fire, kiting with `KeepUnitSafe`, danger-aware retreat) |
+| `bot/army/endgame.py` | M4 §4.7 structure hunt state and points (the scout planner gives Observers/Phoenix trips) |
 | `scripts/test_bots/` | scripted cheese opponents (plain python-sc2): `worker_rush`, `cannon_rush` (natural/main), `twelve_pool`, `proxy_rax` (third/center) |
 | `bot/telemetry/logger.py` | M3 adds scout records (`SCOUT start/done/home/lost/expired`, `METRIC scouts`) and the §8 first-aggression time |
 | `scripts/m3_checks.py` | the M3 "correct flag" check (`M3_EXPECTED_FLAGS`), used by `run_matches.py` and `test_m3_checks.py` |
 | `scripts/test_scout_abilities.py` | in-game checks of the Adept shade, Hallucination, Pulsar Beam and detection |
+| `scripts/test_attack_decision.py` / `test_engagement.py` / `test_endgame.py` | M4: offline gate/hysteresis tests; in-game levels vs ares's; staged §4.7 structure hunt with shortened thresholds |
 
 Every threshold is in `bot/constants.py`.
 
@@ -47,11 +54,14 @@ Every threshold is in `bot/constants.py`.
 | M3 acceptance (same batches; `flag=`/`scouts=` columns and `M3 ...` summary lines) | `poetry run python scripts/run_matches.py --opponent <bot> --map all --total 10 --seed 100` |
 | M3 scout losses vs the built-in AI | `poetry run python scripts/run_matches.py --difficulty Harder --race Terran Zerg Protoss --map all --total 21` |
 | M3 flag check / scouting abilities | `poetry run python scripts/test_m3_checks.py`; `poetry run python scripts/test_scout_abilities.py` |
+| M4 acceptance (10 VeryHard games per race; `M4 wins per race` summary line; `engage=`/`value=`/`step=` columns) | `poetry run python scripts/run_matches.py --difficulty VeryHard --race Terran --map all --total 10` (also `Zerg`, `Protoss`) |
+| M4 gates / fight levels / structure hunt | `poetry run python scripts/test_attack_decision.py`; `poetry run python scripts/test_engagement.py`; `poetry run python scripts/test_endgame.py` |
 | Ladder zip | `poetry run python scripts/create_ladder_zip.py`, then `unzip -l publish/*.zip \| head` |
 
 Four batches can run in parallel on a 4-core machine (about 40 minutes for 10 games each).
 To stop batches, use a pattern that can't match your own shell, e.g.
-`pkill -f "opponent twelve_poo[l]"`, in a command of its own.
+`pkill -f "opponent twelve_poo[l]"`, in a command of its own (nothing else in that command may
+contain the matched text), then kill the orphaned `SC2_x64` clients (parent PID 1).
 
 ## M3 checks on the final code (95ee868)
 
