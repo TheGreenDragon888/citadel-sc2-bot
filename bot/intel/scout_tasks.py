@@ -33,6 +33,7 @@ from sc2.position import Point2
 from sc2.unit import Unit
 
 from bot.constants import (
+    CANNON_NEARLY_DONE,
     OBSERVER_DETECTED_BACKOFF,
     ORACLE_BEAM_MIN_ENERGY,
     ORACLE_CLUMP_RADIUS,
@@ -54,6 +55,8 @@ from bot.constants import (
     SCOUT_HOME_TOWNHALL_RADIUS,
     SCOUT_REORDER_DIST,
     SCOUT_RETREAT_HP,
+    SCOUT_STATIC_MARGIN,
+    SCOUT_STATIC_STEP,
     SCOUT_WAYPOINT_TIMEOUT_S,
 )
 from bot.intel.threat_flags import Threat
@@ -64,6 +67,13 @@ if TYPE_CHECKING:
     from bot.intel.scout_planner import ScoutPlanner
 
 Result = Optional[tuple[str, str]]
+
+GROUND_STATIC_DEFENSE: frozenset[UnitTypeId] = frozenset(
+    {UnitTypeId.PHOTONCANNON, UnitTypeId.BUNKER, UnitTypeId.SPINECRAWLER, UnitTypeId.PLANETARYFORTRESS}
+)
+AIR_STATIC_DEFENSE: frozenset[UnitTypeId] = frozenset(
+    {UnitTypeId.PHOTONCANNON, UnitTypeId.BUNKER, UnitTypeId.MISSILETURRET, UnitTypeId.SPORECRAWLER}
+)
 
 
 class Mover:
@@ -79,6 +89,26 @@ class Mover:
     def is_safe(self, unit: Unit) -> bool:
         return self.bot.mediator.is_position_safe(grid=self.grid(unit), position=unit.position)
 
+    def static_threat(self, point: Point2, flying: bool = False) -> Optional[Unit]:
+        """An enemy static defense (finished or nearly) that could hit `point`, with a margin.
+        Its range comes from game data (`air_range`/`ground_range`)."""
+        types = AIR_STATIC_DEFENSE if flying else GROUND_STATIC_DEFENSE
+        for s in self.bot.enemy_structures:
+            if s.type_id not in types or s.build_progress < CANNON_NEARLY_DONE:
+                continue
+            reach = (s.air_range if flying else s.ground_range) or 7.0  # a Bunker's weapon is its cargo's
+            if s.distance_to(point) <= reach + s.radius + SCOUT_STATIC_MARGIN:
+                return s
+        return None
+
+    def avoid_static(self, unit: Unit) -> bool:
+        """Step straight away from enemy static defense in reach; True if it did."""
+        threat = self.static_threat(unit.position, unit.is_flying)
+        if threat is None:
+            return False
+        self.move(unit, unit.position.towards(threat.position, -SCOUT_STATIC_STEP))
+        return True
+
     def keep_safe(self, unit: Unit) -> bool:
         """Step out of danger; True if the unit was in danger (and was given an order)."""
         bot = self.bot
@@ -92,7 +122,13 @@ class Mover:
 
     def scout_to(self, unit: Unit, target: Point2) -> None:
         """Out of danger first, then toward `target`."""
-        if not self.keep_safe(unit):
+        if not self.avoid_static(unit) and not self.keep_safe(unit):
+            self.path_to(unit, target)
+
+    def go_to(self, unit: Unit, target: Point2) -> None:
+        """Toward `target` on a danger-aware path, but never into static defense's reach (a
+        scout going home waits outside Cannons covering the way instead of walking past them)."""
+        if not self.avoid_static(unit):
             self.path_to(unit, target)
 
     @staticmethod
@@ -180,7 +216,7 @@ class ProbeTask(ScoutTask):
     def home_step(self, unit: Unit) -> Result:
         if self.is_home(unit):
             return "home", self.home_why
-        self.planner.mover.path_to(unit, self.bot.start_location)
+        self.planner.mover.go_to(unit, self.bot.start_location)
         return None
 
     def hurt(self, unit: Unit) -> bool:
@@ -248,15 +284,18 @@ class MainProbeTask(ProbeTask):
                     "natural check done" if detectors.natural_resolved else "past the no-natural deadline"
                 )
                 self.phase = "sweep"
+                if planner.cannon_rush_found():
+                    self.go_home(f"{why}; the proxy spots are next to the rush Cannons")
                 self.sweep = Waypoints(nearest_neighbour_order(unit.position, planner.proxy_spots()))
-                logger.info(
-                    f"SCOUT {self.name} {self.tag} to {len(self.sweep.points)} proxy spots at "
-                    f"{bot.time_formatted} ({why})"
-                )
+                if self.phase == "sweep":
+                    logger.info(
+                        f"SCOUT {self.name} {self.tag} to {len(self.sweep.points)} proxy spots at "
+                        f"{bot.time_formatted} ({why})"
+                    )
             else:
                 spot = bot.mediator.get_enemy_nat.towards(bot.game_info.map_center, NAT_SCOUT_STANDOFF)
                 mover.scout_to(unit, spot)
-        if self.phase == "sweep":
+        if self.phase == "sweep" and self.sweep is not None:
             point = self.sweep.current(bot)
             if point is None:
                 self.go_home("proxy spots checked")
@@ -283,7 +322,9 @@ class PatrolProbeTask(ProbeTask):
     def step(self, unit: Unit) -> Result:
         if self.phase != "home" and not self.hurt(unit):
             point = self.route.current(self.bot)
-            if point is None:
+            if self.planner.cannon_rush_found() or self.planner.flags.get(Threat.PROXY, "proxy_structure"):
+                self.go_home("found the rush structures")
+            elif point is None:
                 self.go_home("patrol done")
             else:
                 self.planner.mover.scout_to(unit, point)
@@ -319,7 +360,7 @@ class UnitTask(ScoutTask):
         home = self.planner.home_point()
         if unit.distance_to(home) < UNIT_SCOUT_HOME_RADIUS:
             return "done", self.why
-        self.planner.mover.path_to(unit, home)
+        self.planner.mover.go_to(unit, home)
         return None
 
     def detected_backoff(self, unit: Unit) -> bool:

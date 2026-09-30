@@ -655,3 +655,8 @@ HALLUCINATION_STALE_S: dict[str, float] = {"Terran": 90.0}
 HALLUCINATION_STALE_DEFAULT_S: float = 60.0
 HALLUCINATION_MIN_GAP_S: float = 45.0  # one Phoenix at a time (they live ~43 s)
 PHOENIX_AWAY_DIST: float = 20.0  # after the natural, the Phoenix flies this far back toward our base
+# scouts keep this far outside the range of enemy static defense (Cannon, Bunker, Spine Crawler,
+# Planetary Fortress; Turrets and Spores for fliers), counting ones at least CANNON_NEARLY_DONE
+# built (M3: cannon-rush test games lost probes that walked past finished Cannons)
+SCOUT_STATIC_MARGIN: float = 3.0
+SCOUT_STATIC_STEP: float = 4.0  # a scout inside that margin moves this far straight away

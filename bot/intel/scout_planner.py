@@ -208,6 +208,10 @@ class ScoutPlanner:
         active = self.flags.active_threats()
         if UNITS_STAY_HOME & active:
             return True
+        return self.cannon_rush_found()
+
+    def cannon_rush_found(self) -> bool:
+        """CANNON_RUSH from rush structures or probes near us, not just §4.4 row 3's Forge."""
         return any(f.threat == Threat.CANNON_RUSH and f.source != "forge_first" for f in self.flags.active())
 
     def _task_active(self, name: str) -> bool:
@@ -254,7 +258,7 @@ class ScoutPlanner:
             and (probe := self._free_probe()) is not None
         ):
             self._start_main_probe(probe, "the enemy main is still unscouted")
-        if not self.patrol_started:
+        if not self.patrol_started and not self.cannon_rush_found():
             why = None
             if PATROL_FROM_S <= now <= PATROL_START_UNTIL_S and self._main_looks_light():
                 why = "the enemy main has no Barracks/Gateway"
@@ -393,7 +397,8 @@ class ScoutPlanner:
         if observers:
             unit = observers[0]
             task = LookTask(self, unit.tag, "expansion_check", nearest_order(unit.position, points))
-        elif not self.probes_needed_home() and (unit := self._free_probe()) is not None:
+        elif not self._units_needed_home() and (unit := self._free_probe()) is not None:
+            # no probe leaves while a defense plan is on (it would walk past the rush)
             task = ProbeLookTask(self, unit.tag, "expansion_check", nearest_order(unit.position, points))
         else:
             return
@@ -411,7 +416,10 @@ class ScoutPlanner:
                 continue
             points = [Point2(p) for p in positions]
             observers = self._free_observers()
-            ours = all(p.distance_to(own_nat) < RESCOUT_PROBE_RADIUS for p in points)
+            # a probe only for evidence on our side, never next to static defense (rush Cannons)
+            ours = key[0] != Threat.CANNON_RUSH and all(
+                p.distance_to(own_nat) < RESCOUT_PROBE_RADIUS and self.mover.static_threat(p) is None for p in points
+            )
             if observers:
                 unit = observers[0]
                 task = LookTask(self, unit.tag, "rescout", points)

@@ -835,3 +835,85 @@ Other checks on the final code (cb092d1):
 - `poetry run python scripts/test_threat_flags.py`: 20/20 passed.
 - Ladder zip: `poetry run python scripts/create_ladder_zip.py` builds `publish/Citadel.zip`
   (366 files) with `run.py`, `config.yml` and `ladder.py` at the top level.
+
+## M3 findings
+
+Found while building M3 (scout planner). Source lines are for the versions at the top of this
+file; **Runtime** results come from `poetry run python scripts/test_scout_abilities.py`
+(PylonAIE_v4, a bare AresBot driven by debug commands, so nothing else moves the units).
+
+**Adept shade (§4.3 PvT/PvZ).** Runtime:
+
+| check | result |
+|---|---|
+| ability on the Adept | `AbilityId.ADEPTPHASESHIFT_ADEPTPHASESHIFT` (2544), with a target point |
+| the shade | own unit `UnitTypeId.ADEPTPHASESHIFT`, appears 2 loops after the cast; takes `MOVE_MOVE`; offers `CANCEL_ADEPTSHADEPHASESHIFT` |
+| the Adept while the shade lives | offers `CANCEL_ADEPTPHASESHIFT` (2594) |
+| shade lifetime | 158 loops (~7.1 s) |
+| when it ends by itself | the Adept teleports to it (18 away in the test) |
+| `CANCEL_ADEPTPHASESHIFT` on the Adept | the shade disappears at once and the Adept stays where it cast |
+| cooldown | castable again 256 loops (~11.4 s) after the cast |
+| `on_unit_destroyed` | fires for the shade's tag both when it ends and when cancelled (so the shade must not be tracked as a scout, or it would count as lost) |
+
+`AdeptShadeTask` cancels at `SHADE_CANCEL_S` (6 s).
+
+**Hallucination (Phoenix).** Runtime: the hallucinated Phoenix appears 2 loops after the cast,
+1.2 from the Sentry, in `self.units` with `is_hallucination` True and **no orders** (as §4.3
+expects after the 5.0.16b revert), so `PhoenixTask` orders every point itself. It lived 958
+loops (~42.8 s) and flew ~120; `on_unit_destroyed` fires when it ends. The Sentry used 74.9
+energy (§11.7's 75). `Unit.is_hallucination` reads the observation proto
+(`sc2/unit.py:1047-1049`); Telemetry records a hallucination's end as "expired", not "lost".
+
+**Oracle Pulsar Beam.** Runtime: `BEHAVIOR_PULSARBEAMON` (2375) is available at 200 energy and
+swaps for `BEHAVIOR_PULSARBEAMOFF` (2376); activation took 25.4 energy over 4 loops; with the beam
+on the Oracle lost 20.1 energy in 10 s (net of regeneration). The test Drone fled out of vision, so
+killing one was not observed; the Oracle kept its attack order. `OracleTask` turns the beam on only
+at `ORACLE_BEAM_MIN_ENERGY` and logs `SCOUT oracle beam on`.
+
+**Unit abilities are refreshed every step.** python-sc2 queries every own unit's available
+abilities in `_prepare_step` with `ignore_resource_requirements=False`
+(`sc2/bot_ai_internal.py:722-730`), so `AbilityId.X in unit.abilities` is also the energy and
+cooldown check (Hallucination, Revelation, the shade).
+
+**Detection.** Runtime: `mediator.get_is_detected(unit=observer)` is True for an own Observer 3 from
+a powered enemy Photon Cannon and False 20 away; `Unit.is_revealed` stayed False in both. A
+detected Observer next to a Cannon is shot down within seconds (the first test Observer died).
+
+**Ground-grid influence of workers and melee units.** Units with ground range < 2 (workers,
+Zerglings, Zealots) add their ground DPS within `RangeBuffer` (4.0, `ares-sc2/src/ares/config.yml:39`)
+of their position to the ground grid (`ares-sc2/src/ares/managers/grid_manager.py:808-825`), so
+scouts path around enemy workers and lings too.
+
+**Map regions for proxy spots.** `mediator.get_map_data_object` is a property returning
+map-analyzer's `MapData` (`ares-sc2/src/ares/managers/manager_mediator.py:1539-1550`);
+`MapData.regions` is a dict of `Region`s, and `Region.center` is a region point nearest its centre
+of mass (`map_analyzer/Polygon.py:156-170`). The pool maps give 3-4 proxy spots within 40 of our
+natural once expansions and a ring are added and spots closer than 12 are merged.
+
+**Taking the build runner's scout.** The `worker_scout` step selects a probe, sends it a queue of
+moves and gives it `BUILD_RUNNER_SCOUT`
+(`ares-sc2/src/ares/build_runner/build_order_runner.py:446-455`); ares only hands idle probes with
+that role back to mining (`ares-sc2/src/ares/main.py:419-429`), so reassigning `SCOUTING` in the
+same step keeps it. `unit.order_target` is the first order's target tag or point
+(`sc2/unit.py:1092-1100`); `Mover.move` uses it to skip identical move orders (§6 APM).
+
+**Cannon test bot on Torches and Incorporeal.** The cannon bot's "natural" is the expansion nearest
+our main in a straight line, which on some maps is not ares's natural; its Cannons can then be
+> 25 from both our main and natural (§4.2's radius), and on Torches its rush probe placed nothing
+at all. In both cases only §4.4 row 3 (the Forge in its main) gives a CANNON_RUSH flag.
+
+## M3 Citadel choices
+
+| Area | Choice | Why |
+|---|---|---|
+| Scope (user decision) | "Correct flag" = the bot's expected flag raised before the cheese reaches us (worker rush 1:00, cannon 1:30, 12-pool 1:45, proxy 2:00) and no flag outside its allowed list (`M3_EXPECTED_FLAGS`); games: the 4 test bots × 10 plus 21 built-in Harder games for the scout-loss criterion; new flags only §4.4 rows 3 and 15; Hallucination only from an existing Sentry | Plan approval |
+| Main probe route | Past the enemy natural first, then a lap of the main, then the natural watch until the no-natural deadline (M2 decision), then the proxy spots near our natural, then home | Row 3 needs to know the natural was empty after the Forge started; the natural is on the way |
+| Probe exits | Home at once on POOL_12, and on WORKER_RUSH before it reaches the enemy main; straight to the proxy spots on PROXY; home below 50% HP+shield | M2: the scout died to lings in 10/10 12-pool games and to the rushers in 5/10 worker-rush games |
+| When a scout counts as lost | Only while it has a task. A probe's task ends when it is back within `SCOUT_HOME_RADIUS` of our start (or 12 of a townhall); a unit's when it is back at our natural. A recalled probe that then fights a worker rush is a defender, not a scout | Definition for the acceptance metric |
+| Retry | One more main probe (by 2:30) if the first came home or died before the main was scouted, once no rush flag is active | After a worker rush the enemy main was otherwise never seen |
+| Row 3 | A Forge in the Protoss main with no Gateway there, and their natural seen empty since the Forge started (or 1:30 passed), raises CANNON_RUSH `forge_first`: patrol probe and a 150 bank after the opener, no opener override; the proxy check doesn't raise PROXY in that case; the flag expires if their natural Nexus is seen (Forge-first expand) | Every cannon-rush game raised a false PROXY in M2 |
+| Row 15 | UNKNOWN_AGGRO only if no active rush flag explains the dead scout; expires when the enemy main is scouted or at 5:00 | "Unknown" aggression |
+| Worker rush | No proxy check after a WORKER_RUSH; rush probes never count as a lingering cannon-rush probe | False PROXY / CANNON_RUSH flags in M2's worker-rush games |
+| Unit scouts | Combat units are taken only while none of WORKER_RUSH, POOL_12, PROXY, ONE_BASE_ALLIN, or a non-Forge-first CANNON_RUSH is active (Defense > Scouting); never pinned units | §3 order of authority |
+| Observers | Before 6:00 posts per matchup; from 6:00 one is left to `BasicArmy`, which already moves free Observers with the army | §4.3 "travels with the army" |
+| Re-scouts | Stale STRUCTURE evidence: Observer, or a probe if on our side (within 45 of our natural); stale main (60 s, after 3:00): Observer; Hallucination as §4.3 | §5 re-scout trigger |
