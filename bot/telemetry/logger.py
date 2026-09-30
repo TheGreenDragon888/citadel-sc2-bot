@@ -2,7 +2,9 @@
 
 M1 records the economy snapshots the acceptance test needs (probes at 6:00) plus a few §8
 metrics that come for free. M3 adds scout records (every scouting task a unit was given, and
-how it ended) and the §8 "first enemy aggression time". Writing them to ./data/logs is M5.
+how it ended) and the §8 "first enemy aggression time". M4 adds the §8 "army value lost vs
+killed", the step-time p99 and the EngagementResult of each attack/retreat decision (kept by
+bot/army/army.py, reported here). Writing them to ./data/logs is M5.
 """
 
 import time
@@ -14,6 +16,7 @@ from loguru import logger
 
 from sc2.ids.unit_typeid import UnitTypeId
 
+from bot.army.engagement import is_fighter
 from bot.constants import (
     AGGRESSION_RADIUS,
     AGGRESSION_WORKERS,
@@ -69,6 +72,9 @@ class Telemetry:
         self.scouts: list[ScoutRecord] = []
         self._active_scouts: dict[int, ScoutRecord] = {}
         self.first_aggression: Optional[tuple[float, str]] = None
+        self.step_ms: list[float] = []  # every step, for the p99 (§6)
+        self.army_value_lost: float = 0.0  # §8, fighting units only (no workers or structures)
+        self.army_value_killed: float = 0.0
 
     # -- scouts (M3) -----------------------------------------------------------------------------
 
@@ -98,6 +104,8 @@ class Telemetry:
         """`unit` is last step's snapshot of our destroyed unit; `role` its ares role."""
         if unit.tag in self._active_scouts:
             self.scout_ended(unit.tag, "expired" if unit.is_hallucination else "lost")
+        if is_fighter(unit):
+            self.army_value_lost += self._value(unit.type_id)
         if unit.type_id != UnitTypeId.PROBE:
             return
         self.probes_lost += 1
@@ -119,6 +127,22 @@ class Telemetry:
         self.step_count += 1
         self.step_total_ms += ms
         self.step_max_ms = max(self.step_max_ms, ms)
+        self.step_ms.append(ms)
+
+    def step_p99_ms(self) -> float:
+        if not self.step_ms:
+            return 0.0
+        ordered = sorted(self.step_ms)
+        return ordered[min(len(ordered) - 1, int(0.99 * len(ordered)))]
+
+    def _value(self, type_id: UnitTypeId) -> float:
+        cost = self.bot.calculate_unit_value(type_id)
+        return cost.minerals + cost.vespene
+
+    def on_enemy_unit_destroyed(self, unit) -> None:
+        """`unit` is last step's snapshot of a destroyed enemy unit (not a structure)."""
+        if is_fighter(unit):
+            self.army_value_killed += self._value(unit.type_id)
 
     def step(self) -> None:
         bot = self.bot
@@ -187,12 +211,19 @@ class Telemetry:
         fields = " ".join(f"{k}={v}" for k, v in snap.items())
         logger.info(f"METRIC t={_mmss(mark)} {fields}")
 
-    def end_report(self, flags=None) -> None:
+    def end_report(self, flags=None, army=None) -> None:
         mean = self.step_total_ms / self.step_count if self.step_count else 0.0
         logger.info(
             f"METRIC end t={self.bot.time_formatted} supply_blocked_s={self.supply_blocked_s:.1f} "
-            f"steps={self.step_count} step_mean_ms={mean:.1f} step_max_ms={self.step_max_ms:.1f}"
+            f"steps={self.step_count} step_mean_ms={mean:.1f} step_p99_ms={self.step_p99_ms():.1f} "
+            f"step_max_ms={self.step_max_ms:.1f}"
         )
+        # §8: army value lost vs killed; EngagementResult at each attack/retreat decision
+        logger.info(
+            f"METRIC army value_lost={self.army_value_lost:.0f} value_killed={self.army_value_killed:.0f}"
+        )
+        for t, action, level, reason in army.decisions if army is not None else []:
+            logger.info(f"METRIC engage {_mmss(t)} {action} level={level} ({reason})")
         lost = self.scouts_lost_before()
         logger.info(
             f"METRIC scouts tasks={len(self.scouts)} lost_before_{_mmss(SCOUT_LOSS_CHECK_S)}={len(lost)}"

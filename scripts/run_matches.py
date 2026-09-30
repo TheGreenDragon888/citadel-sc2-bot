@@ -15,6 +15,10 @@ AI (M2 acceptance: >= 8/10 wins against each).
 M3 columns: `scouts` is scouting tasks lost before 4:00 / tasks given (Telemetry scout records);
 `flag` (with --opponent) is the M3 "correct flag" check (scripts/m3_checks.py): the bot's expected
 threat raised by its deadline and no threat outside its allowed list.
+
+M4 columns: `engage` is launches/retreats/recalls of the main attack (§4.5.2); `value` is army
+value lost/killed (§8); `step` is mean/p99/max step ms (§6). The summary ends with the M4 line:
+wins per opponent race against the built-in AI (user decision: >= 7/10 VeryHard for each race).
 """
 
 import argparse
@@ -57,6 +61,7 @@ from scripts.m3_checks import flag_check  # noqa: E402
 from scripts.test_bots import TEST_BOTS  # noqa: E402
 
 M2_WIN_RATE: float = 0.8  # M2 acceptance: >= 8/10 against each cheese bot
+M4_WIN_RATE: float = 0.7  # M4 acceptance (user decision): >= 7/10 VeryHard wins for each race
 
 CRASH: str = "Crash"
 BUILDS_FILE: Path = ROOT / "protoss_builds.yml"
@@ -287,6 +292,16 @@ def main() -> int:
             scouts_lost = len(telemetry.scouts_lost_before(SCOUT_LOSS_CHECK_S))
             scout_tasks = len(telemetry.scouts)
             task_outcomes = Counter((r.task, r.outcome or "active") for r in telemetry.scouts)
+        army = getattr(bot, "army", None)
+        engage = None
+        if army is not None:
+            actions = Counter(action for _, action, _, _ in army.decisions)
+            engage = f"{actions['launch']}/{actions['retreat']}/{actions['recall']}"
+        value = step = None
+        if telemetry is not None:
+            value = f"{telemetry.army_value_lost / 1000:.1f}k/{telemetry.army_value_killed / 1000:.1f}k"
+            mean = telemetry.step_total_ms / telemetry.step_count if telemetry.step_count else 0.0
+            step = f"{mean:.1f}/{telemetry.step_p99_ms():.0f}/{telemetry.step_max_ms:.0f}"
         flag_ok = flag_why = None
         if args.opponent and flag_store is not None:
             flag_ok, flag_why = flag_check(args.opponent, [(r.threat.name, r.raised_at) for r in flag_store.history])
@@ -305,6 +320,9 @@ def main() -> int:
                 "scouts_lost": scouts_lost,
                 "scout_tasks": scout_tasks,
                 "task_outcomes": task_outcomes,
+                "engage": engage,
+                "value": value,
+                "step": step,
                 "flag_ok": flag_ok,
                 "flag_why": flag_why,
                 "game_s": game_seconds,
@@ -333,6 +351,8 @@ def main() -> int:
         )
         if r["variant"]:
             line += f"  variant={r['variant']}"
+        if r["engage"] is not None:
+            line += f"  engage={r['engage']} value={r['value']} step={r['step']}"
         if r["scout_tasks"] is not None:
             line += f"  scouts={r['scouts_lost']}/{r['scout_tasks']}"
         if r["flag_ok"] is not None:
@@ -386,6 +406,17 @@ def main() -> int:
             f"M2 acceptance vs {args.opponent}: {counts[Result.Victory.name]}/{len(rows)} wins "
             f"(>= {needed:.0f} needed), {counts[CRASH]} crashes: {'PASS' if ok else 'FAIL'}"
         )
+    if not args.opponent:
+        # M4: wins per opponent race
+        parts = []
+        passed = True
+        for race in dict.fromkeys(r["race"] for r in rows):
+            games = [r for r in rows if r["race"] == race]
+            wins = sum(r["outcome"] == Result.Victory.name for r in games)
+            needed = -(-M4_WIN_RATE * len(games) // 1)
+            passed &= wins >= needed
+            parts.append(f"{race} {wins}/{len(games)} (>= {needed:.0f} needed)")
+        print(f"M4 wins per race vs {difficulty.name}: {'; '.join(parts)}: {'PASS' if passed and not counts[CRASH] else 'FAIL'}")
     return 1 if counts[CRASH] else 0
 
 
