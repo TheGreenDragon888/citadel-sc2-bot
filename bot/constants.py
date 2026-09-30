@@ -445,7 +445,6 @@ EARLY_POOL_CERTAIN_S: float = 45.0
 # Proxy (§4.4 rows 7 and 10), checked once the enemy main is scouted and not before 1:30
 PROXY_CHECK_FROM_S: float = 90.0
 PROXY_CHECK_UNTIL_S: float = 180.0  # ... and only if the main was scouted by then (Citadel)
-MINERAL_LINE_RADIUS: float = 10.0  # mineral fields this close to a start location are its line
 MAIN_SAMPLE_STEP: float = 4.0  # enemy main sample-point spacing for "main scouted"
 MAIN_SCOUTED_FRACTION: float = 0.6  # this share of the sample points seen = main scouted
 PROXY_TERRAN_MAX_SCVS: int = 12

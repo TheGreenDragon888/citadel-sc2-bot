@@ -770,7 +770,7 @@ M2 decided as below. Every value is in `bot/constants.py`.
 
 | Area | Choice | Why |
 |---|---|---|
-| Proxy check (§4.4 rows 7, 10) | Runs once, only if the enemy main was scouted by `PROXY_CHECK_UNTIL_S` (3:00); the worker-count parts count only once the enemy main's mineral line was in vision | Mains first seen by the army at 9:00+ raised PROXY mid-game; "0 SCVs seen" raised it vs the built-in AI |
+| Proxy check (§4.4 rows 7, 10) | Runs once, only if the enemy main was scouted by `PROXY_CHECK_UNTIL_S` (3:00). The worker counts stay as §4.4 writes them (what the scout saw): gating them on seeing the mineral line removed false flags vs the built-in AI but missed a 3-Barracks all-in (3 SCVs seen), and a missed all-in costs more than a false flag | Mains first seen by the army at 9:00+ raised PROXY mid-game |
 | Scope (user decision) | Detectors for M2's five threats only; test opponents are our own python-sc2 bots (`scripts/test_bots/`); the proxy check uses §4.4 rows 7 and 10 once our scout has seen the enemy main, not before 1:30; the scout probe then watches the enemy natural until the one-base deadline | Plan approval |
 | Opener override | WORKER_RUSH, PROXY and POOL_12 end the ares opener; CANNON_RUSH only with STRUCTURE evidence (an enemy probe alone is often a scout); ONE_BASE_ALLIN never. After an override or the 4:00 timeout `BuildExecutor` adds `OPENER_ESSENTIALS` (ramp Gateway and Core, 2 gas, Warp Gate, 2 bases) | 12-pool Zerglings arrived before the opener's Zealot |
 | Early Pool | A Pool started by `EARLY_POOL_CERTAIN_S` (0:45) raises POOL_12 at once; later ones are compared with the natural Hatchery | No hatch-first natural starts before ~0:48 on 12 workers |

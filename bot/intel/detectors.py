@@ -11,7 +11,7 @@ including the §5 phase rules.
 | cannon_probe | CANNON_RUSH | UNIT | an enemy probe inside our main for CANNON_PROBE_LINGER_S between CANNON_PROBE_FROM_S and CANNON_PROBE_UNTIL_S |
 | early_pool | POOL_12 | STRUCTURE | Spawning Pool started before the natural Hatchery (start times from build progress and game-data build times; a Pool started by EARLY_POOL_CERTAIN_S needs no natural check) |
 | early_lings | POOL_12 | UNIT | Zerglings seen before EARLY_LINGS_UNTIL_S |
-| proxy_missing | PROXY | STRUCTURE | once the enemy main is scouted (not before PROXY_CHECK_FROM_S, and only if by PROXY_CHECK_UNTIL_S): no Barracks (T) / Gateway (P) there, or, once its mineral line was in vision, Terran SCVs <= PROXY_TERRAN_MAX_SCVS or Protoss probes >= PROXY_PROTOSS_WORKERS_SHORT short of expected (§4.4 rows 7, 10) |
+| proxy_missing | PROXY | STRUCTURE | once the enemy main is scouted (not before PROXY_CHECK_FROM_S, and only if by PROXY_CHECK_UNTIL_S): no Barracks (T) / Gateway (P) there, or Terran SCVs <= PROXY_TERRAN_MAX_SCVS or Protoss probes >= PROXY_PROTOSS_WORKERS_SHORT short of expected (§4.4 rows 7, 10) |
 | proxy_structure | PROXY | STRUCTURE | an enemy production structure > PROXY_FAR_FROM_MAIN from the enemy main before PROXY_DETECT_UNTIL_S |
 | no_natural | ONE_BASE_ALLIN | STRUCTURE | no natural townhall by NO_NATURAL_DEADLINE_S, plus >= NO_NATURAL_MIN_GAS gas or >= NO_NATURAL_MIN_PRODUCTION production structures |
 
@@ -42,7 +42,6 @@ from bot.constants import (
     MAIN_RADIUS,
     MAIN_SAMPLE_STEP,
     MAIN_SCOUTED_FRACTION,
-    MINERAL_LINE_RADIUS,
     NATURAL_TOWNHALL_RADIUS,
     NO_NATURAL_DEADLINE_S,
     NO_NATURAL_GIVE_UP_S,
@@ -118,7 +117,6 @@ class Detectors:
         self.main_scouted_at: Optional[float] = None
         self.enemy_workers_in_main: set[int] = set()
         self._workers_last_added_at: float = 0.0  # when the last new one was seen
-        self.enemy_mineral_line_seen: bool = False
         # created in on_start at loop 0: both sides start with as many workers as we have now
         # (12 or 8 by ruleset, §4.0)
         self._start_workers: int = len(bot.workers)
@@ -200,10 +198,6 @@ class Detectors:
                     f"SCOUT enemy main scouted at {bot.time_formatted} "
                     f"({len(self._main_seen)}/{len(self._main_samples)} sample points seen)"
                 )
-        if not self.enemy_mineral_line_seen:
-            fields = bot.mineral_field.closer_than(MINERAL_LINE_RADIUS, enemy_main)
-            if fields and bot.is_visible(fields.center):
-                self.enemy_mineral_line_seen = True
         for w in self._visible_enemy_units(WORKERS):
             if w.distance_to(enemy_main) < MAIN_RADIUS and w.tag not in self.enemy_workers_in_main:
                 self.enemy_workers_in_main.add(w.tag)
@@ -364,12 +358,12 @@ class Detectors:
             reasons = []
             if not in_main:
                 reasons.append(f"no {'Barracks' if race == Race.Terran else 'Gateway'} in the scouted main")
-            # a worker count is evidence only if the scout saw the mineral line (0 SCVs "seen"
-            # raised PROXY vs the built-in AI)
-            count_workers = self.enemy_mineral_line_seen
-            if race == Race.Terran and count_workers and workers <= PROXY_TERRAN_MAX_SCVS:
+            # the worker counts are §4.4's rule as written: they count what the scout saw. Only
+            # counting once the mineral line was in vision cut false flags vs the built-in AI but
+            # also missed a 3-Barracks all-in (3 SCVs seen) that the count had caught
+            if race == Race.Terran and workers <= PROXY_TERRAN_MAX_SCVS:
                 reasons.append(f"{workers} SCVs seen in the main (<= {PROXY_TERRAN_MAX_SCVS})")
-            if race == Race.Protoss and count_workers:
+            if race == Race.Protoss:
                 build_s = bot.game_data.units[UnitTypeId.PROBE.value].cost.time / 22.4
                 # the starting probes + one per build time until the probes were counted (the
                 # scout may have left the main since), less their own scouting probe
