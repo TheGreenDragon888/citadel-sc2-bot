@@ -30,7 +30,7 @@ while it is out.
 
 from typing import TYPE_CHECKING, Optional
 
-from ares.consts import TOWNHALL_TYPES, UnitRole, UnitTreeQueryType
+from ares.consts import TOWNHALL_TYPES, EngagementResult, UnitRole, UnitTreeQueryType
 from loguru import logger
 from sc2.ids.unit_typeid import UnitTypeId
 from sc2.position import Point2
@@ -319,7 +319,17 @@ class Army:
         state = "none"
         if found is not None:
             if found.is_structure or found.type_id in WORKERS:
-                self.defend_target, state = found.position, f"clearing {found.type_id.name}"
+                # static defense covering the target, and the units around it, fight for it
+                # (M4 cannon_rush Ultralove: the Cannons around a Pylon near our base were just
+                # outside the "near our bases" radius, and the squad died walking in)
+                guard = self.engagement.static_defense_near(found.position) + self.engagement.enemies_near([found.position])
+                guard = [g for g in guard if g.tag != found.tag]
+                level = self.engagement.level(defenders, guard, ENEMY_DEFENDS) if guard else EngagementResult.VICTORY_EMPHATIC
+                self.home_level = int(level)
+                if level >= CLEAR_STATIC_LEVEL:
+                    self.defend_target, state = found.position, f"clearing {found.type_id.name} (level {level})"
+                else:
+                    state = f"hold, {found.type_id.name} covered (level {level} < {CLEAR_STATIC_LEVEL})"
             elif self._inside_main(found.position) or found.distance_to(self.anchor) <= ARMY_HOLD_LEASH:
                 self.defend_target, state = found.position, "last stand (main or defensive position)"
             else:
