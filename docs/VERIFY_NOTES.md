@@ -1014,6 +1014,16 @@ brackets):
 `Engagement.attack_inputs` from our Stalkers to the enemy group returned the 6 Stalkers, 4
 Zealots, 6 Cannons and the Shield Battery, and left out the 4 Probes, the Observer and the Pylon.
 
+**Snapshots don't report power.** An enemy Photon Cannon out of vision is a snapshot, and its
+`is_powered` (`sc2/unit.py:1009`, the proto's `is_powered`) was False for every fogged Cannon in the
+cannon_rush Ultralove game: with a "powered" check, 8 rush Cannons were left out of the fight and 4
+of our units read level 10 against them. Citadel's static-defence test now requires power only of
+a visible Cannon (`bot/army/engagement.py` `is_static_defense`).
+
+**The last structure's death isn't reported.** When the enemy's last structure dies the game ends
+in that step, and python-sc2 never calls `on_unit_destroyed` for it (`scripts/test_endgame.py`: the
+Victory is the evidence).
+
 ## M4 Citadel choices
 
 Where §4.5.2/§4.7 leave a choice open, M4 decided as below. Every value is in `bot/constants.py`.
@@ -1023,7 +1033,8 @@ Where §4.5.2/§4.7 leave a choice open, M4 decided as below. Every value is in 
 | Scope (user decisions) | Acceptance = 10 VeryHard games per race (T/Z/P, all 7 maps cycled), ≥ 7 wins for each race. The level is computed by Citadel from the simulator with our HP + shields; the defender is set (the enemy when we attack, us at home) instead of a static-defence penalty. Non-army changes are allowed if the VeryHard losses call for them, each logged here | Plan approval |
 | Fight inputs (§4.5.2) | Our side: the squad's fighting units (no workers, Observers, Warp Prisms, hallucinations). Enemy side: visible units and ares's 30 s ghosts within 20 of the squad or its target, without workers, hallucinations, Overlords/Overseers/Observers, eggs, larvae, changelings; finished static defence (Cannons only when powered) and Shield Batteries within 15 of the target or of the squad | Workers and support units don't decide fights; ghosts expire after 30 s (§11.2) |
 | Home defence | The DEFEND squad fights a home threat inside our main or within `ARMY_HOLD_LEASH` of the defensive position whatever the level (there is nowhere to fall back to); at ≥ `DEFEND_ENGAGE` (4) when the fight is within `BATTERY_COVER_RADIUS` of a ready Battery; at ≥ `ATTACK_CONTINUE` (5) elsewhere; otherwise it holds the defensive position. Our Cannons within 15 of the fight are on our side | §4.5.2 "never leaves the battery radius"; a base without Batteries is only defended on an even or better fight |
-| Structures near our bases (M2 rules) | M2's "6 supply per finished Cannon" becomes "level ≥ `ATTACK_CONTINUE` against those Cannons" (6 Stalkers vs 3 Cannons = 5, 12 vs 3 = 9: the same 3 Stalkers per Cannon); `ARMY_CLEAR_STRUCTURES_SUPPLY` stays | Same behaviour on the simulator |
+| Structures near our bases (M2 rules) | M2's "6 supply per finished Cannon" becomes "level ≥ `CLEAR_STATIC_LEVEL` (7) against the finished Cannons near our bases and the enemy units around them"; any structure or worker target near our bases is attacked only if the squad beats the static defence and units within 15/20 of that target at the same level; `ARMY_CLEAR_STRUCTURES_SUPPLY` stays | M2's 3 Stalkers per Cannon reads 7-8 (6 vs 3 = 5, 12 vs 3 = 9). At level 5, and with only the Cannons "near our bases" counted, the M4 army fed its first units into rush Cannons in the cannon_rush Ultralove game (a loss, then a 60:00 tie, where M3 had won) |
+| Home fight turns bad | A DEFEND unit that was fighting and is farther than `HOLD_ENGAGE_RADIUS` from the defensive position when the decision flips to hold retreats (danger-aware path, shooting only when its weapon is ready) instead of attack-moving back | VeryHard Zerg (Torches, acceptance game 4 on 5589a6c): the squad chased Zerglings to the natural, Roaches arrived, and the units died fighting their way back; the main Nexus fell at 6:00 |
 | Recall (§3 Defense > Main attack) | While the ATTACK squad is out, a home threat the DEFEND squad won't fight recalls it if the enemies there are worth ≥ `ARMY_RECALL_FRACTION` of the ATTACK squad's value; a recall has no relaunch wait, only the 20 s flip hold | M2's rule in value instead of supply; a recall is not a lost fight |
 | Retreat rules | The 40% value rule is not held back by `MIN_STATE_SECONDS` (units dying is not simulator noise; sieged tanks out of sight read as an empty fight); the level rule is | §4.5.2 lists the two triggers separately |
 | Targets | The known enemy townhall nearest the squad's main group, kept until it is gone (destroyed, or its snapshot dropped); then the nearest other grounded structure; then the structure hunt (enemy start, enemy expansions, all expansions, walkable region centres, a map grid) | §4.5.2 "nearest known enemy expansion → the next one → the main" |
