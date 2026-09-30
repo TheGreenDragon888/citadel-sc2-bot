@@ -962,3 +962,54 @@ Losses:
 - Built-in Harder: six losses, all between 12:52 and 18:57 (late-game army play, M4's area).
 
 Regression checks on 95ee868 are listed in `docs/STATUS.md`.
+
+## M4 findings
+
+Found while building M4 (squads, `EngagementResult` gates, retreat hysteresis, end-game). Source
+lines are for the versions at the top of this file.
+
+**What the simulator's timing adjustment does (§4.5.2 static defence, §11.3).** The simulator
+core is compiled (`ares-sc2/sc2_helper/sc2_helper.*.so`; its Rust source is not in the repo), so
+this is from runtime probes (`scratchpad` probe game on PylonAIE_v4, 6 own Stalkers = 960 HP +
+shields; most common of 20 calls to `predict_engage`):
+
+| enemy | timing on, defender none (ares's `can_win_fight`) | timing on, enemy defends | timing on, we defend | timing off |
+|---|---|---|---|---|
+| 3 Cannons | won, 960 left | won, 113 left | won, 960 left | won, 320 left |
+| 6 Cannons | won, 960 left | lost, 1529 left | lost, 1800 left | lost, 1481 left |
+| 6 Stalkers | lost, 189 left | lost, 189 left | lost, 189 left | lost, 189 left |
+
+- `predict_engage(own, enemy, optimistic=False, defender_player=0)`
+  (`ares-sc2/sc2_helper/combat_simulator.py:114`); ares always passes the default
+  `defender_player=0` (`ares-sc2/src/ares/managers/combat_sim_manager.py:136-137`).
+- The simulator is never given positions. With timing adjustment on, the side(s) not marked as
+  the defender must walk into range first, which takes time by movement speed. With no defender,
+  a Cannon (movement speed 0) never gets into range, so it never fires: that is M0's "Cannons
+  soak shots but never shoot". With the enemy as defender its Cannons shoot from the start while
+  our units walk in. With us as defender and only structures on the enemy side, nobody walks in
+  and the result is decided on health alone (the "we defend" column).
+- Confirmed by the per-type cache: the simulator keeps each unit type's stats from the first
+  unit of that type it sees in the process. In a fresh process whose first Cannon reported a
+  Stalker's movement speed (a Python proxy object), Cannons fired with no defender too (won,
+  113 left vs 3 Cannons).
+
+**Citadel's level (`bot/army/engagement.py`, user decisions).** The same simulator and the same
+11 levels as ares's `can_win_fight`, but with our HP + shields as the denominator after a win, and
+the defender set: the enemy when our squad attacks, us when we defend at home (the enemy when
+its side holds structures, which would otherwise stall the simulation). Runtime
+(`poetry run python scripts/test_engagement.py`, PylonAIE_v4; most common of 20 calls, range in
+brackets):
+
+| scenario | Citadel | ares `can_win_fight` |
+|---|---|---|
+| 6 Stalkers vs nothing | 10 (10-10) | 10 (10-10) |
+| 6 Stalkers vs 6 Stalkers | 5 (5-5) | 5 (5-5) |
+| 6 Stalkers vs 4 Zealots | 6 (6-6) | 10 (10-10) |
+| 6 Stalkers vs 3 Cannons (attacking) | 5 (5-5) | 10 (10-10) |
+| 6 Stalkers vs 6 Cannons (attacking) | 1 (1-1) | 10 (10-10) |
+| 12 Stalkers vs 3 Cannons (attacking) | 9 (9-9) | 10 (10-10) |
+| 6 Stalkers vs 6 Stalkers (defending) | 5 (5-5) | 5 (5-5) |
+| 6 Stalkers + 2 own Cannons vs 6 Stalkers (defending) | 9 (8-9) | 10 (7-10) |
+
+`Engagement.attack_inputs` from our Stalkers to the enemy group returned the 6 Stalkers, 4
+Zealots, 6 Cannons and the Shield Battery, and left out the 4 Probes, the Observer and the Pylon.

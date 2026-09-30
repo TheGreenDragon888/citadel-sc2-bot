@@ -668,3 +668,31 @@ UNIT_SCOUT_MAX_S: float = 120.0
 # a scout steps out of grid danger (KeepUnitSafe) only when hurt or when an enemy that isn't a
 # worker and can hit it is this close (M3: mining workers kept a probe out of an enemy main)
 SCOUT_DANGER_RADIUS: float = 12.0
+
+
+# ---------------------------------------------------------------------------------------------
+# M4: squads, EngagementResult gates, retreat hysteresis, end-game (DESIGN.md §4.5.2, §4.7)
+# ---------------------------------------------------------------------------------------------
+
+# §4.5.2 gates on Citadel's EngagementResult (bot/army/engagement.py: our HP+shields, defender set;
+# user decisions). Values compare as ints: LOSS_EMPHATIC 0 ... TIE 5 ... VICTORY_EMPHATIC 10.
+ATTACK_START: int = 8  # launch at >= this with ATTACK_START_SUPPLY supply used ...
+ATTACK_START_SUPPLY: int = 150
+ATTACK_START_MAX: int = 5  # ... or at >= this with ATTACK_START_MAX_SUPPLY supply used
+ATTACK_START_MAX_SUPPLY: int = 190
+ATTACK_CONTINUE: int = 5  # keep attacking while >= this
+RETREAT_AT: int = 4  # retreat at <= this (3-level hysteresis vs ATTACK_START)
+DEFEND_ENGAGE: int = 4  # at home, inside the battery radius (batteries are not simulated)
+MIN_STATE_SECONDS: float = 20.0  # no attack/retreat flip within this unless the result is <= ...
+FLIP_ANYWAY_AT: int = 2  # ... this
+RETREAT_VALUE_FRACTION: float = 0.4  # retreat when the squad's value is below this x its start value
+RELAUNCH_WAIT_S: float = 45.0  # after a retreat, no launch for this long
+# §4.5.2 inputs: remembered enemy army within this of the squad or its target; static defense
+# within ENGAGE_STATIC_RADIUS of the target
+ENGAGE_ENEMY_RADIUS: float = 20.0
+ENGAGE_STATIC_RADIUS: float = 15.0
+# §3 cadence, in on_step calls: attack decision (<= 2 simulations per evaluation); home defense
+# is evaluated on the same tick
+DECISION_EVERY_STEPS: int = 16
+# §4.5.2 "Reinforcements rally in groups of >= 8 supply; never trickle them in"
+REINFORCE_MIN_SUPPLY: int = 8
