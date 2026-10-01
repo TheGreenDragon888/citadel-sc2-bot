@@ -1171,3 +1171,74 @@ Where §4.6, §5, §6 and §8 leave a choice open, M5 decided as below. Every va
 | Writes | Every file write goes through `bot/data_files.py`, which refuses any path outside `./data` | §2 |
 | Test hook | `CitadelBot.external_tags`: units a dev test drives itself are held like the wall-gap holder; always empty in games | `scripts/test_counterattack.py`'s Observer over the enemy army |
 | M3 flag check | ARMY_OUT_OF_POSITION is allowed in every game (`M3_ALWAYS_ALLOWED`) | It says where the enemy army is, not which cheese it is |
+
+## M5 acceptance evidence
+
+Acceptance (DESIGN.md §7 M5): the counterattack triggers and recalls correctly in at least 3
+staged tests; no crash in 30 local games (user decision: 10 VeryHard games per race, each batch
+with a local opponent id so opponent memory and telemetry are written and read in every game).
+Final code: commit d24ba02 (later commits change docs only).
+
+**Staged counterattack tests** (`scripts/test_counterattack.py`, 7 cases against a scripted Terran,
+see the file's docstring for the setup), on d24ba02, on two maps:
+
+```
+poetry run python scripts/test_counterattack.py --case all --map PylonAIE_v4
+poetry run python scripts/test_counterattack.py --case all --map TorchesAIE_v4
+```
+
+| Case | What happens | PylonAIE_v4 | TorchesAIE_v4 |
+|---|---|---|---|
+| `return` | the enemy army walks back to the target once the squad is near it | PASS: recall "enemy army heading back: 101 from the target by ground, 124 at launch"; 7/7 home after 18 s | PASS: heading back (75 vs 95); 7/7 home after 22 s |
+| `timeout` | the enemy army stays away | PASS: recall "out for 60.0 s > 60 s"; 6 SCVs killed, first kill an SCV; 7/7 home | PASS: same; 6 SCVs, first kill an SCV; 7/7 home |
+| `defense` | 16 Marauders, 12 Marines, 3 sieged Tanks appear in our main 15 s after launch | PASS: recall "defense: home threat ..., home level 1 < 4"; 7/7 home after 9 s | PASS: same; 7/7 home after 10 s |
+| `abort` | 10 Marauders and 3 sieged Tanks appear at the target as the squad nears it | PASS: recall "level 3 <= 4"; 6/7 home (1 lost after the recall) | PASS: "level 1 <= 4"; 6/7 home |
+| `merge` | the main attack's supply gate is lowered once the squad is out | PASS: "merged into the main attack (7 units)", squad in the ATTACK squad | PASS: same |
+| `in_position` (negative) | the enemy army waits next to its natural | PASS: no flag, no launch (detector: "centre 16 from an enemy base") | PASS |
+| `early` (negative) | real COUNTER_FROM_S (5:00) | PASS: no flag, no launch, no detector run before 5:00 | PASS |
+
+In every positive case ARMY_OUT_OF_POSITION was raised at 0:30 (enemy army value 1600, 81% seen
+within 15 s, centre 79-103 from the nearest enemy base) and the counterattack launched at once
+against the enemy natural (defence 0; the main has 2 Bunkers and 6 Marines) with 6 Adepts and 1
+Stalker: 14 of 40 army supply, the 35% cap, Adepts first, no Immortals, not the test's held
+Observer. **Result: PASS** (4 trigger-and-recall cases out of the ≥ 3 needed, on each map; the
+merge and both negative cases pass too).
+
+Offline: `poetry run python scripts/test_counterattack_rules.py` 36/36 (squad, target, every
+recall rule including heading back, the launch block).
+
+**30 local games** on d24ba02:
+
+```
+poetry run python scripts/run_matches.py --difficulty VeryHard --race Terran --map all --total 10 --opponent-id m5f-vh-terran --game-seed 3000
+poetry run python scripts/run_matches.py --difficulty VeryHard --race Zerg --map all --total 10 --opponent-id m5f-vh-zerg --game-seed 3000
+poetry run python scripts/run_matches.py --difficulty VeryHard --race Protoss --map all --total 10 --opponent-id m5f-vh-protoss --game-seed 3000
+```
+
+| Race | Crashes | §8 log line written | Wins (M4 bar ≥ 7) | Counterattacks (how they ended) | Pre-raised |
+|---|---|---|---|---|---|
+| Terran | **0** | 10/10 | 10/10 | 2 (level 2, level 0) | none |
+| Zerg | **0** | 10/10 | 8/10 (Ley Lines 10:15, Pylon 10:16) | 2 (enemy army within 20 of the squad ×2) | POOL_12 in 4 games (from game 5) |
+| Protoss | **0** | 10/10 | 10/10 | 3 (level 4, enemy army within 20 of the squad, within 35 of the target) | none |
+
+**Result: PASS** (`M5 no crash: 10/10 games without a crash, §8 log line written 10/10` for each
+race; 0 crashes in 30 games).
+
+- Every game's record was found by its game id in `./data/logs/games.jsonl`;
+  `poetry run python scripts/check_game_log.py` checked all 125 lines written locally so far
+  (every §8 field present, 0 malformed): 163 KB, about 1.3 KB per game; all of `./data` 201 KB
+  (limit 4.5 MB).
+- Opponent memory: each batch's record (`./data/opponents/m5f-vh-<race>.json`) has 10 games; the
+  Zerg one saw POOL_12 in games 3 and 4 and pre-raised it from game 5 on (games 5, 6, 9, 10: 3 wins).
+- Step time over the 30 games (3 in parallel, plus the staged tests): mean 2.9-6.5 ms per game,
+  p99 13-35 ms (none over 40), max 33-216 ms; the step guard turned on 7 times in 4 games; startup
+  0.4-2.9 s (§6: 5 s).
+- Counterattacks in these games: 7, each recalled within 2-16 s without a kill (level ≤ 4 three
+  times once the squad saw the defenders, the enemy army within 20 of the squad three times, within
+  35 of the target once); the enemy armies were 60-68 from their bases, just past the threshold.
+
+Earlier runs on superseded commits (same commands, other opponent ids, no game seed for the
+first): a2da122 (before the two recall/launch decisions) 29 games, 0 crashes, 29/29 log lines,
+Terran 10/10, Zerg 6/10, Protoss 9/9 (a container restart stopped game 10); eb06fe4 (before the
+launch decision) 27 games, 0 crashes, 27/27 log lines, Terran 9/9, Zerg 7/9, Protoss 9/9 (a
+container restart stopped the batches).
