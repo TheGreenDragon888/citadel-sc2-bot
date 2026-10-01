@@ -712,3 +712,74 @@ BATTERY_COVER_RADIUS: float = 8.0  # a fight this close to a ready Shield Batter
 OBSERVER_WITH_ARMY_FROM_S: float = 360.0  # §4.3 "from 6:00 travels with the army": one Observer
 END_GAME_CORNER_INSET: float = 4.0  # hunt points at the playable area's corners, this far inside
 END_GAME_POINTS_PER_TRIP: int = 8  # hunt points per Observer trip (a unit scout comes back after UNIT_SCOUT_MAX_S)
+
+
+# ---------------------------------------------------------------------------------------------
+# M5: counterattack (§4.6), opponent memory (§5), telemetry to ./data (§8), step guard (§6)
+# ---------------------------------------------------------------------------------------------
+
+# §4.6 gates on Citadel's EngagementResult (same 0-10 levels as §4.5.2)
+COUNTER_START: int = 7  # launch at >= this against the defenders local to the target
+COUNTER_ABORT: int = 4  # recall at <= this
+# §4.4 row 17 / §4.6 ARMY_OUT_OF_POSITION (bot/intel/army_position.py), evaluated with the
+# counterattack every DECISION_EVERY_STEPS (half a period after the main attack decision)
+COUNTER_FROM_S: float = 300.0  # from 5:00
+OUT_OF_POSITION_MIN_VALUE: float = 800.0  # remembered enemy army value (minerals + gas) ...
+OUT_OF_POSITION_FRESH_S: float = 15.0  # ... at least OUT_OF_POSITION_FRESH_FRACTION of it seen this recently
+OUT_OF_POSITION_FRESH_FRACTION: float = 0.6
+OUT_OF_POSITION_PATH: float = 60.0  # its centre this far (ground path) from every known enemy townhall
+OUT_OF_POSITION_PATH_CELL: float = 4.0  # path lengths are cached per cell of this size
+OUT_OF_POSITION_PATH_CACHE_MAX: int = 2000  # ... and the cache is emptied beyond this many entries
+# §4.6 target: the known enemy base with the lowest local defence value (remembered units within
+# COUNTER_DEFENCE_RADIUS plus static defence within ENGAGE_STATIC_RADIUS, counted with §4.5.2's
+# penalty in Stalkers' worth of value; a Shield Battery is Citadel's 1)
+COUNTER_DEFENCE_RADIUS: float = 20.0
+STATIC_PENALTY_STALKERS: dict[UnitTypeId, float] = {
+    UnitTypeId.PHOTONCANNON: 3.0,
+    UnitTypeId.BUNKER: 3.0,
+    UnitTypeId.SPINECRAWLER: 3.0,
+    UnitTypeId.PLANETARYFORTRESS: 8.0,
+    UnitTypeId.SHIELDBATTERY: 1.0,
+}
+COUNTER_TARGET_ARMY_RADIUS: float = 25.0  # enemy army value within this of the target ...
+COUNTER_TARGET_ARMY_FRACTION: float = 0.25  # ... is at most this share of the remembered army
+COUNTER_BASE_RADIUS: float = 14.0  # the target base's workers, production and townhall are within this
+# §4.6 squad: Adepts, Zealots with Charge, then Stalkers, from units no one has pinned
+COUNTER_SQUAD_MAX_FRACTION: float = 0.35  # of our army supply
+COUNTER_SQUAD_MIN_SUPPLY: float = 8.0
+# §4.6 recall
+COUNTER_RECALL_TARGET_RADIUS: float = 35.0  # the out-of-position army's centre within this of the target ...
+COUNTER_RECALL_SQUAD_RADIUS: float = 20.0  # ... or within this of the squad
+COUNTER_RECALL_VALUE_FRACTION: float = 0.5  # squad value below this x its start value
+COUNTER_MAX_OUT_S: float = 60.0
+COUNTER_RELAUNCH_WAIT_S: float = 30.0  # Citadel: no new counterattack this soon after one ends
+
+# §5 opponent memory (bot/memory/opponent_store.py): ./data/opponents/<OpponentId>.json
+DATA_DIR: str = "data"  # §2: Citadel writes only under ./data (ares's own file is ./data/<id>-protoss.json)
+OPPONENTS_SUBDIR: str = "opponents"
+MEMORY_CHEESE: Tuple[str, ...] = ("WORKER_RUSH", "CANNON_RUSH", "POOL_12", "PROXY", "ONE_BASE_ALLIN")  # user decision
+# weak sources that don't count toward the pre-raise (a Forge-first expand; an enemy probe alone,
+# which M2 already doesn't let end the opener)
+MEMORY_IGNORED_SOURCES: Tuple[Tuple[str, str], ...] = (("CANNON_RUSH", "forge_first"), ("CANNON_RUSH", "cannon_probe"))
+MEMORY_LAST_GAMES: int = 3  # §5: the same cheese flag in >= MEMORY_MIN_GAMES of the last 3 games ...
+MEMORY_MIN_GAMES: int = 2  # ... is pre-raised at 0:00 as STRUCTURE evidence with a phase-only expiry
+MEMORY_KEEP_GAMES: int = 20  # threats_seen keeps entries from this many recent games
+MEMORY_SOURCE: str = "memory"  # flag source of a pre-raised flag (never counted for the next game)
+# §5 has no phase rule for WORKER_RUSH (UNIT evidence); a pre-raised one ends after this time once
+# at most WORKER_RUSH_END_AT enemy workers are within BRIDGE_HOME_RADIUS of our bases (user decision)
+WORKER_RUSH_MEMORY_END_S: float = 150.0
+
+# §8 telemetry: one JSON line per game in ./data/logs/games.jsonl, the last GAME_LOG_KEEP games
+LOGS_SUBDIR: str = "logs"
+GAME_LOG_FILE: str = "games.jsonl"
+GAME_LOG_KEEP: int = 200
+DATA_MAX_BYTES: int = 4_500_000  # §2 keeps ./data under 5 MB: older log lines go first
+GAME_LOG_MAX_EVENTS: int = 100  # at most this many flag/engage/counterattack entries per list
+TELEMETRY_SNAPSHOT_EVERY_S: float = 30.0  # §3 step 7: a stdout snapshot this often
+
+# §6 step time
+STEP_WARN_MS: float = 30.0  # log a warning for any step above this
+STEP_GUARD_MS: float = 200.0  # a step above this ...
+STEP_GUARD_STEPS: int = 16  # ... skips the scout planner, counterattack evaluation and snapshot for this many steps
+STARTUP_WARN_MS: float = 5000.0  # §6: keep on_start under 5 s
+STEP_SECTION_LOG_MS: float = 2.0  # a slow step's warning lists the parts that took at least this long
