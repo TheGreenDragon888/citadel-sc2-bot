@@ -3,13 +3,14 @@
 - `flag_check`: the "correct flag logged" test agreed for M3. Against a scripted cheese bot, the
   bot's expected threat must be raised by its deadline, and no threat outside the expected one
   and the bot's allowed list may be raised at any time in the game
-  (`bot.constants.M3_EXPECTED_FLAGS`).
+  (`bot.constants.M3_EXPECTED_FLAGS`); M5's ARMY_OUT_OF_POSITION, which describes where the enemy
+  army is, is allowed in every game (`M3_ALWAYS_ALLOWED`).
 - "No scout lost before 4:00" is `Telemetry.scouts_lost_before()` being empty.
 """
 
 from typing import Iterable
 
-from bot.constants import M3_EXPECTED_FLAGS
+from bot.constants import M3_ALWAYS_ALLOWED, M3_EXPECTED_FLAGS
 
 
 def _mmss(seconds: float) -> str:
@@ -23,7 +24,7 @@ def flag_check(opponent: str, raised: Iterable[tuple[str, float]]) -> tuple[bool
     expected, by_s, allowed = M3_EXPECTED_FLAGS[opponent]
     raised = list(raised)
     times = [t for name, t in raised if name == expected]
-    false_flags = sorted({name for name, _ in raised if name != expected and name not in allowed})
+    false_flags = sorted({name for name, _ in raised if name != expected and name not in allowed and name not in M3_ALWAYS_ALLOWED})
     problems = []
     if not times:
         problems.append(f"{expected} never raised")

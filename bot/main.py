@@ -64,6 +64,9 @@ class CitadelBot(AresBot):
         self.scouts: Optional[ScoutPlanner] = None  # M3: §4.3 scouting schedule
         self.static_defense: Optional[StaticDefense] = None
         self.worker_defense: Optional[WorkerDefense] = None
+        # units a dev test script drives itself (scripts/test_counterattack.py's Observer): held
+        # like the wall-gap holder, so no squad or scouting task takes them
+        self.external_tags: set[int] = set()
 
     async def on_start(self) -> None:
         # §4.0: loop-0 state is parsed here, before ares picks an opener in super().on_start()
@@ -96,7 +99,7 @@ class CitadelBot(AresBot):
         self.economy = Economy(self)
         self.executor = BuildExecutor(self, self.opener, self.planner)
         self.production = Production(self)
-        self.army = Army(self, self.endgame)
+        self.army = Army(self, self.endgame, self.flags)
 
     async def on_step(self, iteration: int) -> None:
         started = time.perf_counter()
@@ -151,7 +154,7 @@ class CitadelBot(AresBot):
         if iteration % ARMY_EVERY_STEPS == 0:
             holder = self.wall.step(hold_gap=plan.hold_wall_gap)
             # the wall-gap holder and scouts are controlled elsewhere
-            self.army.held_tags = {holder} if holder is not None else set()
+            self.army.held_tags = ({holder} if holder is not None else set()) | self.external_tags
             self.army.scout_tags = self.scouts.tags
             plan.pinned_unit_tags = self.army.held_tags | self.scouts.tags | set(self.worker_defense.jobs)
             self.army.hold_point = plan.army_hold_point
@@ -195,6 +198,7 @@ class CitadelBot(AresBot):
         # python-sc2 still holds last step's own units here, so the type is known
         own = self._units_previous_map.get(unit_tag)
         enemy = self._enemy_units_previous_map.get(unit_tag)
+        enemy_structure = self._enemy_structures_previous_map.get(unit_tag)
         role = "?"
         if own is not None and self.static_defense is not None:
             role = next((str(r) for r, tags in self.mediator.get_unit_role_dict.items() if unit_tag in tags), "?")
@@ -210,6 +214,8 @@ class CitadelBot(AresBot):
             self.telemetry.on_own_unit_destroyed(own, role)
         if enemy is not None and self.telemetry is not None:
             self.telemetry.on_enemy_unit_destroyed(enemy)
+        if self.army is not None and (enemy or enemy_structure) is not None:
+            self.army.counter.on_enemy_destroyed(enemy or enemy_structure)  # §8 counterattack outcomes
 
     async def on_unit_took_damage(self, unit: Unit, amount_damage_taken: float) -> None:
         await super(CitadelBot, self).on_unit_took_damage(unit, amount_damage_taken)

@@ -28,6 +28,7 @@ CASES = [
     ("twelve_pool", [("POOL_12", 200), ("POOL_12", 70)], True, "POOL_12 at 1:10"),
     ("proxy_rax", [("PROXY", 90), ("ONE_BASE_ALLIN", 158)], True, ""),
     ("proxy_rax", [("PROXY", 90), ("POOL_12", 158)], False, "false POOL_12"),
+    ("proxy_rax", [("PROXY", 90), ("ARMY_OUT_OF_POSITION", 400)], True, "PROXY at 1:30"),
 ]
 
 

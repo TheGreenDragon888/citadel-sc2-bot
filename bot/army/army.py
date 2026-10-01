@@ -26,6 +26,10 @@ go out as REINFORCE groups of at least REINFORCE_MIN_SUPPLY and join the ATTACK 
 
 One Observer stays with the army from OBSERVER_WITH_ARMY_FROM_S (§4.3), with the ATTACK squad
 while it is out.
+
+Counterattack (HARASS squad, bot/army/counterattack.py, §4.6): evaluated every
+DECISION_EVERY_STEPS, half a period after the main attack decision; a main attack launch takes the
+HARASS squad in.
 """
 
 from typing import TYPE_CHECKING, Optional
@@ -38,6 +42,7 @@ from sc2.unit import Unit
 
 from bot.army import micro
 from bot.army.attack_decision import ATTACK, AttackDecision, Decision
+from bot.army.counterattack import Counterattack
 from bot.army.engagement import (
     ENEMY_DEFENDS,
     WE_DEFEND,
@@ -82,6 +87,7 @@ if TYPE_CHECKING:
     from ares import AresBot
 
     from bot.army.endgame import EndGame
+    from bot.intel.threat_flags import FlagStore
 
 # enemy units that never make a home threat
 HARMLESS: frozenset[UnitTypeId] = frozenset(
@@ -104,16 +110,17 @@ NOT_TARGETS: frozenset[UnitTypeId] = frozenset(
 )
 
 # unit intents
-FIGHT, HOLD, RETREAT, MOVE = "fight", "hold", "retreat", "move"
+FIGHT, HOLD, RETREAT, MOVE, HARASS = "fight", "hold", "retreat", "move", "harass"
 
 
 class Army:
-    def __init__(self, bot: "AresBot", endgame: Optional["EndGame"] = None):
+    def __init__(self, bot: "AresBot", endgame: Optional["EndGame"] = None, flags: Optional["FlagStore"] = None):
         self.bot = bot
         self.endgame = endgame  # §4.7
         self.engagement = Engagement(bot)
         self.decision = AttackDecision()
         self.squads = Squads(bot)
+        self.counter = Counterattack(bot, self, flags)  # §4.6
         # set by CitadelBot each army tick
         self.held_tags: set[int] = set()  # the wall-gap holder (other modules control it)
         self.scout_tags: set[int] = set()  # the scout planner's units
@@ -144,10 +151,25 @@ class Army:
 
     @property
     def busy_tags(self) -> set[int]:
-        """Units the scout planner must not take: the ATTACK and REINFORCE squads and the
+        """Units the scout planner must not take: the ATTACK, REINFORCE and HARASS squads and the
         army's Observer."""
-        tags = self.squads.tags(Role.ATTACK) | self.squads.tags(Role.REINFORCE)
+        tags = self.squads.tags(Role.ATTACK) | self.squads.tags(Role.REINFORCE) | self.squads.tags(Role.HARASS)
         return tags | ({self.observer_tag} if self.observer_tag is not None else set())
+
+    @property
+    def attacking(self) -> bool:
+        """The main attack is on (§4.6: no counterattack then)."""
+        return self.decision.state == ATTACK
+
+    def retreating(self, tag: int) -> bool:
+        intent = self.intents.get(tag)
+        return intent is not None and intent[0] == RETREAT
+
+    def send_home(self, tags: set[int]) -> None:
+        """Squad units back to the DEFEND squad, walking home on a danger-aware path."""
+        self.squads.assign(tags, Role.DEFEND)
+        for tag in tags:
+            self.intents[tag] = (RETREAT, self.anchor)
 
     def forget(self, tag: int) -> None:
         self.squads.forget(tag)
@@ -155,7 +177,8 @@ class Army:
         if tag == self.observer_tag:
             self.observer_tag = None
 
-    def step(self, iteration: int) -> None:
+    def step(self, iteration: int, guarded: bool = False) -> None:
+        """`guarded`: the §6 step guard is on (the counterattack skips detection and launch)."""
         bot = self.bot
         self._step = iteration
         army = [
@@ -168,12 +191,15 @@ class Army:
         self._claim_observer()
         if iteration % DECISION_EVERY_STEPS == 0:
             self._decide()
+        elif iteration % DECISION_EVERY_STEPS == DECISION_EVERY_STEPS // 2:
+            self.counter.tick(guarded)
+        self.counter.refresh_goals()
         self._set_intents()
         self._status()
 
     # -- decisions (every DECISION_EVERY_STEPS) --------------------------------------------------
 
-    def _fighters(self, role: Role) -> list[Unit]:
+    def fighters(self, role: Role) -> list[Unit]:
         return [u for u in self.squads.units(role) if is_fighter(u)]
 
     def _supply(self, units: list[Unit]) -> float:
@@ -189,9 +215,9 @@ class Army:
     def _decide(self) -> None:
         bot = self.bot
         now = bot.time
-        defenders = self._fighters(Role.DEFEND)
+        defenders = self.fighters(Role.DEFEND)
         self._home_defense(defenders)
-        attackers = self._fighters(Role.ATTACK)
+        attackers = self.fighters(Role.ATTACK)
         if self.decision.state == ATTACK and self.threat is not None and self.defend_target is None:
             near = self.engagement.enemies_near([self.threat])
             value = self.engagement.value(attackers)
@@ -223,6 +249,7 @@ class Army:
             for u in candidates:
                 self.intents.pop(u.tag, None)
             self._log(decision, level, f"{len(candidates)} units, {self._supply(candidates):g} supply -> {target.rounded}")
+            self.counter.merge()  # §4.6: the main attack absorbs a counterattack
 
     def _evaluate_attack(self, attackers: list[Unit]) -> None:
         bot = self.bot
@@ -247,10 +274,7 @@ class Army:
             self._retreat_attack_squad()
 
     def _retreat_attack_squad(self) -> None:
-        tags = self.squads.tags(Role.ATTACK) | self.squads.tags(Role.REINFORCE)
-        self.squads.assign(tags, Role.DEFEND)
-        for tag in tags:
-            self.intents[tag] = (RETREAT, self.anchor)
+        self.send_home(self.squads.tags(Role.ATTACK) | self.squads.tags(Role.REINFORCE))
         self._target_tag = None
 
     def _reinforce(self, defenders: list[Unit]) -> None:
@@ -258,7 +282,7 @@ class Army:
         if self.attack_center is None:
             return
         # groups on their way: join the squad near it, or come back from a fight they'd lose
-        group = self._fighters(Role.REINFORCE)
+        group = self.fighters(Role.REINFORCE)
         if group:
             center = Point2.center([u.position for u in group])
             if center.distance_to(self.attack_center) <= REINFORCE_JOIN_RADIUS:
@@ -296,7 +320,7 @@ class Army:
             and abs(bot.get_terrain_z_height(point) - bot.get_terrain_z_height(bot.start_location)) < SAME_LEVEL_Z
         )
 
-    def _own_cannons_near(self, point: Point2) -> list[Unit]:
+    def own_cannons_near(self, point: Point2) -> list[Unit]:
         return [
             s for s in self.bot.structures
             if s.type_id == UnitTypeId.PHOTONCANNON and s.is_ready and s.is_powered
@@ -334,7 +358,7 @@ class Army:
                 self.defend_target, state = found.position, "last stand (main or defensive position)"
             else:
                 enemy = self.engagement.enemies_near([found.position]) + self.engagement.static_defense_near(found.position)
-                level = self.engagement.level(defenders + self._own_cannons_near(found.position), enemy, WE_DEFEND)
+                level = self.engagement.level(defenders + self.own_cannons_near(found.position), enemy, WE_DEFEND)
                 self.home_level = level
                 covered = self._covered_by_battery(found.position)
                 needed = DEFEND_ENGAGE if covered else ATTACK_CONTINUE
@@ -518,7 +542,7 @@ class Army:
                 self.intents[u.tag] = (RETREAT, anchor)
             else:
                 self.intents[u.tag] = (HOLD, anchor)
-        attackers = self._fighters(Role.ATTACK)
+        attackers = self.fighters(Role.ATTACK)
         if attackers and self.decision.state == ATTACK:
             groups = self._groups(attackers)
             main = groups[0] if groups else None
@@ -540,6 +564,8 @@ class Army:
         rally = self.attack_center or anchor
         for u in self.squads.units(Role.REINFORCE):
             self.intents[u.tag] = (MOVE, rally)
+        for u in self.squads.units(Role.HARASS):
+            self.intents[u.tag] = (HARASS, self.counter.target or anchor)
         # the army's Observer: with the ATTACK squad's main group while it is out, else at home
         if self.observer_tag is not None:
             where = self.attack_center if self.decision.state == ATTACK and self.attack_center is not None else anchor
@@ -576,6 +602,12 @@ class Army:
         near_lists = bot.mediator.get_units_in_range(
             start_points=[u.position for u in units], distances=MICRO_RADIUS, query_tree=UnitTreeQueryType.AllEnemy
         )
+        goals: list[list[Unit]] = []
+        if self.counter.target is not None:
+            goals = [
+                [e for tag in group if (e := get(tag)) is not None and not e.is_memory]
+                for group in self.counter.goals
+            ]
         for unit, near in zip(units, near_lists):
             mode, point = self.intents.get(unit.tag, (HOLD, self.anchor))
             own_tick = (iteration + unit.tag) % ARMY_EVERY_STEPS == 0 or unit.is_idle
@@ -584,6 +616,9 @@ class Army:
                     micro.keep_safe(bot, unit, point)
                 continue
             visible = [e for e in near if not e.is_memory and e.type_id not in NOT_TARGETS]
+            if mode == HARASS:
+                micro.harass(bot, unit, visible, point, goals, own_tick)
+                continue
             if mode == RETREAT:
                 if own_tick or unit.weapon_cooldown == 0:
                     micro.retreat(bot, unit, visible, point, move_now=own_tick)
@@ -615,12 +650,13 @@ class Army:
             return
         self._last_status = bot.time
         parts = []
-        for role in (Role.DEFEND, Role.ATTACK, Role.REINFORCE, Role.SCOUT):
+        for role in (Role.DEFEND, Role.ATTACK, Role.REINFORCE, Role.HARASS, Role.SCOUT):
             units = self.squads.units(role)
             if units:
                 parts.append(f"{role.value}={len(units)}/{self._supply(units):g}")
         logger.info(
             f"ARMY {bot.time_formatted} state={self.decision.state} {' '.join(parts) or 'no units'} "
             f"anchor={self.anchor.rounded} target={self.target.rounded if self.target else '-'} "
-            f"level={self.last_level if self.last_level is not None else '-'} defend={self._defend_state}"
+            f"level={self.last_level if self.last_level is not None else '-'} defend={self._defend_state} "
+            f"counter={self.counter.state}"
         )

@@ -543,6 +543,8 @@ M3_EXPECTED_FLAGS: dict[str, tuple[str, float, Tuple[str, ...]]] = {
     "twelve_pool": ("POOL_12", 105.0, ("ONE_BASE_ALLIN", "UNKNOWN_AGGRO")),
     "proxy_rax": ("PROXY", 120.0, ("ONE_BASE_ALLIN", "UNKNOWN_AGGRO")),
 }
+# M5: flags that describe the enemy army rather than a cheese; allowed in every M3 check
+M3_ALWAYS_ALLOWED: Tuple[str, ...] = ("ARMY_OUT_OF_POSITION",)
 M3_FLAG_RATE: float = 0.8  # correct flag in >= 80% of each bot's games
 M3_SCOUT_SAFE_RATE: float = 0.7  # no scout lost before 4:00 in >= 70% of games
 
@@ -744,6 +746,7 @@ STATIC_PENALTY_STALKERS: dict[UnitTypeId, float] = {
 COUNTER_TARGET_ARMY_RADIUS: float = 25.0  # enemy army value within this of the target ...
 COUNTER_TARGET_ARMY_FRACTION: float = 0.25  # ... is at most this share of the remembered army
 COUNTER_BASE_RADIUS: float = 14.0  # the target base's workers, production and townhall are within this
+COUNTER_THREAT_MARGIN: float = 1.0  # a defender this far beyond its reach to a squad unit is fought first
 # §4.6 squad: Adepts, Zealots with Charge, then Stalkers, from units no one has pinned
 COUNTER_SQUAD_MAX_FRACTION: float = 0.35  # of our army supply
 COUNTER_SQUAD_MIN_SUPPLY: float = 8.0

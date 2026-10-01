@@ -7,6 +7,9 @@
   shoots a target already in range first.
 - `move`: attack-move (FIGHT/HOLD) or move (REINFORCE, support units) to a point; python-sc2 drops
   an order identical to the unit's current one (§6 APM).
+- `harass`: the §4.6 counterattack squad: on the way, shoot only what can fight back; inside the
+  target base, what can fight back first, then workers, production and the townhall (user
+  decision), and walk to the next of those when nothing is in range.
 """
 
 from typing import TYPE_CHECKING, Optional, Sequence
@@ -21,7 +24,7 @@ from sc2.position import Point2
 from sc2.unit import Unit
 
 from bot.army.engagement import WORKERS, is_static_defense
-from bot.constants import KITE_RANGE_MARGIN, MOVE_REISSUE_DIST
+from bot.constants import COUNTER_BASE_RADIUS, COUNTER_THREAT_MARGIN, KITE_RANGE_MARGIN, MOVE_REISSUE_DIST
 
 if TYPE_CHECKING:
     from ares import AresBot
@@ -49,6 +52,14 @@ def threats_to(unit: Unit, enemies: Sequence[Unit]) -> list[Unit]:
     return [e for e in enemies if (e.can_attack_air if unit.is_flying else e.can_attack_ground)]
 
 
+def _fights_back(e: Unit) -> bool:
+    """An enemy that can fight: a unit that can attack (not a worker), or finished static defense."""
+    return (
+        e.type_id not in WORKERS and (e.can_attack_ground or e.can_attack_air)
+        and (not e.is_structure or is_static_defense(e))
+    )
+
+
 def fight(bot: "AresBot", unit: Unit, enemies: Sequence[Unit], fallback: Point2) -> None:
     """`enemies`: visible enemies near `unit`. With none it can hit, attack-move to `fallback`."""
     targets = [e for e in enemies if _can_hit(unit, e) and not e.is_memory]
@@ -57,11 +68,7 @@ def fight(bot: "AresBot", unit: Unit, enemies: Sequence[Unit], fallback: Point2)
         return
     # what can fight back (units, and finished static defense) before workers and other structures
     # (§4.6 priorities are M5's)
-    fighters = [
-        e for e in targets
-        if e.type_id not in WORKERS and (e.can_attack_ground or e.can_attack_air)
-        and (not e.is_structure or is_static_defense(e))
-    ]
+    fighters = [e for e in targets if _fights_back(e)]
     for group in (fighters, targets):
         if group and ShootTargetInRange(unit=unit, targets=group).execute(bot, bot.config, bot.mediator):
             return
@@ -77,6 +84,39 @@ def fight(bot: "AresBot", unit: Unit, enemies: Sequence[Unit], fallback: Point2)
                     return
     target = min(fighters or targets, key=lambda e: e.distance_to(unit))
     move(unit, target.position, attack=True)
+
+
+def harass(
+    bot: "AresBot", unit: Unit, enemies: Sequence[Unit], base: Point2, goals: Sequence[Sequence[Unit]], own_tick: bool
+) -> None:
+    """`enemies`: visible enemies near `unit`; `goals`: visible enemies at the target `base` in §4.6
+    order (workers, production, townhalls). New orders go out on the unit's own tick or when idle."""
+    targets = [e for e in enemies if _can_hit(unit, e) and not e.is_memory]
+    fighters = [e for e in targets if _fights_back(e)]
+    at_base = unit.distance_to(base) <= COUNTER_BASE_RADIUS
+    groups: list[Sequence[Unit]] = [fighters]
+    if at_base:
+        tags = [{e.tag for e in g} for g in goals]
+        groups += [[e for e in targets if e.tag in g] for g in tags] + [targets]
+    for group in groups:
+        if group and ShootTargetInRange(unit=unit, targets=group).execute(bot, bot.config, bot.mediator):
+            return
+    if not own_tick and not unit.is_idle:
+        return
+    # fight back first: a defender that can reach us
+    threats = [
+        e for e in fighters
+        if e.distance_to(unit)
+        <= (e.air_range if unit.is_flying else e.ground_range) + e.radius + unit.radius + COUNTER_THREAT_MARGIN
+    ]
+    for group in [threats] + [list(g) for g in goals]:
+        reachable = [e for e in group if _can_hit(unit, e)]
+        if reachable:
+            goal = min(reachable, key=lambda e: e.distance_to(unit))
+            if unit.order_target != goal.tag:
+                unit.attack(goal)
+            return
+    move(unit, base, attack=at_base)
 
 
 def retreat(bot: "AresBot", unit: Unit, enemies: Sequence[Unit], home: Point2, move_now: bool = True) -> None:
