@@ -40,11 +40,12 @@ from bot.constants import (
     CANNON_RUSH_RADIUS,
     CANNON_RUSH_UNTIL_S,
     EARLY_LINGS_UNTIL_S,
-    FORGE_FIRST_UNTIL_S,
     EARLY_POOL_CERTAIN_S,
+    FORGE_FIRST_UNTIL_S,
     MAIN_RADIUS,
     MAIN_SAMPLE_STEP,
     MAIN_SCOUTED_FRACTION,
+    MEMORY_SOURCE,
     NATURAL_TOWNHALL_RADIUS,
     NO_NATURAL_DEADLINE_S,
     NO_NATURAL_GIVE_UP_S,
@@ -66,6 +67,8 @@ from bot.constants import (
     SAME_LEVEL_Z,
     UNKNOWN_AGGRO_PHASE_END_S,
     WORKER_RUSH_CONFIRM_MIN,
+    WORKER_RUSH_END_AT,
+    WORKER_RUSH_MEMORY_END_S,
     WORKER_RUSH_MIN_WORKERS,
     WORKER_RUSH_RADIUS,
     WORKER_RUSH_UNTIL_S,
@@ -568,6 +571,19 @@ class Detectors:
             elif now > UNKNOWN_AGGRO_PHASE_END_S:
                 phase[Threat.UNKNOWN_AGGRO] = f"time > {_mmss(UNKNOWN_AGGRO_PHASE_END_S)}"
         source_over: dict[tuple[Threat, str], str] = {}
+        if now > WORKER_RUSH_MEMORY_END_S:
+            # §5 gives WORKER_RUSH no phase rule; a flag pre-raised from opponent memory ends here
+            # (user decision)
+            near = [
+                e for e in bot.enemy_units
+                if e.type_id in WORKER_TYPES and not e.is_memory
+                and any(e.distance_to(b) < BRIDGE_HOME_RADIUS for b in bases)
+            ]
+            if len(near) <= WORKER_RUSH_END_AT:
+                source_over[(Threat.WORKER_RUSH, MEMORY_SOURCE)] = (
+                    f"pre-raised from memory: time > {_mmss(WORKER_RUSH_MEMORY_END_S)} with {len(near)} enemy "
+                    f"workers near our bases"
+                )
         if self.natural_townhall_seen_at is not None:
             # §4.4 row 3: "or a Forge-first expand if the natural exists" (M3)
             source_over[(Threat.CANNON_RUSH, "forge_first")] = "enemy natural townhall seen: a Forge-first expand"

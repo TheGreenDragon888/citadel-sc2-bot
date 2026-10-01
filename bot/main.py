@@ -14,6 +14,8 @@ from bot.constants import (
     ARMY_EVERY_STEPS,
     INTEL_EVERY_STEPS,
     MACRO_EVERY_STEPS,
+    MEMORY_LAST_GAMES,
+    MEMORY_SOURCE,
     OPENER_TIMEOUT_S,
     PROBE_TARGET,
     RULESET_12_WORKER,
@@ -25,11 +27,12 @@ from bot.defense.worker_defense import WorkerDefense
 from bot.intel.ares_bridge import AresBridge
 from bot.intel.detectors import Detectors
 from bot.intel.scout_planner import ScoutPlanner
-from bot.intel.threat_flags import FlagStore, Threat
+from bot.intel.threat_flags import Evidence, FlagStore, Threat
 from bot.macro.build_executor import BuildExecutor
 from bot.macro.economy import Economy, KeepBank, ReserveForPending
 from bot.macro.production import Production
 from bot.macro.supply import supply_behavior
+from bot.memory.opponent_store import OpponentStore
 from bot.ruleset import detect_ruleset
 from bot.telemetry.logger import Telemetry
 
@@ -67,6 +70,8 @@ class CitadelBot(AresBot):
         # units a dev test script drives itself (scripts/test_counterattack.py's Observer): held
         # like the wall-gap holder, so no squad or scouting task takes them
         self.external_tags: set[int] = set()
+        self.memory: Optional[OpponentStore] = None  # M5: §5 opponent memory
+        self.preraised: list[str] = []  # threats pre-raised from memory at 0:00
 
     async def on_start(self) -> None:
         # §4.0: loop-0 state is parsed here, before ares picks an opener in super().on_start()
@@ -100,6 +105,38 @@ class CitadelBot(AresBot):
         self.executor = BuildExecutor(self, self.opener, self.planner)
         self.production = Production(self)
         self.army = Army(self, self.endgame, self.flags)
+        self._load_memory()
+
+    def _load_memory(self) -> None:
+        """§5: load the opponent's record; pre-raise the cheese it showed in 2 of its last 3 games
+        as STRUCTURE evidence (phase-only expiry) that acts like the same flag raised in game,
+        ending the opener where that flag would (user decision)."""
+        try:
+            self.memory = OpponentStore(self.opponent_id)
+            self.memory.load()
+            for name, games in self.memory.preraise().items():
+                threat = Threat[name]
+                self.flags.raise_flag(
+                    threat,
+                    Evidence.STRUCTURE,
+                    MEMORY_SOURCE,
+                    self.time,
+                    reason=f"opponent memory: raised in {games} of the last {MEMORY_LAST_GAMES} games",
+                    override_opener=self.planner.override_for(threat, Evidence.STRUCTURE),
+                )
+                self.preraised.append(name)
+        except Exception:  # noqa: BLE001 - memory must never stop the game
+            logger.exception("MEMORY load failed; playing without opponent memory")
+
+    def _save_memory(self, game_result: Result) -> None:
+        if self.memory is None or self.flags is None:
+            return
+        try:
+            result = game_result.name if isinstance(game_result, Result) else str(game_result)
+            first = self.telemetry.first_aggression[0] if self.telemetry and self.telemetry.first_aggression else None
+            self.memory.save(result, [(r.threat.name, r.source, r.raised_at) for r in self.flags.history], first)
+        except Exception:  # noqa: BLE001 - never crash at the end of a game
+            logger.exception("MEMORY save failed")
 
     async def on_step(self, iteration: int) -> None:
         started = time.perf_counter()
@@ -225,4 +262,5 @@ class CitadelBot(AresBot):
     async def on_end(self, game_result: Result) -> None:
         if self.telemetry is not None:
             self.telemetry.end_report(self.flags, self.army)
+        self._save_memory(game_result)
         await super(CitadelBot, self).on_end(game_result)
