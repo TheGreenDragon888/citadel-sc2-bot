@@ -1,15 +1,26 @@
-"""Per-game metrics (DESIGN.md §8), kept in memory and logged to stdout.
+"""Per-game metrics (DESIGN.md §8), kept in memory, logged to stdout and written to ./data/logs.
 
 M1 records the economy snapshots the acceptance test needs (probes at 6:00) plus a few §8
 metrics that come for free. M3 adds scout records (every scouting task a unit was given, and
 how it ended) and the §8 "first enemy aggression time". M4 adds the §8 "army value lost vs
 killed", the step-time p99 and the EngagementResult of each attack/retreat decision (kept by
-bot/army/army.py, reported here). Writing them to ./data/logs is M5.
+bot/army/army.py, reported here).
+
+M5 (§8, §6):
+- at the end of the game, one JSON line with every §8 metric (`game_record`) goes to stdout
+  (`METRIC game {...}`) and is appended to ./data/logs/games.jsonl, which keeps the last
+  GAME_LOG_KEEP games and drops its oldest lines first if ./data would pass DATA_MAX_BYTES (§2);
+- a stdout snapshot every TELEMETRY_SNAPSHOT_EVERY_S (§3 step 7), skipped with the 4:00-10:00
+  snapshots while the §6 step guard is on;
+- startup time and step counts (over STEP_WARN_MS, guard activations, guarded steps).
 """
 
+import json
 import time
+import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Optional
 
 from ares.consts import WORKER_TYPES
 from loguru import logger
@@ -21,9 +32,17 @@ from bot.constants import (
     AGGRESSION_RADIUS,
     AGGRESSION_WORKERS,
     CANNON_RUSH_RADIUS,
+    DATA_MAX_BYTES,
+    GAME_LOG_FILE,
+    GAME_LOG_KEEP,
+    GAME_LOG_MAX_EVENTS,
+    LADDER_TIE_GAME_SECONDS,
+    LOGS_SUBDIR,
     METRIC_TIMES_S,
     SCOUT_LOSS_CHECK_S,
+    TELEMETRY_SNAPSHOT_EVERY_S,
 )
+from bot.data_files import data_path, data_size, read_text, write_text
 
 if TYPE_CHECKING:
     from ares import AresBot
@@ -75,6 +94,14 @@ class Telemetry:
         self.step_ms: list[float] = []  # every step, for the p99 (§6)
         self.army_value_lost: float = 0.0  # §8, fighting units only (no workers or structures)
         self.army_value_killed: float = 0.0
+        # M5
+        self.game_id: str = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:6]}"
+        self.startup_ms: Optional[float] = None
+        self.steps_over_warn: int = 0
+        self.guard_activations: int = 0
+        self.guarded_steps: int = 0
+        self._last_snapshot: float = 0.0
+        self.log_written: bool = False
 
     # -- scouts (M3) -----------------------------------------------------------------------------
 
@@ -121,13 +148,14 @@ class Telemetry:
             + (f"{near.type_id.name} at {near.position.distance_to(pos):.1f}" if near is not None else "none seen")
         )
 
-    def record_step_time(self, started: float) -> None:
-        """`started` is `time.perf_counter()` at the start of `on_step`."""
+    def record_step_time(self, started: float) -> float:
+        """`started` is `time.perf_counter()` at the start of `on_step`; returns the step's ms."""
         ms = (time.perf_counter() - started) * 1000
         self.step_count += 1
         self.step_total_ms += ms
         self.step_max_ms = max(self.step_max_ms, ms)
         self.step_ms.append(ms)
+        return ms
 
     def step_p99_ms(self) -> float:
         if not self.step_ms:
@@ -144,7 +172,8 @@ class Telemetry:
         if is_fighter(unit):
             self.army_value_killed += self._value(unit.type_id)
 
-    def step(self) -> None:
+    def step(self, snapshot: bool = True) -> None:
+        """Every step. `snapshot` False (§6 step guard): no snapshot this step."""
         bot = self.bot
         now = bot.time
         blocked = bot.supply_left <= 0 and bot.supply_cap < 200
@@ -161,9 +190,24 @@ class Telemetry:
         self._last_time = now
         if self.first_aggression is None:
             self._check_aggression()
+        if not snapshot:
+            return
         for mark in METRIC_TIMES_S:
             if mark not in self.snapshots and now >= mark:
                 self._snapshot(mark)
+        if now - self._last_snapshot >= TELEMETRY_SNAPSHOT_EVERY_S:
+            self._last_snapshot = now
+            self._periodic_snapshot()
+
+    def _periodic_snapshot(self) -> None:
+        """§3 step 7: a stdout snapshot every TELEMETRY_SNAPSHOT_EVERY_S."""
+        bot = self.bot
+        logger.info(
+            f"METRIC snap t={bot.time_formatted} supply={int(bot.supply_used)}/{int(bot.supply_cap)} "
+            f"army_supply={int(bot.supply_army)} probes={len(bot.workers)} bases={len(bot.ready_townhalls)} "
+            f"minerals={bot.minerals} vespene={bot.vespene} value_lost={self.army_value_lost:.0f} "
+            f"value_killed={self.army_value_killed:.0f}"
+        )
 
     def _check_aggression(self) -> None:
         """§8 first enemy aggression time."""
@@ -242,3 +286,87 @@ class Telemetry:
             logger.info(
                 f"METRIC flag {r.threat.name} ({r.source}) raised {_mmss(r.raised_at)}: {r.reason}; {expired}"
             )
+
+    # -- M5: the per-game record (§8) ------------------------------------------------------------
+
+    def game_record(
+        self, result: str, flags=None, army=None, opener: str = "", ruleset: Optional[str] = None,
+        wall_ok: Optional[bool] = None, memory=None, preraised: Optional[list[str]] = None,
+    ) -> dict[str, Any]:
+        """Every §8 metric for this game as one JSON-ready dict."""
+        bot = self.bot
+        mean = self.step_total_ms / self.step_count if self.step_count else 0.0
+
+        def snap(mark: int, key: str):
+            return self.snapshots[mark][key] if mark in self.snapshots else None
+
+        def capped(items: list) -> list:
+            return items[:GAME_LOG_MAX_EVENTS]
+
+        counter = army.counter if army is not None else None
+        return {
+            "version": 1,
+            "game_id": self.game_id,
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "result": result,
+            "opponent_id": bot.opponent_id,
+            "opponent_race": bot.enemy_race.name,
+            "map": bot.game_info.map_name,
+            "game_length_s": round(bot.time, 1),
+            "tie": result == "Tie" or bot.time >= LADDER_TIE_GAME_SECONDS,
+            "opener": opener,
+            "ruleset": ruleset,
+            "wall_ok": wall_ok,
+            "flags": capped([
+                {
+                    "threat": r.threat.name, "source": r.source, "raised": round(r.raised_at, 1), "reason": r.reason,
+                    "expired": round(r.expired_at, 1) if r.expired_at is not None else None, "expire_reason": r.expire_reason,
+                }
+                for r in (flags.history if flags is not None else [])
+            ]),
+            "preraised": preraised or [],
+            "opponent_games_before": memory.record["games"] if memory is not None and memory.loaded else 0,
+            "probes": {"4:00": snap(240, "probes"), "6:00": snap(360, "probes"), "8:00": snap(480, "probes")},
+            "bases": {"6:00": snap(360, "bases"), "10:00": snap(600, "bases")},
+            "supply_blocked_s": round(self.supply_blocked_s, 1),
+            "unspent": {
+                "6:00": {"minerals": snap(360, "minerals"), "vespene": snap(360, "vespene")},
+                "10:00": {"minerals": snap(600, "minerals"), "vespene": snap(600, "vespene")},
+            },
+            "first_aggression": (
+                {"time": round(self.first_aggression[0], 1), "what": self.first_aggression[1]}
+                if self.first_aggression is not None else None
+            ),
+            "army_value": {"lost": round(self.army_value_lost), "killed": round(self.army_value_killed)},
+            "engage": capped([
+                {"t": round(t, 1), "action": action, "level": level, "reason": reason}
+                for t, action, level, reason in (army.decisions if army is not None else [])
+            ]),
+            "counterattacks": capped(list(counter.outcomes) if counter is not None else []),
+            "scouts": {"tasks": len(self.scouts), f"lost_before_{SCOUT_LOSS_CHECK_S:.0f}s": len(self.scouts_lost_before())},
+            "startup_ms": round(self.startup_ms, 1) if self.startup_ms is not None else None,
+            "step_ms": {
+                "mean": round(mean, 2), "p99": round(self.step_p99_ms(), 1), "max": round(self.step_max_ms, 1),
+                "count": self.step_count, "over_warn": self.steps_over_warn,
+                "guard_activations": self.guard_activations, "guarded_steps": self.guarded_steps,
+            },
+        }
+
+    def write_game_record(self, record: dict[str, Any]) -> bool:
+        """§8: stdout, and a line in ./data/logs/games.jsonl (the last GAME_LOG_KEEP games, oldest
+        dropped first to keep ./data under DATA_MAX_BYTES, §2)."""
+        line = json.dumps(record, separators=(",", ":"), default=str)
+        logger.info(f"METRIC game {line}")
+        path = data_path(LOGS_SUBDIR, GAME_LOG_FILE)
+        lines = [ln for ln in (read_text(path) or "").splitlines() if ln.strip()]
+        lines = lines[-(GAME_LOG_KEEP - 1):] + [line]
+        budget = DATA_MAX_BYTES - data_size(exclude=path)
+        while len(lines) > 1 and sum(len(ln) + 1 for ln in lines) > budget:
+            lines.pop(0)
+        if sum(len(ln) + 1 for ln in lines) > budget:
+            logger.warning(f"LOG not written: ./data is at {DATA_MAX_BYTES - budget} bytes of {DATA_MAX_BYTES}")
+            return False
+        write_text(path, "\n".join(lines) + "\n")
+        self.log_written = True
+        logger.info(f"LOG {path.name}: {len(lines)} games, {sum(len(ln) + 1 for ln in lines)} bytes")
+        return True

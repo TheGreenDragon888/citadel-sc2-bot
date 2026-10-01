@@ -19,6 +19,11 @@ from bot.constants import (
     OPENER_TIMEOUT_S,
     PROBE_TARGET,
     RULESET_12_WORKER,
+    STARTUP_WARN_MS,
+    STEP_GUARD_MS,
+    STEP_GUARD_STEPS,
+    STEP_SECTION_LOG_MS,
+    STEP_WARN_MS,
 )
 from bot.defense.defense_planner import DefensePlanner
 from bot.defense.static_defense import StaticDefense
@@ -72,8 +77,11 @@ class CitadelBot(AresBot):
         self.external_tags: set[int] = set()
         self.memory: Optional[OpponentStore] = None  # M5: §5 opponent memory
         self.preraised: list[str] = []  # threats pre-raised from memory at 0:00
+        # §6 step guard: through this iteration, skip the non-critical modules
+        self.guard_until: int = -1
 
     async def on_start(self) -> None:
+        started = time.perf_counter()
         # §4.0: loop-0 state is parsed here, before ares picks an opener in super().on_start()
         self.ruleset = detect_ruleset(self)
         if self.ruleset != RULESET_12_WORKER:
@@ -106,6 +114,10 @@ class CitadelBot(AresBot):
         self.production = Production(self)
         self.army = Army(self, self.endgame, self.flags)
         self._load_memory()
+        # §6: keep on_start under 5 s and log its duration
+        self.telemetry.startup_ms = (time.perf_counter() - started) * 1000
+        log = logger.warning if self.telemetry.startup_ms > STARTUP_WARN_MS else logger.info
+        log(f"STARTUP on_start took {self.telemetry.startup_ms:.0f} ms")
 
     def _load_memory(self) -> None:
         """§5: load the opponent's record; pre-raise the cheese it showed in 2 of its last 3 games
@@ -140,7 +152,12 @@ class CitadelBot(AresBot):
 
     async def on_step(self, iteration: int) -> None:
         started = time.perf_counter()
+        # §6 step guard: after a step over STEP_GUARD_MS, the scout planner, the counterattack's
+        # detection and launch, and the telemetry snapshots wait STEP_GUARD_STEPS steps
+        guarded = iteration <= self.guard_until
+        marks: list[tuple[str, float]] = []
         await super(CitadelBot, self).on_step(iteration)
+        marks.append(("ares", time.perf_counter()))
         # ares only moves workers that a Mining behavior tells to mine; register it every step.
         # No long-distance mining while rush Cannons may cover other bases' minerals (§4.2), or
         # while our unit holds the wall gap (the probes would walk out past it into the lings)
@@ -165,11 +182,14 @@ class CitadelBot(AresBot):
             self.detectors.update()
             self.flags.expire(self.time, self.detectors.expiry_context(self.supply_army))
             self.planner.update()
+        marks.append(("intel", time.perf_counter()))
         plan = self.planner.plan
-        if iteration % MACRO_EVERY_STEPS == 0:
-            # §3 step 4; the ATTACK/REINFORCE squads and the army's Observer are not free to scout
+        if iteration % MACRO_EVERY_STEPS == 0 and not guarded:
+            # §3 step 4; the ATTACK/REINFORCE/HARASS squads and the army's Observer are not free to scout
             self.scouts.step(pinned=self.army.held_tags | plan.pinned_unit_tags | self.army.busy_tags)
+        marks.append(("scouts", time.perf_counter()))
         self.worker_defense.step(plan)  # §3 step 5: every step
+        marks.append(("worker_defense", time.perf_counter()))
 
         if iteration % MACRO_EVERY_STEPS == 0:
             self.static_defense.step(plan)
@@ -187,6 +207,7 @@ class CitadelBot(AresBot):
                 for behavior in defense:
                     defense_plan.add(behavior)
                 self.register_behavior(defense_plan)
+        marks.append(("macro", time.perf_counter()))
 
         if iteration % ARMY_EVERY_STEPS == 0:
             holder = self.wall.step(hold_gap=plan.hold_wall_gap)
@@ -197,11 +218,36 @@ class CitadelBot(AresBot):
             self.army.hold_point = plan.army_hold_point
             self.army.leash = plan.army_leash
             self.endgame.update()
-            self.army.step(iteration)
+            self.army.step(iteration, guarded)
+        marks.append(("army", time.perf_counter()))
         self.army.micro(iteration)  # §3 step 5: squad micro every step
+        marks.append(("micro", time.perf_counter()))
 
-        self.telemetry.step()
-        self.telemetry.record_step_time(started)
+        self.telemetry.step(snapshot=not guarded)
+        marks.append(("telemetry", time.perf_counter()))
+        if guarded:
+            self.telemetry.guarded_steps += 1
+        self._check_step_time(iteration, self.telemetry.record_step_time(started), started, marks)
+
+    def _check_step_time(self, iteration: int, ms: float, started: float, marks: list[tuple[str, float]]) -> None:
+        """§6: a warning for any step over STEP_WARN_MS (with the parts that took the time); a
+        step over STEP_GUARD_MS turns the guard on for the next STEP_GUARD_STEPS steps."""
+        if ms <= STEP_WARN_MS:
+            return
+        self.telemetry.steps_over_warn += 1
+        parts, prev = [], started
+        for name, at in marks:
+            if (at - prev) * 1000 >= STEP_SECTION_LOG_MS:
+                parts.append(f"{name} {(at - prev) * 1000:.0f}")
+            prev = at
+        logger.warning(f"STEP {ms:.0f} ms at {self.time_formatted} (step {iteration}): {', '.join(parts) or 'spread out'}")
+        if ms > STEP_GUARD_MS:
+            self.guard_until = iteration + STEP_GUARD_STEPS
+            self.telemetry.guard_activations += 1
+            logger.warning(
+                f"STEP guard on: steps {iteration + 1}-{self.guard_until} skip the scout planner, "
+                f"counterattack evaluation and telemetry snapshot"
+            )
 
     def _register_macro_plan(self, defense: list) -> None:
         """After the opener. A MacroPlan stops at the first behavior that acts (or, for
@@ -261,6 +307,14 @@ class CitadelBot(AresBot):
 
     async def on_end(self, game_result: Result) -> None:
         if self.telemetry is not None:
-            self.telemetry.end_report(self.flags, self.army)
+            try:
+                self.telemetry.end_report(self.flags, self.army)
+                result = game_result.name if isinstance(game_result, Result) else str(game_result)
+                record = self.telemetry.game_record(
+                    result, self.flags, self.army, self.opener, self.ruleset, self.wall_ok, self.memory, self.preraised
+                )
+                self.telemetry.write_game_record(record)  # §8: ./data/logs
+            except Exception:  # noqa: BLE001 - never crash at the end of a game
+                logger.exception("LOG game record failed")
         self._save_memory(game_result)
         await super(CitadelBot, self).on_end(game_result)

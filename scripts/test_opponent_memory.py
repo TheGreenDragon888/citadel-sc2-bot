@@ -1,5 +1,7 @@
-"""Offline tests for §5 opponent memory (bot/memory/opponent_store.py) and the ./data file rules
-(bot/data_files.py); no game needed. Files go to a temporary folder, not ./data.
+"""Offline tests for §5 opponent memory (bot/memory/opponent_store.py), the ./data file rules
+(bot/data_files.py) and the §8 game log's bounds (`Telemetry.write_game_record`: the last 200
+games, oldest dropped first to keep ./data under its byte budget); no game needed. Files go to a
+temporary folder, not ./data.
 
     poetry run python scripts/test_opponent_memory.py
 """
@@ -17,7 +19,8 @@ sys.path.insert(0, str(ROOT))
 import run  # noqa: E402,F401  (puts ares-sc2 on sys.path)
 
 import bot.data_files as data_files  # noqa: E402
-from bot.constants import MEMORY_KEEP_GAMES, MEMORY_SOURCE  # noqa: E402
+import bot.telemetry.logger as logger_module  # noqa: E402
+from bot.constants import GAME_LOG_KEEP, MEMORY_KEEP_GAMES, MEMORY_SOURCE  # noqa: E402
 from bot.memory.opponent_store import (  # noqa: E402
     OpponentStore,
     add_game,
@@ -140,6 +143,26 @@ def main() -> int:
     check("store: only ./data/opponents was written",
           sorted(p.name for p in (tmp / "data" / "opponents").iterdir()) == ["opponent-1.json", "x.json"],
           ", ".join(sorted(str(p.relative_to(tmp)) for p in tmp.rglob("*") if p.is_file())))
+
+    # -- the §8 game log's bounds -----------------------------------------------------------------
+    telemetry = logger_module.Telemetry.__new__(logger_module.Telemetry)  # no game: only the writer is used
+    log_path = data_files.data_path("logs", "games.jsonl")
+    for i in range(GAME_LOG_KEEP + 5):
+        telemetry.write_game_record({"game_id": f"g{i}", "pad": "x" * 100})
+    lines = log_path.read_text().splitlines()
+    check(f"game log: keeps the last {GAME_LOG_KEEP} games",
+          len(lines) == GAME_LOG_KEEP and json.loads(lines[0])["game_id"] == "g5" and json.loads(lines[-1])["game_id"] == f"g{GAME_LOG_KEEP + 4}",
+          f"{len(lines)} lines, first {json.loads(lines[0])['game_id']}")
+    others = data_files.data_size(exclude=log_path)
+    logger_module.DATA_MAX_BYTES = others + 20 * 130  # room for about 20 lines
+    telemetry.write_game_record({"game_id": "budget", "pad": "x" * 100})
+    lines = log_path.read_text().splitlines()
+    check("game log: drops its oldest lines to stay inside the ./data budget",
+          len(lines) < 25 and json.loads(lines[-1])["game_id"] == "budget" and data_files.data_size() <= logger_module.DATA_MAX_BYTES,
+          f"{len(lines)} lines, ./data {data_files.data_size()} of {logger_module.DATA_MAX_BYTES} bytes")
+    logger_module.DATA_MAX_BYTES = others  # no room at all
+    wrote = telemetry.write_game_record({"game_id": "none", "pad": "x" * 100})
+    check("game log: not written when ./data has no room left", wrote is False and "none" not in log_path.read_text())
 
     passed = sum(ok for _, ok, _ in RESULTS)
     print(f"\n{passed}/{len(RESULTS)} passed")
