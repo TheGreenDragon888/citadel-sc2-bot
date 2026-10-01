@@ -148,6 +148,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int, default=None, help="seed for the --opponent bot's random choices")
     parser.add_argument(
+        "--game-seed",
+        type=int,
+        default=None,
+        help="the game's random seed (python-sc2 run_game random_seed; game i uses this + i), so batches "
+        "on two commits meet the same built-in AI randomness",
+    )
+    parser.add_argument(
         "--start",
         type=int,
         default=1,
@@ -202,7 +209,9 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def run_bot_game(map_name: str, players: list, replay: Optional[str], time_limit: int) -> tuple[Result, Optional[str]]:
+def run_bot_game(
+    map_name: str, players: list, replay: Optional[str], time_limit: int, random_seed: Optional[int] = None
+) -> tuple[Result, Optional[str]]:
     """Bot vs bot. python-sc2's `run_game` turns an exception on either side into a bare
     AssertionError, so host and join here to keep both. Returns Citadel's result and the
     opponent bot's error, if any; Citadel's own exception is raised."""
@@ -212,7 +221,7 @@ def run_bot_game(map_name: str, players: list, replay: Optional[str], time_limit
         return await asyncio.gather(
             _host_game(
                 maps.get(map_name), players, realtime=False, portconfig=portconfig,
-                save_replay_as=replay, game_time_limit=time_limit,
+                save_replay_as=replay, game_time_limit=time_limit, random_seed=random_seed,
             ),
             _join_game(players, realtime=False, portconfig=portconfig, game_time_limit=time_limit),
             return_exceptions=True,
@@ -323,11 +332,12 @@ def main() -> int:
                 (args.replays / f"{stamp}_{map_name}_{opp_race.name}_{args.opponent or difficulty.name}_{i}.SC2Replay").resolve()
             )
         started = time.perf_counter()
+        game_seed = None if args.game_seed is None else args.game_seed + i
         error: Optional[str] = None
         try:
             if args.opponent:
                 result, opponent_error = run_bot_game(
-                    map_name, [Bot(bot_race, bot, bot_name), opponent_player], replay, args.time_limit
+                    map_name, [Bot(bot_race, bot, bot_name), opponent_player], replay, args.time_limit, game_seed
                 )
                 if opponent_error is not None:
                     error = f"opponent bot: {opponent_error}"
@@ -338,6 +348,7 @@ def main() -> int:
                     realtime=False,
                     save_replay_as=replay,
                     game_time_limit=args.time_limit,
+                    random_seed=game_seed,
                 )
             outcome = result.name if isinstance(result, Result) else str(result)
         except Exception as e:

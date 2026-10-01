@@ -752,7 +752,11 @@ COUNTER_SQUAD_MAX_FRACTION: float = 0.35  # of our army supply
 COUNTER_SQUAD_MIN_SUPPLY: float = 8.0
 # §4.6 recall
 COUNTER_RECALL_TARGET_RADIUS: float = 35.0  # the out-of-position army's centre within this of the target ...
-COUNTER_RECALL_SQUAD_RADIUS: float = 20.0  # ... or within this of the squad
+COUNTER_RECALL_SQUAD_RADIUS: float = 20.0  # ... or within this of the squad, ...
+# ... or (user decision, M5 staged tests: on Torches the natural's only exit faces the returning
+# army, and squads recalled at 35 lost 5-7 of 7 units) its centre this much closer to the target
+# (ground path) than at launch: it is heading back
+COUNTER_RECALL_HEADING_BACK: float = 20.0
 COUNTER_RECALL_VALUE_FRACTION: float = 0.5  # squad value below this x its start value
 COUNTER_MAX_OUT_S: float = 60.0
 COUNTER_RELAUNCH_WAIT_S: float = 30.0  # Citadel: no new counterattack this soon after one ends

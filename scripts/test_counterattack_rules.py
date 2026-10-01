@@ -31,6 +31,7 @@ from bot.army.counterattack import (  # noqa: E402
 from bot.constants import (  # noqa: E402
     COUNTER_ABORT,
     COUNTER_MAX_OUT_S,
+    COUNTER_RECALL_HEADING_BACK,
     COUNTER_RECALL_SQUAD_RADIUS,
     COUNTER_RECALL_TARGET_RADIUS,
 )
@@ -136,6 +137,13 @@ def main() -> int:
     check("recall: out for more than 60 s", r is not None and "out for" in r, r)
     check("recall: out for exactly 60 s keeps going", recall_reason(**{**base, "now": 100.0 + COUNTER_MAX_OUT_S}) is None)
     check("recall: no enemy army centre known -> other rules only", recall_reason(**{**base, "army_center": None}) is None)
+    r = recall_reason(**{**base, "launch_path": 90.0, "army_path": 90.0 - COUNTER_RECALL_HEADING_BACK})
+    check(f"recall: enemy army {COUNTER_RECALL_HEADING_BACK:g} closer by path than at launch (heading back)",
+          r is not None and "heading back" in r, r)
+    check("recall: enemy army a little closer than at launch -> keep going",
+          recall_reason(**{**base, "launch_path": 90.0, "army_path": 90.0 - COUNTER_RECALL_HEADING_BACK + 1}) is None)
+    check("recall: enemy army farther than at launch -> keep going",
+          recall_reason(**{**base, "launch_path": 90.0, "army_path": 120.0}) is None)
 
     # -- weighted centre --------------------------------------------------------------------------
     c = weighted_center([(Point2((0, 0)), 100.0), (Point2((10, 0)), 300.0)])

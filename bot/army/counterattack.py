@@ -20,7 +20,8 @@ simulator calls), from COUNTER_FROM_S:
   HARASS squad; inside the base it shoots what can fight back first, then workers, production and
   the townhall (user decision), and walks to the next of those when nothing is in range.
 - **Recall** on any §4.6 rule (`recall_reason`): the out-of-position army's centre near the target or
-  the squad, the fight at <= COUNTER_ABORT, the squad below half its start value, out longer than
+  the squad, or (user decision) COUNTER_RECALL_HEADING_BACK closer to the target by ground path than
+  at launch, the fight at <= COUNTER_ABORT, the squad below half its start value, out longer than
   COUNTER_MAX_OUT_S, or a home threat the DEFEND units can't hold (Defense > Counterattack, §3);
   also when the target base is cleared. The squad walks home on a danger-aware path
   (`PathUnitToTarget` on the influence grid, bot/army/micro.py `retreat`).
@@ -47,6 +48,7 @@ from bot.constants import (
     COUNTER_DEFENCE_RADIUS,
     COUNTER_FROM_S,
     COUNTER_MAX_OUT_S,
+    COUNTER_RECALL_HEADING_BACK,
     COUNTER_RECALL_SQUAD_RADIUS,
     COUNTER_RECALL_TARGET_RADIUS,
     COUNTER_RECALL_VALUE_FRACTION,
@@ -158,8 +160,11 @@ def recall_reason(
     target: Point2,
     squad_center: Optional[Point2],
     home_unheld: str = "",
+    army_path: Optional[float] = None,
+    launch_path: Optional[float] = None,
 ) -> Optional[str]:
-    """§4.6 "return home" rules, defense first; None = keep going."""
+    """§4.6 "return home" rules, defense first; None = keep going. `army_path` / `launch_path`: the
+    out-of-position army's ground path to the target now and at launch (the heading-back rule)."""
     if home_unheld:
         return f"defense: {home_unheld}"
     if army_center is not None:
@@ -167,6 +172,8 @@ def recall_reason(
             return f"enemy army within {COUNTER_RECALL_TARGET_RADIUS:g} of the target ({army_center.distance_to(target):.0f})"
         if squad_center is not None and army_center.distance_to(squad_center) <= COUNTER_RECALL_SQUAD_RADIUS:
             return f"enemy army within {COUNTER_RECALL_SQUAD_RADIUS:g} of the squad ({army_center.distance_to(squad_center):.0f})"
+    if army_path is not None and launch_path is not None and army_path <= launch_path - COUNTER_RECALL_HEADING_BACK:
+        return f"enemy army heading back: {army_path:.0f} from the target by ground, {launch_path:.0f} at launch"
     if level is not None and level <= COUNTER_ABORT:
         return f"level {level} <= {COUNTER_ABORT}"
     if squad_value < COUNTER_RECALL_VALUE_FRACTION * start_value:
@@ -190,6 +197,7 @@ class Counterattack:
         self.ended_at: Optional[float] = None
         self.start_value: float = 0.0
         self.watched: set[int] = set()  # the out-of-position army's tags at launch
+        self.launch_path: Optional[float] = None  # its centre's ground path to the target at launch
         self.last_level: Optional[int] = None
         self.outcomes: list[dict] = []  # §8 counterattack outcomes
         self.current: Optional[dict] = None
@@ -341,6 +349,7 @@ class Counterattack:
         self.launched_at = bot.time
         self.start_value = army.engagement.value(squad)
         self.watched = set(reading.fresh_tags)
+        self.launch_path = self.position.path_distance(reading.center, target.position, exact=True)
         self._wait = ""
         kinds: dict[str, int] = {}
         for u in squad:
@@ -405,9 +414,11 @@ class Counterattack:
             f"home threat at {army.threat.rounded}, home level {home} < {DEFEND_ENGAGE}"
             if home is not None and home < DEFEND_ENGAGE else ""
         )
+        army_center = self.position.center_of(self.watched)
+        army_path = self.position.path_distance(army_center, self.target, exact=True) if army_center is not None else None
         reason = recall_reason(
             bot.time, self.launched_at, level, value, self.start_value,
-            self.position.center_of(self.watched), self.target, center, home_unheld,
+            army_center, self.target, center, home_unheld, army_path, self.launch_path,
         )
         if reason is None and self._target_cleared():
             reason = "target base cleared"
@@ -442,5 +453,6 @@ class Counterattack:
         self.state = IDLE
         self.target = None
         self.watched = set()
+        self.launch_path = None
         self.goals = [[], [], []]
         self.ended_at = now

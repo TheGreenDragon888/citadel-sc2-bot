@@ -62,6 +62,24 @@ with its hysteresis and end-game gates (`attack_decision.py`), home defense and 
 show `ENGAGE` lines at each launch/retreat/recall, `DEFEND` lines when the home-defense decision
 changes, and `ENDGAME` lines.
 
+## Counterattack, memory, telemetry, step guard (M5)
+
+- **Counterattack** (DESIGN.md §4.6): `bot/intel/army_position.py` raises ARMY_OUT_OF_POSITION
+  when the remembered enemy army is far (ground path) from all its bases; `bot/army/counterattack.py`
+  then sends a small fast squad (the HARASS squad) to the least defended enemy base and recalls it
+  on §4.6's rules. Logs: `COUNTER launch`, `COUNTER recall`, `COUNTER outcome`.
+- **Opponent memory** (§5): `bot/memory/opponent_store.py` keeps `./data/opponents/<OpponentId>.json`
+  (the ladder's `--OpponentId`; local games have none, so no memory). A cheese seen in 2 of the
+  opponent's last 3 games is raised at 0:00. Logs: `MEMORY` lines.
+- **Telemetry** (§8): each game appends one JSON line with every §8 metric to
+  `./data/logs/games.jsonl` (the last 200 games) and prints it as `METRIC game {...}`.
+- **Step guard** (§6): a warning for each step over 30 ms (`STEP ... ms`, naming the slow parts);
+  after a step over 200 ms the scout planner, counterattack evaluation and telemetry snapshot
+  wait 16 steps (`STEP guard on`).
+
+Citadel writes files only under `./data` (`bot/data_files.py`), which AI Arena keeps between
+games when "bot data enabled" is on. Local test runs fill `./data` too; delete it to start over.
+
 ## Commands
 
 | Task | Command |
@@ -86,5 +104,12 @@ changes, and `ENDGAME` lines.
 | Attack/retreat gates, hysteresis and the §4.7 45:00 rule, no game | `poetry run python scripts/test_attack_decision.py` |
 | Citadel's EngagementResult in game (shields counted, defender set) | `poetry run python scripts/test_engagement.py` |
 | §4.7 structure hunt, staged with shortened thresholds | `poetry run python scripts/test_endgame.py` |
+| M5 acceptance: 10 VeryHard games per race with a local opponent id; the summary's `M5 no crash` line, and per game `counter=` (counterattacks and why each ended), `pre=` (flags pre-raised from memory), `mem=`, `log=` (§8 line written), `guard=` | `poetry run python scripts/run_matches.py --difficulty VeryHard --race Terran --map all --total 10 --opponent-id local-vh-terran` (also `Zerg`, `Protoss`) |
+| §4.6 counterattack, staged (7 cases vs a scripted Terran) | `poetry run python scripts/test_counterattack.py --case all` |
+| §4.6 squad, target and recall rules, no game | `poetry run python scripts/test_counterattack_rules.py` |
+| §5 opponent memory, `./data` file rules and the game log's bounds, no game | `poetry run python scripts/test_opponent_memory.py` |
+| Opponent memory in game (game 3 pre-raises WORKER_RUSH) | `poetry run python scripts/run_matches.py --opponent worker_rush --map all --total 3 --seed 100 --opponent-id local-memory-check` |
+| §6 step guard, in game | `poetry run python scripts/test_step_guard.py` |
+| Check `./data/logs/games.jsonl` (every §8 field) and the size of `./data` | `poetry run python scripts/check_game_log.py --last 10` |
 | Build the ladder zip | `poetry run python scripts/create_ladder_zip.py` |
 | Check the zip layout | `unzip -l publish/*.zip \| head` (`run.py` must be at the top level) |

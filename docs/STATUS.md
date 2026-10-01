@@ -12,9 +12,10 @@ findings and Citadel's choices are in `docs/VERIFY_NOTES.md`.
 | M2 | Done (see the evidence in `docs/VERIFY_NOTES.md`, "M2 acceptance evidence") | ares bridge, detectors, ThreatFlag expiry, defense plans |
 | M3 | Done (see `docs/VERIFY_NOTES.md`, "M3 acceptance evidence") | per-matchup scout planner, §4.4 rows 3 and 15 |
 | M4 | Done (see `docs/VERIFY_NOTES.md`, "M4 acceptance evidence") | squads, `EngagementResult` gates, retreat hysteresis, end-game rules (`bot/army/`) |
-| M5 | Next | counterattack (§4.6), opponent memory, telemetry to `./data`, step guard (DESIGN.md §7) |
+| M5 | Done (see `docs/VERIFY_NOTES.md`, "M5 acceptance evidence") | counterattack (§4.6), opponent memory (§5), telemetry to `./data/logs` (§8), step guard (§6) |
+| M6 | Next | upload with bot data enabled; watch the first ladder games (DESIGN.md §7) |
 
-## Code map (M2-M4 additions)
+## Code map (M2-M5 additions)
 
 | File | What it does |
 |---|---|
@@ -37,6 +38,13 @@ findings and Citadel's choices are in `docs/VERIFY_NOTES.md`.
 | `scripts/m3_checks.py` | the M3 "correct flag" check (`M3_EXPECTED_FLAGS`), used by `run_matches.py` and `test_m3_checks.py` |
 | `scripts/test_scout_abilities.py` | in-game checks of the Adept shade, Hallucination, Pulsar Beam and detection |
 | `scripts/test_attack_decision.py` / `test_engagement.py` / `test_endgame.py` | M4: offline gate/hysteresis tests; in-game levels vs ares's; staged §4.7 structure hunt with shortened thresholds |
+| `bot/intel/army_position.py` | M5 §4.4 row 17 detector: ARMY_OUT_OF_POSITION from ares's army cache (value, seen within 15 s, ground path from every known enemy townhall; path lengths cached) |
+| `bot/army/counterattack.py` | M5 §4.6: squad/target/recall rules as plain functions, and `Counterattack` (HARASS squad launch, recall, merge into a main attack, outcome records); ticks 8 steps after the main attack decision |
+| `bot/memory/opponent_store.py` | M5 §5 opponent memory: `./data/opponents/<OpponentId>.json`, recurring-cheese pre-raise |
+| `bot/data_files.py` | M5: the only place Citadel writes files (inside `./data`, atomic), and the `./data` size |
+| `bot/telemetry/logger.py` | M5 adds the §8 game record (`./data/logs/games.jsonl`, last 200 games, `METRIC game` on stdout), a 30 s snapshot, startup and step-guard counts |
+| `bot/main.py` | M5 adds the §6 step guard (`_check_step_time`), on_start timing, memory load/pre-raise and the end-of-game writes, and `external_tags` (units a dev test drives) |
+| `scripts/test_counterattack.py` / `test_counterattack_rules.py` / `test_opponent_memory.py` / `test_step_guard.py` / `check_game_log.py` | M5: 7 staged counterattack cases vs a scripted Terran; offline rules; offline memory + `./data` + log bounds; in-game guard window; game log validator |
 
 Every threshold is in `bot/constants.py`.
 
@@ -56,6 +64,9 @@ Every threshold is in `bot/constants.py`.
 | M3 flag check / scouting abilities | `poetry run python scripts/test_m3_checks.py`; `poetry run python scripts/test_scout_abilities.py` |
 | M4 acceptance (10 VeryHard games per race; `M4 wins per race` summary line; `engage=`/`value=`/`step=` columns) | `poetry run python scripts/run_matches.py --difficulty VeryHard --race Terran --map all --total 10` (also `Zerg`, `Protoss`) |
 | M4 gates / fight levels / structure hunt | `poetry run python scripts/test_attack_decision.py`; `poetry run python scripts/test_engagement.py`; `poetry run python scripts/test_endgame.py` |
+| M5 acceptance (10 VeryHard games per race with a local opponent id; `M5 no crash` summary line; `counter=`/`pre=`/`mem=`/`log=`/`guard=` columns) | `poetry run python scripts/run_matches.py --difficulty VeryHard --race Terran --map all --total 10 --opponent-id local-vh-terran` (also `Zerg`, `Protoss`) |
+| M5 staged counterattack (7 cases) / rules / memory / step guard / game log | `poetry run python scripts/test_counterattack.py --case all`; `poetry run python scripts/test_counterattack_rules.py`; `poetry run python scripts/test_opponent_memory.py`; `poetry run python scripts/test_step_guard.py`; `poetry run python scripts/check_game_log.py --last 10` |
+| Opponent memory in game (game 3 pre-raises WORKER_RUSH) | `poetry run python scripts/run_matches.py --opponent worker_rush --map all --total 3 --seed 100 --opponent-id local-memory-check` |
 | Ladder zip | `poetry run python scripts/create_ladder_zip.py`, then `unzip -l publish/*.zip \| head` |
 
 Four batches can run in parallel on a 4-core machine (about 40-70 minutes for 10 games each).

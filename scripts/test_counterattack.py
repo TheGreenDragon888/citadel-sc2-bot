@@ -23,9 +23,11 @@ Every positive case must:
    of our army supply, with no unit the test holds;
 3. recall for the case's reason (below);
 4. bring the squad home: every survivor within HOME_RADIUS of the defensive position, or at least
-   half way back from where it was at the recall, within HOME_TIMEOUT_S.
+   half way back from where it was at the recall, within HOME_TIMEOUT_S, with at least
+   HOME_MIN_FRACTION of the units it had at the recall still alive.
 Cases:
-- `return`: once the squad is near the target, the enemy army walks back to it -> "enemy army within".
+- `return`: once the squad is near the target, the enemy army walks back to it -> "enemy army ..."
+  (heading back, or within 35 of the target / 20 of the squad).
 - `timeout`: the enemy army stays away -> "out for" (> 60 s); the first enemy the squad kills
   at the base must be a worker.
 - `defense`: once the squad is well on its way, a strong enemy force appears in our main ->
@@ -83,6 +85,7 @@ SPOT_MIN_FROM_US: float = 50.0  # ... this far from our start and natural ...
 SPOT_MIN_FROM_ROUTE: float = 20.0  # ... and this far from the line between the two naturals
 HOME_RADIUS: float = 20.0
 HOME_TIMEOUT_S: float = 60.0
+HOME_MIN_FRACTION: float = 0.5
 NEGATIVE_WATCH_S: float = 60.0
 RETURN_TRIGGER_DIST: float = 25.0  # `return`: the enemy army turns back once the squad is this close to the target
 DEFENSE_AFTER_S: float = 15.0  # `defense`: the home attackers appear in our main this long after the launch
@@ -314,8 +317,13 @@ class StagedCitadel(CitadelBot):
                 "start": {u.tag: u.distance_to(self.army.anchor) for u in survivors},
                 "roles": {u.tag: self.army.squads.roles.get(u.tag) for u in survivors},
             }
+            enemy = [u for u in self.enemy_units if not u.is_memory and u.type_id in (UnitTypeId.MARINE, UnitTypeId.MARAUDER)]
+            center = Point2.center([u.position for u in survivors]) if survivors else None
+            nearest = min((e.distance_to(center) for e in enemy), default=None) if center is not None else None
             self.log(f"recall: {outcome['reason']} (out {outcome['launched']:.0f}-{outcome['ended']:.0f} s, "
-                     f"killed {outcome['workers_killed']} workers, first kill {outcome['first_kill']})")
+                     f"killed {outcome['workers_killed']} workers, first kill {outcome['first_kill']}); squad at "
+                     f"{center.rounded if center else '-'}, nearest enemy army unit "
+                     f"{f'{nearest:.0f}' if nearest is not None else '-'} away")
         if self.recalled is not None and self.home_result is None:
             survivors = [u for tag in self.recalled["start"] if (u := self.unit_tag_dict.get(tag)) is not None]
             anchor = self.army.anchor
@@ -323,8 +331,16 @@ class StagedCitadel(CitadelBot):
                 u for u in survivors
                 if u.distance_to(anchor) <= HOME_RADIUS or u.distance_to(anchor) <= 0.5 * self.recalled["start"][u.tag]
             ]
-            if len(home) == len(survivors):
-                self.home_result = f"{len(survivors)} survivors home after {now - self.recalled['t']:.0f} s"
+            lost = len(self.recalled["start"]) - len(survivors)
+            if self.recalled["start"] and len(survivors) < HOME_MIN_FRACTION * len(self.recalled["start"]):
+                self.home_result = (
+                    f"FAIL: {lost} of {len(self.recalled['start'])} units lost after the recall"
+                )
+            elif len(home) == len(survivors):
+                self.home_result = (
+                    f"{len(survivors)} survivors home after {now - self.recalled['t']:.0f} s"
+                    + (f" ({lost} lost after the recall)" if lost else "")
+                )
             elif now - self.recalled["t"] > HOME_TIMEOUT_S:
                 self.home_result = f"FAIL: {len(home)}/{len(survivors)} survivors home after {HOME_TIMEOUT_S:g} s"
             if self.home_result is not None:
@@ -392,7 +408,7 @@ class StagedCitadel(CitadelBot):
                            f"{launched['supply']:g} of {launched['army_supply']:g} (cap {cap:.1f})"))
             checks.append(("squad: no held unit", self.observer not in launched["tags"], ""))
         expected = {
-            "return": "enemy army within", "timeout": "out for", "defense": "defense", "abort": "level", "merge": "merged",
+            "return": "enemy army", "timeout": "out for", "defense": "defense", "abort": "level", "merge": "merged",
         }[self.case]
         reason = recalled["reason"] if recalled is not None else "no recall"
         checks.append((f"recall reason '{expected}'", recalled is not None and reason.startswith(expected), reason))

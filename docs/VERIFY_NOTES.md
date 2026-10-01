@@ -1101,3 +1101,72 @@ lines (and `--start` to finish a batch cut short). Cannon rush: M3 won 10/10 on 
 three M4 fixes from these runs are in "M4 Citadel choices" (level 7 against rush Cannons with the
 units around them, fogged Cannons counted, a Cannon target in its own guard).
 
+
+## M5 findings
+
+Found while building M5 (counterattack, opponent memory, telemetry, step guard). Source lines are
+for the versions at the top of this file.
+
+**ares's army cache holds each enemy unit's last observation (§4.6 "seen within the last 15 s").**
+`UnitCacheManager.store_enemy_unit` (`ares-sc2/src/ares/managers/unit_cache_manager.py:281-327`)
+replaces a seen-before unit's entry with this step's `Unit` object (old entry removed through
+`enemy_tags_to_remove`, new one added in `update_enemy_army`, `:329-342`); a morphing Zerg unit
+(`DOES_NOT_USE_LARVA`, Hellion tank) is re-added from `ai.unit_tag_dict`, which ares fills with
+every unit of the step, own, enemy and neutral (`ares-sc2/src/ares/main.py:251`). So for a cached
+unit `unit.age` (`sc2/unit.py:471-473`: current loop minus the observation's loop, / 22.4) is the
+time since it was last seen. The cache also holds enemy workers (added before the worker check,
+`unit_cache_manager.py:303-310`); Citadel filters it with `is_fighter`.
+
+**Ground path lengths (§4.6 "ground path distance").** `mediator.find_raw_path(start=, target=,
+grid=, sensitivity=)` (`ares-sc2/src/ares/managers/manager_mediator.py:1315`) runs map-analyzer's
+`pathfind` (`map_analyzer/Pather.py:348-390`): start and goal are rounded and moved to the nearest
+pathable point within 10, the start point is left out of the result, and it returns None when
+there is no path. **Runtime** (probe game, PylonAIE_v4): map centre to the enemy main, 69 points,
+length 85.6 against 70.1 in a straight line, 0.7 ms. Citadel uses the clean ground grid
+(`get_cached_ground_grid`, §11.6) so influence doesn't lengthen paths.
+
+**Debug commands in a bot-vs-bot game.** **Runtime** (probe with two python-sc2 bots hosted by
+`_host_game`/`_join_game`, as `run_matches.py --opponent` does): `debug_create_unit` from the host
+creates units for either player, `debug_show_map` works, and the other bot sees and orders the
+units created for it. `scripts/test_counterattack.py` relies on this. Leaving a game with
+`client.leave()` sometimes ends the other side with `ConnectionAlreadyClosed`.
+
+**`opponent_id` and `./data`.** python-sc2 keeps an `opponent_id` set before the game
+(`sc2/bot_ai_internal.py:83-87` sets None only if the attribute is missing); the template's
+`ladder.py:42` sets it from `--OpponentId`. ares names its data file from it
+(`ares-sc2/src/ares/managers/data_manager.py:99-101`) under `ares.consts.DATA_DIR = "./data"`
+(`consts.py:106`), relative to the working directory; Citadel's files use the same base.
+
+**Destroyed enemy structures.** python-sc2 keeps last step's enemy structures in
+`_enemy_structures_previous_map` (`sc2/bot_ai_internal.py:699`), so `on_unit_destroyed` can tell
+what was destroyed (the counterattack's kills).
+
+**Startup.** `on_start` took 0.7-1.6 s in the M5 test games (§6's limit is 5 s).
+
+## M5 Citadel choices
+
+Where §4.6, §5, §6 and §8 leave a choice open, M5 decided as below. Every value is in
+`bot/constants.py`.
+
+| Area | Choice | Why |
+|---|---|---|
+| Scope (user decisions) | Pre-raised flags act like the same flag raised in game, including ending the ares opener (WORKER_RUSH, PROXY, POOL_12, Cannon-structure CANNON_RUSH); cheese for the pre-raise = WORKER_RUSH, CANNON_RUSH (not the weak Forge-first source), POOL_12, PROXY and ONE_BASE_ALLIN; a pre-raised WORKER_RUSH ends after 2:30 with ≤ 1 enemy worker near our bases (§5 gives it no phase rule); inside the counterattack target, what can fight back first, then workers, production, townhall; the 30 games = 10 VeryHard per race, each batch with a local opponent id; recall also when the enemy army heads back (below) | Plan approval; the heading-back rule after the staged test below |
+| Remembered army (§4.6 1) | ares's army cache (every enemy fighter seen and not known dead), as for §4.7 in M4; "seen within 15 s" = the cached observation is ≤ 15 s old | §11.2: the 30 s memory is too short for a whole army |
+| Army centre (§4.6 2) | Value-weighted centre of the units seen within 15 s only | Up to 40% of the value can be minutes old and would pull the centre to where units used to be |
+| Path distance (§4.6 2) | The straight line where it is already ≥ 60 (a path is never shorter); otherwise `find_raw_path` on the clean ground grid, cached per 4-tile cell; the straight line if there is no ground path | §6 "cache pathing results"; 0.7 ms per query |
+| Known enemy bases | Enemy townhalls seen (snapshots too); the enemy start location if none has been seen | §4.6 "known enemy townhall" |
+| Launch | Only on an evaluation that finds the army out of position now; the flag's 15 s TTL (§5) keeps it active for the logs | A flag up to 15 s old shouldn't send a squad |
+| Target (§4.6) | Condition 3 as a filter (bases with ≤ 25% of the enemy army within 25), then the lowest local defence value: remembered army value within 20 plus static defence within 15 counted as Stalkers' value (Cannon, Bunker, Spine Crawler 3; Planetary Fortress 8, §4.5.2's penalty; Shield Battery 1, Citadel); ties to the base farther from the enemy army | §4.6 "static defense penalty plus remembered units", in one unit (resource value) |
+| Squad (§4.6) | Adepts, Zealots with Charge, then Stalkers (no other type), nearest the target first within a type, from DEFEND units that aren't retreating; cap 35% of our fighting units' supply, minimum 8 | §4.6 order; units the defense plan pins are never in a squad (M4) |
+| Home check (§4.6 4 and the defense recall) | A home threat blocks a launch, and recalls the squad, when the DEFEND units left at home read < DEFEND_ENGAGE against the enemies around it (static defence included, we defend) | "the defense planner reports that it can hold" |
+| Recall: "the enemy army" | The out-of-position army's units at launch (their tags): the value-weighted centre of those seen within 15 s (all of them if none) | Defenders seen at the target would otherwise read as "the enemy army at the target" |
+| Recall: heading back (user decision) | Besides §4.6's 35 of the target / 20 of the squad, recall once the out-of-position army's centre is `COUNTER_RECALL_HEADING_BACK` (20) closer to the target by ground path than it was at launch (both measured by path, not the straight-line shortcut) | Staged `return` case on TorchesAIE_v4: the natural's only exit faces the returning army; recalled at 35 (nearest enemy unit 30 away) the squad lost 6, 7 and 5 of its 7 units on the way home in three runs; retreating without shooting changed nothing (5 lost); recalling at 60 or on heading back brought 7/7 home on Torches and Pylon, recalled about 7 s after the army turned |
+| Recall: target cleared | Also recall when no known enemy structure and no visible enemy worker is left within 14 of the target | Nothing left to kill |
+| Relaunch wait | 30 s after a counterattack ends | A squad recalled after 60 s would turn round at once |
+| Cadence | Every 16 steps, 8 steps after the main attack decision; ≤ 2 simulations per evaluation (launch: home check + squad level; out: squad level + home check) | §3 "≤ 2 sims each"; spreads the simulator calls |
+| Step guard (§6) | Skips the scout planner, the counterattack's detection and launch (recall checks keep running), and the telemetry snapshots (4:00-10:00 and 30 s) for 16 steps; every step over 30 ms is logged with the parts that took ≥ 2 ms | Defense keeps priority; detection holds the path queries |
+| Opponent memory (§5) | `threats_seen` entries also carry the game number and the detector source; one entry per (threat, source) per game with its first raise time; the last 20 games kept; `first_aggression_time` = the earliest over all games; flags pre-raised from memory are never recorded; Cannon flags from an enemy probe alone (`cannon_probe`) don't count toward the pre-raise either (Citadel's addition to the user's Forge-first decision); an id is reduced to letters, digits, `_`, `-`, `.` before it names a file; no id → no memory; an unreadable file → a fresh record | "Last 3 games" needs game numbers; a pre-raise must not keep itself going; M2 already doesn't let a probe alone end the opener |
+| Game log (§8) | `./data/logs/games.jsonl`, one JSON line per game (also `METRIC game` on stdout), the last 200 games; the oldest lines are dropped first if `./data` would pass 4.5 MB; lists capped at 100 entries; written atomically | §2 keeps `./data` under 5 MB |
+| Writes | Every file write goes through `bot/data_files.py`, which refuses any path outside `./data` | §2 |
+| Test hook | `CitadelBot.external_tags`: units a dev test drives itself are held like the wall-gap holder; always empty in games | `scripts/test_counterattack.py`'s Observer over the enemy army |
+| M3 flag check | ARMY_OUT_OF_POSITION is allowed in every game (`M3_ALWAYS_ALLOWED`) | It says where the enemy army is, not which cheese it is |

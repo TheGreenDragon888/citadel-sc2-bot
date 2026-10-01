@@ -109,11 +109,11 @@ class ArmyPosition:
         bases = [s.position for s in bot.enemy_structures if s.type_id in TOWNHALL_TYPES]
         return bases or [bot.enemy_start_locations[0]]
 
-    def path_distance(self, start: Point2, goal: Point2) -> float:
-        """Ground path length, or the straight line where that already decides (>= OUT_OF_POSITION_PATH)
-        or where there is no ground path (an air army over unpathable ground)."""
+    def path_distance(self, start: Point2, goal: Point2, exact: bool = False) -> float:
+        """Ground path length, or the straight line where that already decides (>= OUT_OF_POSITION_PATH;
+        `exact` always paths) or where there is no ground path (an air army over unpathable ground)."""
         straight = start.distance_to(goal)
-        if straight >= OUT_OF_POSITION_PATH:
+        if straight >= OUT_OF_POSITION_PATH and not exact:
             return straight
         cell = OUT_OF_POSITION_PATH_CELL
         key = (int(start.x // cell), int(start.y // cell), int(goal.x), int(goal.y))
