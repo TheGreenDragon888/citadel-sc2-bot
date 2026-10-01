@@ -57,6 +57,7 @@ from bot.constants import (
     ONE_BASE_PHASE_END_S,
     POOL_12_PHASE_END_S,
     PROXY_CHECK_FROM_S,
+    PROXY_CHECK_SETTLE_S,
     PROXY_CHECK_UNTIL_S,
     PROXY_DETECT_UNTIL_S,
     PROXY_FAR_FROM_MAIN,
@@ -441,6 +442,9 @@ class Detectors:
             # §4.4 rows 7 and 10 are early-game observations: a main first seen when the army
             # walks in at 9:00+ says nothing about proxies (such checks raised PROXY mid-game)
             and self.main_scouted_at <= PROXY_CHECK_UNTIL_S
+            # the probe finishes its lap first (M5: a cannon rusher's Forge came into vision 1 s
+            # after the main counted as scouted, and row 10 raised a false PROXY before row 3)
+            and now - self.main_scouted_at >= PROXY_CHECK_SETTLE_S
         ):
             self.proxy_checked = True
             enemy_main = bot.enemy_start_locations[0]

@@ -286,6 +286,10 @@ _C2_SCHEDULE: Tuple[ScheduleItem, ...] = (
 # pre-raised from opponent memory ends the opener at 0:00, and taking both gases first delayed the
 # first Pylon: a 31 s supply block (0:18-0:49) and a 0:57 Gateway against a 12-pool
 OPENER_ESSENTIALS_GAS_WAIT_S: float = 90.0
+# M5: §4.4 rows 7/10 (the proxy check) wait this long after the enemy main counts as scouted, so
+# the probe's lap can see a Forge there first (row 3); with CANNON_RUSH pre-raised from memory the
+# scout reached the main earlier and the Forge came into vision 1 s too late (a false PROXY)
+PROXY_CHECK_SETTLE_S: float = 3.0
 OPENER_ESSENTIALS: Tuple[ScheduleItem, ...] = (
     ScheduleItem(0, "structure", UnitTypeId.GATEWAY, 1, "ramp"),
     ScheduleItem(0, "structure", UnitTypeId.CYBERNETICSCORE, 1, "ramp"),
