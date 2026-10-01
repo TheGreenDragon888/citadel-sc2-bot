@@ -1242,3 +1242,24 @@ first): a2da122 (before the two recall/launch decisions) 29 games, 0 crashes, 29
 Terran 10/10, Zerg 6/10, Protoss 9/9 (a container restart stopped game 10); eb06fe4 (before the
 launch decision) 27 games, 0 crashes, 27/27 log lines, Terran 9/9, Zerg 7/9, Protoss 9/9 (a
 container restart stopped the batches).
+
+**Zerg A/B, M4 vs M5 code.** The first 30-game run (a2da122) went 6/10 against VeryHard Zerg (M4:
+9/10): four early losses on one base to a Pool-first, then Roach/Zergling attack at 4:00-5:00. To
+tell code from chance, the same 10 games were played on M4's final code (e345c04, a separate
+worktree) and on M5's (d24ba02) with the game's random seed fixed (`--game-seed 2000`, new in M5),
+the opener forced (`--opener B_PvZ`) and no opponent id:
+
+```
+poetry run python scripts/run_matches.py --difficulty VeryHard --race Zerg --map all --total 10 --opener B_PvZ --game-seed 2000
+```
+
+| Game | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | Wins |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| M4 (e345c04) | W | L 27:25 | L 11:44 | W | W | W | W | W | W | W | 8/10 |
+| M5 (d24ba02) | W | W | L 7:01 | W | W | W | W | W | W | W | 9/10 |
+
+Same outcome in 9 of 10 games; the one difference is a 27-minute M4 loss that M5 won. M5's code
+doesn't weaken play against VeryHard Zerg: the earlier 6/10 came from the AI's random builds (all
+four losses met the 4:00 Roach attack, which also beats M4 in game 3) and from ares cycling openers
+afresh under a new opponent id (B2_PvZSafe in 8 of those 10 games); all four losses were holding against Roaches at 4:05-4:17. The POOL_12 plan against a
+Pool-into-Roach build is in "Known issues" (`docs/STATUS.md`).
