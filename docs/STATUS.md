@@ -97,6 +97,21 @@ Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M4 acceptance evidence
   over 40 ms in 2 games (42, 55), max step 49-411 ms; a cheese game run with 6 clients on 4 cores
   had a 1.3 s step. §6's 200 ms guard (skip non-critical modules for 16 steps) is M5's.
 
+## Starting M5
+
+- **Deliverable / acceptance (DESIGN.md §7):** counterattack (§4.6), opponent memory (§5 "Opponent
+  memory"), telemetry (§8, written to `./data/logs`, last 200 games), step guard (§6). Acceptance:
+  the counterattack triggers and recalls correctly in ≥ 3 staged tests; no crash in 30 local games.
+- **Spec sections to read:** §4.6, §4.4 row 17 (ARMY_OUT_OF_POSITION), §5 (opponent memory and
+  the `UNIT_TTL_S` for ARMY_OUT_OF_POSITION), §6, §8, and §2's `./data` rules (≤ 5 MB, written only
+  under `./data`, "bot data enabled" on the ladder).
+- **Reusable test patterns:** `scripts/test_endgame.py` (a CitadelBot subclass that sets up a game
+  with debug commands and patches thresholds inside the test) fits §8's staged counterattack tests
+  (place an enemy army ~70 path-distance away, check trigger, target, recall). Offline state-machine
+  tests like `scripts/test_attack_decision.py` fit the §4.6 recall rules.
+- **Environment:** the cloud container restarted three times during M4's long runs and killed the
+  batches; `run_matches.py --start N` resumes a batch, and each game prints a `ROW` line.
+
 ## Open question for the user
 
 - **A natural Nexus started before POOL_12 is raised.** §4.2 says to "cancel or delay the natural
