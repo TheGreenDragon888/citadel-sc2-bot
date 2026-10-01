@@ -12,7 +12,7 @@ findings and Citadel's choices are in `docs/VERIFY_NOTES.md`.
 | M2 | Done (see the evidence in `docs/VERIFY_NOTES.md`, "M2 acceptance evidence") | ares bridge, detectors, ThreatFlag expiry, defense plans |
 | M3 | Done (see `docs/VERIFY_NOTES.md`, "M3 acceptance evidence") | per-matchup scout planner, §4.4 rows 3 and 15 |
 | M4 | Done (see `docs/VERIFY_NOTES.md`, "M4 acceptance evidence") | squads, `EngagementResult` gates, retreat hysteresis, end-game rules (`bot/army/`) |
-| M5 | Done (see `docs/VERIFY_NOTES.md`, "M5 acceptance evidence") | counterattack (§4.6), opponent memory (§5), telemetry to `./data/logs` (§8), step guard (§6) |
+| M5 | Final runs pending on 2f082d0 (see "M5 checks" below) | counterattack (§4.6), opponent memory (§5), telemetry to `./data/logs` (§8), step guard (§6) |
 | M6 | Next | upload with bot data enabled; watch the first ladder games (DESIGN.md §7) |
 
 ## Code map (M2-M5 additions)
@@ -89,9 +89,13 @@ contain the matched text), then kill the orphaned `SC2_x64` clients (parent PID 
 
 Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M4 acceptance evidence".
 
-## M5 checks on the final code (FINAL_COMMIT)
+## M5 checks (in progress when the session stopped)
 
-M5_CHECKS_TABLE
+Final bot commit: 2f082d0. Evidence so far is in `docs/VERIFY_NOTES.md`, "M5 acceptance evidence"
+(staged tests 7/7 on Pylon and Torches; 30 VeryHard games on d24ba02 and again on 5555cfa, 0 crashes,
+30/30 log lines each time; Zerg A/B M4 8/10 vs M5 9/10). Still to do on 2f082d0: the 30 VeryHard
+games (`--opponent-id m5z-vh-<race> --game-seed 3000`), the 4 cheese batches with opponent ids,
+Hard x 10, both staged suites, the ladder zip, and updating the evidence section.
 
 Details: `docs/VERIFY_NOTES.md`, "M5 acceptance evidence".
 
