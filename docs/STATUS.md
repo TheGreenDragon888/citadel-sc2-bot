@@ -89,39 +89,41 @@ contain the matched text), then kill the orphaned `SC2_x64` clients (parent PID 
 
 Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M4 acceptance evidence".
 
-## Carry-forward for M5 (counterattack, opponent memory, telemetry, step guard)
+## M5 checks on the final code (FINAL_COMMIT)
 
-- **Squads.** `Role.HARASS` exists for the §4.6 counterattack squad and nothing is assigned to it
-  yet. `Army.busy_tags` keeps the scout planner off the ATTACK/REINFORCE squads; a HARASS squad
-  should be added there. The defense plan's pinned units never reach a squad (`held_tags`).
-- **Fight levels.** `Engagement.level(own, enemy, defender)` is the one entry point (our
-  HP+shields, defender set, 0-10); `attack_inputs(center, target)` builds the §4.5.2 enemy side.
-  §4.6's `COUNTER_START`/`COUNTER_ABORT` are not in `bot/constants.py` yet.
-- **Interactions M5 must keep.** `AttackDecision.recall` (no relaunch wait) is how defense pulls
-  the main attack home; §4.6 says the counterattack never runs during a main attack and is merged
-  into the ATTACK squad when the attack gate opens.
-- **Enemy army value.** `Army._value_ratio` uses ares's army cache (every enemy unit seen, until
-  it dies); §4.6's "seen within the last 15 s" needs `unit.age` / `is_memory` on top.
-- **Telemetry.** `Telemetry` now keeps army value lost/killed, per-step times (p99) and
-  `Army.decisions` (every launch/retreat/recall with its level); M5 writes them to `./data/logs`.
-- **Step time.** Over the 30 acceptance games (4 in parallel on 4 cores): mean 3.4-10.9 ms, p99
-  over 40 ms in 2 games (42, 55), max step 49-411 ms; a cheese game run with 6 clients on 4 cores
-  had a 1.3 s step. §6's 200 ms guard (skip non-critical modules for 16 steps) is M5's.
+M5_CHECKS_TABLE
 
-## Starting M5
+Details: `docs/VERIFY_NOTES.md`, "M5 acceptance evidence".
 
-- **Deliverable / acceptance (DESIGN.md §7):** counterattack (§4.6), opponent memory (§5 "Opponent
-  memory"), telemetry (§8, written to `./data/logs`, last 200 games), step guard (§6). Acceptance:
-  the counterattack triggers and recalls correctly in ≥ 3 staged tests; no crash in 30 local games.
-- **Spec sections to read:** §4.6, §4.4 row 17 (ARMY_OUT_OF_POSITION), §5 (opponent memory and
-  the `UNIT_TTL_S` for ARMY_OUT_OF_POSITION), §6, §8, and §2's `./data` rules (≤ 5 MB, written only
-  under `./data`, "bot data enabled" on the ladder).
-- **Reusable test patterns:** `scripts/test_endgame.py` (a CitadelBot subclass that sets up a game
-  with debug commands and patches thresholds inside the test) fits §8's staged counterattack tests
-  (place an enemy army ~70 path-distance away, check trigger, target, recall). Offline state-machine
-  tests like `scripts/test_attack_decision.py` fit the §4.6 recall rules.
-- **Environment:** the cloud container restarted three times during M4's long runs and killed the
-  batches; `run_matches.py --start N` resumes a batch, and each game prints a `ROW` line.
+## Carry-forward for M6 (upload with bot data enabled; first ladder games)
+
+- **Bot data.** Opponent memory (`./data/opponents/`), ares's opener data (`./data/<id>-protoss.json`)
+  and the game log (`./data/logs/games.jsonl`) only persist when the bot's "bot data enabled"
+  setting is on (§2, §9 risk 15). `config.yml` has `BotDataEnabled: True`; check it on the
+  AI Arena bot page after the upload. `./data` is not in the zip (local test data stays local).
+- **What to watch in the first 20 games** (M6 acceptance: no crashes or timeouts): the bot logs'
+  `STARTUP on_start took ... ms` (§6 limit 5 s; 0.7-1.6 s locally), `STEP ... ms` warnings and
+  `STEP guard on` lines, `METRIC game {...}` (every §8 metric), `MEMORY` lines (the opponent's
+  record and any pre-raise) and `COUNTER` lines. The game log in the bot data holds the same
+  JSON lines.
+- **Ladder environment test** (§8): run the actual zip once in `aiarena/local-play-bootstrap`
+  before uploading (the `--OpponentId` path and `./data` writes are the new M5 code paths a
+  local `run_matches.py` game only partly exercises: it passes the id with `--opponent-id`).
+- **Counterattacks against bots.** The built-in AI rarely leaves its army seen and far from home,
+  so most M5 evidence is staged; the first ladder games are the first real test of §4.6's
+  thresholds (`COUNTER_*`, `OUT_OF_POSITION_*` in `bot/constants.py`).
+
+## Starting M6
+
+- **Deliverable / acceptance (DESIGN.md §7):** upload with bot data enabled; watch the first
+  ladder games. Acceptance: no crashes or timeouts in the first 20 games.
+- **Spec sections to read:** §2 (AI Arena packaging, bot data), §6 (TimeOut), §8 (ladder
+  environment: local-play-bootstrap), §9 (risks 2, 3, 5, 15).
+- **Tools already in the repo:** `scripts/create_ladder_zip.py` (zip), `scripts/upload_to_ai_arena.py`
+  (the template's uploader; `AutoUploadToAiarena: False` in `config.yml`), and the template's
+  GitHub Actions workflow in `.github/`. Uploading needs the user's AI Arena account and token.
+- **Environment:** the cloud container restarted during long runs in M4 and M5 and killed the
+  batches; `run_matches.py --start N` resumes a batch.
 
 ## Open question for the user
 
@@ -134,7 +136,7 @@ Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M4 acceptance evidence
   the Pool on entering the enemy main, so POOL_12 was raised by 1:08-1:13 in all ten M3 12-pool
   games, before the opener's Nexus; the question now only matters for a later-scouted 12-pool.
 
-## Known issues (not blocking M4)
+## Known issues (not blocking M4 or M5)
 
 - **Cannon rush 8/10 (M3: 10/10).** The Ultralove natural variant tied at 60:00 once and the Pylon
   main variant lost once in the final run: in both the first few units were lost near the rush
