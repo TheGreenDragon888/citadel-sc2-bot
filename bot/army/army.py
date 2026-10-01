@@ -659,4 +659,5 @@ class Army:
             f"anchor={self.anchor.rounded} target={self.target.rounded if self.target else '-'} "
             f"level={self.last_level if self.last_level is not None else '-'} defend={self._defend_state} "
             f"counter={self.counter.state}"
+            + (f" (enemy army: {self.counter.position.last.why})" if self.counter.position.last is not None else "")
         )

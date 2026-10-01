@@ -19,7 +19,17 @@ threat raised by its deadline and no threat outside its allowed list.
 M4 columns: `engage` is launches/retreats/recalls of the main attack (§4.5.2); `value` is army
 value lost/killed (§8); `step` is mean/p99/max step ms (§6). The summary ends with the M4 line:
 wins per opponent race against the built-in AI (user decision: >= 7/10 VeryHard for each race).
+
+M5: `--opponent-id ID` gives Citadel the ladder's opponent id (python-sc2's `opponent_id`, as
+ladder.py sets it), so §5 opponent memory (./data/opponents/ID.json) and ares's build data
+(./data/ID-protoss.json) are read and written as on the ladder. Columns: `counter` is
+counterattacks launched (each one's end reason), `pre` the flags pre-raised from memory, `mem` the
+games already in this opponent's record, `log` whether this game's §8 line is in
+./data/logs/games.jsonl, `guard` the §6 step guard activations. The M5 summary line counts crashes
+and games whose §8 line was written (M5 acceptance: no crash in 30 local games).
 """
+
+import json
 
 import argparse
 import asyncio
@@ -50,7 +60,10 @@ from sc2.portconfig import Portconfig  # noqa: E402
 from sc2.player import Bot, Computer  # noqa: E402
 
 from bot.constants import (  # noqa: E402
+    DATA_DIR,
+    GAME_LOG_FILE,
     LADDER_TIE_GAME_SECONDS,
+    LOGS_SUBDIR,
     M1_PROBES_AT_6_MIN,
     M3_FLAG_RATE,
     M3_SCOUT_SAFE_RATE,
@@ -169,6 +182,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--replays", type=Path, default=None, help="folder to save a replay of every game"
     )
+    parser.add_argument(
+        "--opponent-id",
+        default=None,
+        help="the ladder's opponent id to give Citadel (default none, as in local games): enables "
+        "opponent memory in ./data/opponents/<id>.json and ares's ./data/<id>-protoss.json",
+    )
     args = parser.parse_args()
     if args.games < 1:
         parser.error("--games must be at least 1")
@@ -230,6 +249,20 @@ def cell(value) -> str:
     return "-" if value is None else str(value)
 
 
+def logged(game_id: Optional[str]) -> bool:
+    """This game's §8 line is in ./data/logs/games.jsonl."""
+    path = ROOT / DATA_DIR / LOGS_SUBDIR / GAME_LOG_FILE
+    if game_id is None or not path.exists():
+        return False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            if json.loads(line).get("game_id") == game_id:
+                return True
+        except json.JSONDecodeError:
+            continue
+    return False
+
+
 def format_row(r: dict) -> str:
     """One game's summary row (also printed as `ROW ...` right after the game)."""
     line = (
@@ -241,6 +274,8 @@ def format_row(r: dict) -> str:
         line += f"  variant={r['variant']}"
     if r["engage"] is not None:
         line += f"  engage={r['engage']} value={r['value']} step={r['step']}"
+    if r["counter"] is not None:
+        line += f"  counter={r['counter']} pre={r['pre'] or '-'} mem={cell(r['mem'])} log={'ok' if r['log_ok'] else 'MISSING'} guard={r['guard']}"
     if r["scout_tasks"] is not None:
         line += f"  scouts={r['scouts_lost']}/{r['scout_tasks']}"
     if r["flag_ok"] is not None:
@@ -279,6 +314,8 @@ def main() -> int:
             label = f"{opp_race.name} {difficulty.name} {ai_build.name}"
         print(f"\n=== Game {i}/{len(schedule)}: {bot_name} vs {label} on {map_name} ===")
         bot = TrackedCitadelBot(forced_opener=args.opener)
+        if args.opponent_id is not None:
+            bot.opponent_id = args.opponent_id  # as ladder.py does before the game starts
         replay: Optional[str] = None
         if args.replays is not None:
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -334,6 +371,17 @@ def main() -> int:
             value = f"{telemetry.army_value_lost / 1000:.1f}k/{telemetry.army_value_killed / 1000:.1f}k"
             mean = telemetry.step_total_ms / telemetry.step_count if telemetry.step_count else 0.0
             step = f"{mean:.1f}/{telemetry.step_p99_ms():.0f}/{telemetry.step_max_ms:.0f}"
+        counter = pre = mem = guard = None
+        log_ok = False
+        if army is not None:
+            outcomes = army.counter.outcomes
+            counter = f"{len(outcomes)}" + (f"({';'.join(o['reason'][:24] for o in outcomes)})" if outcomes else "")
+            pre = ",".join(getattr(bot, "preraised", []))
+            memory = getattr(bot, "memory", None)
+            mem = memory.record["games"] - (1 if memory.saved else 0) if memory is not None and memory.path is not None else None
+        if telemetry is not None:
+            guard = telemetry.guard_activations
+            log_ok = logged(telemetry.game_id)
         flag_ok = flag_why = None
         if args.opponent and flag_store is not None:
             flag_ok, flag_why = flag_check(args.opponent, [(r.threat.name, r.raised_at) for r in flag_store.history])
@@ -357,6 +405,11 @@ def main() -> int:
                 "step": step,
                 "flag_ok": flag_ok,
                 "flag_why": flag_why,
+                "counter": counter,
+                "pre": pre,
+                "mem": mem,
+                "log_ok": log_ok,
+                "guard": guard,
                 "game_s": game_seconds,
                 "real_s": time.perf_counter() - started,
                 "error": error,
@@ -422,6 +475,14 @@ def main() -> int:
             f"M2 acceptance vs {args.opponent}: {counts[Result.Victory.name]}/{len(rows)} wins "
             f"(>= {needed:.0f} needed), {counts[CRASH]} crashes: {'PASS' if ok else 'FAIL'}"
         )
+    # M5: no crash, and every game's §8 line written to ./data/logs
+    written = sum(bool(r["log_ok"]) for r in rows)
+    launched = sum(int(r["counter"].split("(")[0]) for r in rows if r["counter"])
+    ok = not counts[CRASH] and written == len(rows)
+    print(
+        f"M5 no crash: {len(rows) - counts[CRASH]}/{len(rows)} games without a crash, §8 log line written "
+        f"{written}/{len(rows)}, counterattacks {launched}: {'PASS' if ok else 'FAIL'}"
+    )
     if not args.opponent:
         # M4: wins per opponent race
         parts = []
