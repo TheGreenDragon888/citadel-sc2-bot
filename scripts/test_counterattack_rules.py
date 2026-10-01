@@ -25,6 +25,7 @@ from bot.army.counterattack import (  # noqa: E402
     Candidate,
     pick_squad,
     pick_target,
+    recall_at_launch,
     recall_reason,
     squad_rank,
 )
@@ -144,6 +145,15 @@ def main() -> int:
           recall_reason(**{**base, "launch_path": 90.0, "army_path": 90.0 - COUNTER_RECALL_HEADING_BACK + 1}) is None)
     check("recall: enemy army farther than at launch -> keep going",
           recall_reason(**{**base, "launch_path": 90.0, "army_path": 120.0}) is None)
+
+    # -- no launch that a recall rule would end at once (user decision) ---------------------------
+    home = Point2((30, 30))
+    r = recall_at_launch(home.towards(Point2((100, 100)), COUNTER_RECALL_SQUAD_RADIUS - 2), Point2((150, 150)), home)
+    check("launch: enemy army next to the squad at home -> no launch", r is not None and "of the squad" in r, r)
+    r = recall_at_launch(Point2((150, 150)).towards(home, COUNTER_RECALL_TARGET_RADIUS - 2), Point2((150, 150)), home)
+    check("launch: enemy army already near the target -> no launch", r is not None and "of the target" in r, r)
+    check("launch: enemy army far from both -> launch", recall_at_launch(Point2((30, 150)), Point2((150, 150)), home) is None)
+    check("launch: no enemy army centre -> launch", recall_at_launch(None, Point2((150, 150)), home) is None)
 
     # -- weighted centre --------------------------------------------------------------------------
     c = weighted_center([(Point2((0, 0)), 100.0), (Point2((10, 0)), 300.0)])

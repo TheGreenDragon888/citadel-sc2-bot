@@ -16,7 +16,10 @@ simulator calls), from COUNTER_FROM_S:
   at least COUNTER_SQUAD_MIN_SUPPLY.
 - **Home**: if a home threat is on, the DEFEND units left behind must read >= DEFEND_ENGAGE against
   it (condition 4).
-- **Launch** at >= COUNTER_START against the defenders local to the target. The squad becomes the
+- **Launch** at >= COUNTER_START against the defenders local to the target, unless a recall rule
+  would already fire (the enemy army's centre near the squad or the target: user decision; in the
+  M5 runs an army counted as out of position because it stood at our base, and the squad was
+  recalled 1 s after launching). The squad becomes the
   HARASS squad; inside the base it shoots what can fight back first, then workers, production and
   the townhall (user decision), and walks to the next of those when nothing is in range.
 - **Recall** on any §4.6 rule (`recall_reason`): the out-of-position army's centre near the target or
@@ -183,6 +186,12 @@ def recall_reason(
     return None
 
 
+def recall_at_launch(army_center: Optional[Point2], target: Point2, squad_center: Optional[Point2]) -> Optional[str]:
+    """The recall rule that would fire as soon as a squad at `squad_center` launched (the enemy
+    army's centre near the squad or the target); None = the launch can go ahead (user decision)."""
+    return recall_reason(0.0, 0.0, None, 1.0, 0.0, army_center, target, squad_center)
+
+
 # -- in the game ---------------------------------------------------------------------------------
 
 
@@ -324,6 +333,10 @@ class Counterattack:
             return
         get = bot.unit_tag_dict.get
         squad = [u for tag in tags if (u := get(tag)) is not None]
+        blocked = recall_at_launch(reading.center, target.position, Point2.center([u.position for u in squad]))
+        if blocked is not None:
+            self._set_wait(f"a recall rule would fire at once: {blocked}")
+            return
         home = self._home_level(set(tags))
         if home is not None and home < DEFEND_ENGAGE:
             self._set_wait(f"home threat at {army.threat.rounded}: level {home} < {DEFEND_ENGAGE} without the squad")
