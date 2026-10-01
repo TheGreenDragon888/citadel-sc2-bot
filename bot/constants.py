@@ -282,10 +282,14 @@ _C2_SCHEDULE: Tuple[ScheduleItem, ...] = (
 # What every opener has built by its last step. Prepended to each schedule: when a threat flag
 # ends the ares opener early (§3 step 3), these finish it; otherwise they are already met.
 # The natural waits for DefensePlan.allow_expand (bases_target).
+# M5: the gas waits for a Gateway (until OPENER_ESSENTIALS_GAS_WAIT_S), as in every opener. A flag
+# pre-raised from opponent memory ends the opener at 0:00, and taking both gases first delayed the
+# first Pylon: a 31 s supply block (0:18-0:49) and a 0:57 Gateway against a 12-pool
+OPENER_ESSENTIALS_GAS_WAIT_S: float = 90.0
 OPENER_ESSENTIALS: Tuple[ScheduleItem, ...] = (
     ScheduleItem(0, "structure", UnitTypeId.GATEWAY, 1, "ramp"),
     ScheduleItem(0, "structure", UnitTypeId.CYBERNETICSCORE, 1, "ramp"),
-    ScheduleItem(0, "gas", None, 2),
+    ScheduleItem(0, "gas", None, 2, only_if="gateway_started", only_if_until_s=OPENER_ESSENTIALS_GAS_WAIT_S),
     ScheduleItem(0, "upgrade", UpgradeId.WARPGATERESEARCH),
     ScheduleItem(0, "bases", None, 2),
 )

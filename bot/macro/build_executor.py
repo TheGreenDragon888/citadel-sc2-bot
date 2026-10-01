@@ -62,6 +62,12 @@ def _no_zerg_rush_flag(bot: "AresBot") -> bool:
 # properties (docs/VERIFY_NOTES.md §11.1).
 CONDITIONS: dict[str, Callable[["AresBot"], bool]] = {
     "robo_started": lambda bot: len(bot.mediator.get_own_structures_dict[UnitTypeId.ROBOTICSFACILITY]) > 0,
+    # a Gateway placed, building or done (M5: the essentials' gas waits for it, as in every opener)
+    "gateway_started": lambda bot: (
+        len(bot.mediator.get_own_structures_dict[UnitTypeId.GATEWAY])
+        + len(bot.mediator.get_own_structures_dict[UnitTypeId.WARPGATE])
+        + bot.mediator.get_building_counter[UnitTypeId.GATEWAY]
+    ) > 0,
     "nat_ready": _nat_ready,
     "no_zerg_rush_flag": _no_zerg_rush_flag,
     "enemy_third": lambda bot: bool(bot.mediator.get_enemy_has_base_outside_natural),
