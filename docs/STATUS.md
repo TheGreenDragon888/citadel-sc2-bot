@@ -12,7 +12,7 @@ findings and Citadel's choices are in `docs/VERIFY_NOTES.md`.
 | M2 | Done (see the evidence in `docs/VERIFY_NOTES.md`, "M2 acceptance evidence") | ares bridge, detectors, ThreatFlag expiry, defense plans |
 | M3 | Done (see `docs/VERIFY_NOTES.md`, "M3 acceptance evidence") | per-matchup scout planner, §4.4 rows 3 and 15 |
 | M4 | Done (see `docs/VERIFY_NOTES.md`, "M4 acceptance evidence") | squads, `EngagementResult` gates, retreat hysteresis, end-game rules (`bot/army/`) |
-| M5 | Final runs pending on 2f082d0 (see "M5 checks" below) | counterattack (§4.6), opponent memory (§5), telemetry to `./data/logs` (§8), step guard (§6) |
+| M5 | Final runs on 2f082d0 finishing (see "M5 checks" below) | counterattack (§4.6), opponent memory (§5), telemetry to `./data/logs` (§8), step guard (§6) |
 | M6 | Next | upload with bot data enabled; watch the first ladder games (DESIGN.md §7) |
 
 ## Code map (M2-M5 additions)
@@ -66,7 +66,8 @@ Every threshold is in `bot/constants.py`.
 | M4 gates / fight levels / structure hunt | `poetry run python scripts/test_attack_decision.py`; `poetry run python scripts/test_engagement.py`; `poetry run python scripts/test_endgame.py` |
 | M5 acceptance (10 VeryHard games per race with a local opponent id; `M5 no crash` summary line; `counter=`/`pre=`/`mem=`/`log=`/`guard=` columns) | `poetry run python scripts/run_matches.py --difficulty VeryHard --race Terran --map all --total 10 --opponent-id local-vh-terran` (also `Zerg`, `Protoss`) |
 | M5 staged counterattack (7 cases) / rules / memory / step guard / game log | `poetry run python scripts/test_counterattack.py --case all`; `poetry run python scripts/test_counterattack_rules.py`; `poetry run python scripts/test_opponent_memory.py`; `poetry run python scripts/test_step_guard.py`; `poetry run python scripts/check_game_log.py --last 10` |
-| Opponent memory in game (game 3 pre-raises WORKER_RUSH) | `poetry run python scripts/run_matches.py --opponent worker_rush --map all --total 3 --seed 100 --opponent-id local-memory-check` |
+| Opponent memory in game (game 3 pre-raises WORKER_RUSH) | `poetry run python scripts/run_matches.py --opponent worker_rush --map all --total 3 --seed 100 --opponent-id local-memory-check` (an id keeps its memory across batches: delete `data/opponents/<id>.json` to start fresh) |
+| Same games on two commits (A/B) | add `--game-seed N` (game i uses N + i); `--opener NAME` fixes the opener |
 | Ladder zip | `poetry run python scripts/create_ladder_zip.py`, then `unzip -l publish/*.zip \| head` |
 
 Four batches can run in parallel on a 4-core machine (about 40-70 minutes for 10 games each).
@@ -89,15 +90,14 @@ contain the matched text), then kill the orphaned `SC2_x64` clients (parent PID 
 
 Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M4 acceptance evidence".
 
-## M5 checks (in progress when the session stopped)
+## M5 checks (finishing)
 
-Final bot commit: 2f082d0. Evidence so far is in `docs/VERIFY_NOTES.md`, "M5 acceptance evidence"
-(staged tests 7/7 on Pylon and Torches; 30 VeryHard games on d24ba02 and again on 5555cfa, 0 crashes,
-30/30 log lines each time; Zerg A/B M4 8/10 vs M5 9/10). Still to do on 2f082d0: the 30 VeryHard
-games (`--opponent-id m5z-vh-<race> --game-seed 3000`), the 4 cheese batches with opponent ids,
-Hard x 10, both staged suites, the ladder zip, and updating the evidence section.
-
-Details: `docs/VERIFY_NOTES.md`, "M5 acceptance evidence".
+Final bot commit: 2f082d0. Done on it: staged tests 7/7 on Pylon and Torches; 30 VeryHard games
+(0 crashes, 30/30 log lines; Terran 10/10, Zerg 9/10, Protoss 10/10); worker rush 10/10, cannon
+rush 8/10, 12-pool 9/10; Hard 10/10; offline tests; ladder zip. Still running: the last proxy-rax
+game, and replays of 12-pool game 5 and cannon-rush game 3 with and without opponent memory (both
+losses had the flag pre-raised). The evidence section in `docs/VERIFY_NOTES.md` is updated once
+they finish.
 
 ## Carry-forward for M6 (upload with bot data enabled; first ladder games)
 
@@ -106,7 +106,7 @@ Details: `docs/VERIFY_NOTES.md`, "M5 acceptance evidence".
   setting is on (§2, §9 risk 15). `config.yml` has `BotDataEnabled: True`; check it on the
   AI Arena bot page after the upload. `./data` is not in the zip (local test data stays local).
 - **What to watch in the first 20 games** (M6 acceptance: no crashes or timeouts): the bot logs'
-  `STARTUP on_start took ... ms` (§6 limit 5 s; 0.7-1.6 s locally), `STEP ... ms` warnings and
+  `STARTUP on_start took ... ms` (§6 limit 5 s; 0.6-3.6 s locally), `STEP ... ms` warnings and
   `STEP guard on` lines, `METRIC game {...}` (every §8 metric), `MEMORY` lines (the opponent's
   record and any pre-raise) and `COUNTER` lines. The game log in the bot data holds the same
   JSON lines.
