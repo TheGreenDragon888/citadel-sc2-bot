@@ -395,6 +395,9 @@ def main() -> int:
     rows: list[dict] = []
     for n in numbers:
         match = MATCHES[n - 1]
+        if subprocess.run(["docker", "info"], capture_output=True).returncode != 0:
+            log(f"STOP Docker isn't running any more (before match {n}); the run is incomplete")
+            return 1
         started = time.perf_counter()
         result, out = play(workdir, n, match)
         info = citadel_log(out, match.citadel_seat)
