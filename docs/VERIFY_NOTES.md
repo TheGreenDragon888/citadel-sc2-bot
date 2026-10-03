@@ -1502,3 +1502,71 @@ downloads the bot's log for the bot's owner only (`:122-123`); lists are paged 1
 | Ladder environment test (user decision: hybrid) | Official v0.8.0 proxy and bot images; the official v0.8.0 `sc2_controller` from its image layer (sha256-checked), run in the proxy image with this machine's SC2 4.10 (the SC2 image, 7.8 GB compressed, doesn't fit this machine's disk next to the 11 GB bot image); the IPv4 shim (`scripts/ladder_env/ipv4only.c`) for the proxy and sc2 controller only, on a kernel without IPv6 | Same bot image, launch command, timeouts and result rules as the ladder |
 | Upload | `scripts/upload_to_ai_arena.py --upload` from a dev machine with `UPLOAD_API_TOKEN`/`UPLOAD_BOT_ID`; `AutoUploadToAiarena` stays False | One tested zip, uploaded once; with auto-upload on, every push to `main` would upload |
 | Counting the first 20 games | `scripts/ladder_watch.py`: games played after the latest zip upload (`bot_zip_updated`), oldest first; a Citadel failure is a loss with `result_cause` crash, timeout or initialization_failure; if one happens, the fix is uploaded and the count starts again from that upload | AI Arena's own crash definition; the plan stated the restart |
+
+## M6 acceptance evidence
+
+Acceptance (DESIGN.md §7 M6): upload with bot data enabled; no crashes or timeouts in the first
+20 ladder games. The ladder games are counted after the upload (`scripts/ladder_watch.py`, below);
+this section first records what was checked before uploading. Bot code: commit 4d53ca5 (later
+commits change scripts and docs only).
+
+**The zip** (`poetry run python scripts/create_ladder_zip.py`): `publish/Citadel.zip`, 256 files,
+9,854,928 bytes, md5 `07db06fe540df9dec7e1105fbc8ab491`, content hash
+`f02e94a724e15fcf985cca65aa2dfbacace36df9e989a38276fa781a1b9ef4ee` (sha256 over every file's name
+and contents, printed by the zip script; a rebuild of the same commit gives other bytes, md5
+`afc29ba6...`, and the same content hash). `run.py`, `ladder.py`, `config.yml`,
+`protoss_builds.yml` at the top level; no `data/`; `bot/` identical to the commit (`diff -rq`).
+Its `sc2`, `map_analyzer` and `cython_extensions` are the Poetry environment's (`diff -rq`: 0
+differences each, M6 findings); imported in the ladder bot image in 1.4-1.5 s (15.5 s cold).
+
+**Error guard** (`poetry run python scripts/test_error_guard.py`, Easy Terran, PylonAIE_v4, errors
+injected after five parts on every call plus a behavior raising inside ares's after-step for
+2:00-2:30): 15/15 checks, Victory at 8:38 with 5,806 errors in "ares step", 5,806 in "micro", 726
+in "detectors", 336 in "ares after step" (one per window step, actions still sent on 336/336), 54
+in "ares unit destroyed", 43 in "ares construction started"; 3 tracebacks per part; ares's behavior
+list at most 3 long; probes 21 → 23 through the window. (The first run, before the per-call guards
+in `on_unit_destroyed`: 15/15, Victory at 8:48.)
+
+**Regression with the guard** (`poetry run python scripts/run_matches.py --difficulty Hard --map
+all --total 10 --race Terran Zerg Protoss Random`): 10/10 wins (Terran 3/3, Zerg 3/3, Protoss 2/2,
+Random 2/2), `M5 no crash` 10/10 with the §8 line 10/10, `M6 errors caught: 0 in 0/10 games`, no
+scout lost before 4:00 in 10/10, 2 counterattacks; 44+ probes at 6:00 in 8/10 (41 and 41 against
+Pool-first Zerg, as in M4/M5); step mean 2.4-3.3 ms, max 31-166 ms (three batches shared the
+machine).
+
+**Ladder environment** (`poetry run python scripts/ladder_env_test.py`, the hybrid set-up in the
+M6 choices: official v0.8.0 proxy and bot images, the official v0.8.0 sc2_controller, this
+machine's SC2 4.10; Citadel's `./data` kept from match to match):
+
+| # | Map | Opponent (race) | Citadel's seat | Arena result | Citadel | Game | Startup | Step mean/p99/max (ms) | Controller avg step | Errors | Pre-raised | Games in memory |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | PylonAIE_v4 | loser_bot (T) | 1 | Player1Win | Win | 8:24 | 1074 ms | 1.71/6.7/68.8 | 4.8 ms | 0 | - | 0 |
+| 2 | TorchesAIE_v4 | basic_bot (T) | 2 | Player2Win | Win | 9:12 | 755 ms | 1.43/6.0/54.5 | 4.4 ms | 0 | - | 0 |
+| 3 | MagannathaAIE_v2 | worker_rush (Z) | 1 | Player1Win | Win | 9:51 | 763 ms | 1.94/6.7/57.3 | 5.1 ms | 0 | - | 0 |
+| 4 | UltraloveAIE_v2 | worker_rush (T) | 2 | Player2Win | Win | 9:55 | 895 ms | 1.88/6.7/51.1 | 4.8 ms | 0 | - | 1 |
+| 5 | LeyLinesAIE_v3 | worker_rush (P) | 1 | Player1Win | Win | 9:15 | 576 ms | 1.75/6.4/66.2 | 4.6 ms | 0 | WORKER_RUSH | 2 |
+| 6 | PersephoneAIE_v4 | cannon_rush (P) | 2 | Player2Win | Win | 10:48 | 640 ms | 2.38/8.8/62.5 | 5.6 ms | 0 | - | 0 |
+| 7 | IncorporealAIE_v4 | twelve_pool (Z) | 1 | Player1Win | Win | 10:33 | 441 ms | 2.59/12.4/73.9 | 4.8 ms | 0 | - | 0 |
+| 8 | PylonAIE_v4 | proxy_rax (T) | 2 | Player2Win | Win | 11:32 | 1002 ms | 2.92/10.9/62.1 | 5.5 ms | 0 | - | 0 |
+| 9 | TorchesAIE_v4 | Citadel mirror (P) | 1 | Player2Win | Loss | 11:14 | 557 ms | 2.81/9.9/77.7 | 5.4 ms | 0 | - | 0 |
+| 10 | LeyLinesAIE_v3 | twelve_pool (Z) | 2 | Error (see below) | - | - | - | - | - | - | - | - |
+| 10 again | LeyLinesAIE_v3 | twelve_pool (Z) | 2 | Player2Win | Win | 9:52 | 614 ms | 2.89/13.4/68.1 | 5.6 ms | 0 | - | 1 |
+
+- 10 of 10 matches played to a result with no Crash, TimeOut or InitializationError from Citadel,
+  every one with its STARTUP line (441-1074 ms) and `METRIC game` line, no traceback, no guarded
+  error; the third game against `le-worker-rush` pre-raised WORKER_RUSH from memory.
+- Match 10's first attempt: the twelve_pool bot (seat 1) created the game, and neither SC2 process
+  started it: Citadel's `join_game` returned after 33 s and its next request got "A game has not
+  been started yet" (python-sc2 raised in `initialize_first_step`, before `on_start`), and the other
+  SC2 process didn't answer for 60 s (`Sc2Timeout(60s)` → SC2Crash). The arena client scores that
+  `Error` (on AI Arena: no result, cause "error", not a bot crash). Run alone with the data kept
+  (`--matches 10 --keep-data`), it played normally.
+- Citadel's `./data` after the 10 matches: 15 files, 18,369 bytes (limit 5 MB): ares's
+  `<id>-protoss.json` and `opponents/<id>.json` for each of the 7 opponent ids, and
+  `logs/games.jsonl` with 10 lines, all version 2 and well formed (`check_game_log.problems`), with
+  `errors` empty in each.
+- Earlier runs of the same test: the first (commit 901491e) played matches 1, 2 and 9 the same way
+  (Citadel won all three, startup 749-1100 ms); its six cheese-bot matches ended in
+  InitializationError at once because the cheese bots' generated `run.py` didn't import `sc2.main`
+  (M6 findings); fixed in ce5c35b. The second stopped in match 1 when the Docker daemon, run as a
+  time-limited background task, was stopped.

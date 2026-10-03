@@ -13,9 +13,9 @@ findings and Citadel's choices are in `docs/VERIFY_NOTES.md`.
 | M3 | Done (see `docs/VERIFY_NOTES.md`, "M3 acceptance evidence") | per-matchup scout planner, §4.4 rows 3 and 15 |
 | M4 | Done (see `docs/VERIFY_NOTES.md`, "M4 acceptance evidence") | squads, `EngagementResult` gates, retreat hysteresis, end-game rules (`bot/army/`) |
 | M5 | Done (see `docs/VERIFY_NOTES.md`, "M5 acceptance evidence") | counterattack (§4.6), opponent memory (§5), telemetry to `./data/logs` (§8), step guard (§6) |
-| M6 | Next | upload with bot data enabled; watch the first ladder games (DESIGN.md §7) |
+| M6 | In progress: pre-upload checks done (see `docs/VERIFY_NOTES.md`, "M6 acceptance evidence"); upload and the first 20 ladder games pending | zip with the tested libraries, error guard, ladder-environment test, upload and watch scripts |
 
-## Code map (M2-M5 additions)
+## Code map (M2-M6 additions)
 
 | File | What it does |
 |---|---|
@@ -45,6 +45,11 @@ findings and Citadel's choices are in `docs/VERIFY_NOTES.md`.
 | `bot/telemetry/logger.py` | M5 adds the §8 game record (`./data/logs/games.jsonl`, last 200 games, `METRIC game` on stdout), a 30 s snapshot, startup and step-guard counts |
 | `bot/main.py` | M5 adds the §6 step guard (`_check_step_time`), on_start timing, memory load/pre-raise and the end-of-game writes, and `external_tags` (units a dev test drives) |
 | `scripts/test_counterattack.py` / `test_counterattack_rules.py` / `test_opponent_memory.py` / `test_step_guard.py` / `check_game_log.py` | M5: 7 staged counterattack cases vs a scripted Terran; offline rules; offline memory + `./data` + log bounds; in-game guard window; game log validator |
+| `bot/error_guard.py` | M6 error guard (user decision): each part of a step, the event hooks and ares's after-step run in `ErrorGuard.guard(part)`; an error is logged and counted (`errors` in the game record) and the game goes on |
+| `scripts/create_ladder_zip.py` | M6: zips `sc2`, `map_analyzer`, `cython_extensions` from the Poetry environment (the tested versions) and prints the zip's content hash |
+| `scripts/test_error_guard.py` | M6: offline guard checks and one game with errors injected in five parts and in ares's after-step |
+| `scripts/ladder_env_test.py` (+ `scripts/ladder_env/ipv4only.c`) | M6 §8 ladder-environment test: the real zip in AI Arena's arena client (official proxy/bot images and sc2_controller, this machine's SC2), 10 matches, Citadel's `./data` kept between them |
+| `scripts/upload_to_ai_arena.py` / `scripts/ladder_watch.py` | M6: upload `publish/Citadel.zip` (`--upload`) and read Citadel's ladder games, causes and logs from the AI Arena API (`UPLOAD_API_TOKEN`, `UPLOAD_BOT_ID`) |
 
 Every threshold is in `bot/constants.py`.
 
@@ -68,7 +73,10 @@ Every threshold is in `bot/constants.py`.
 | M5 staged counterattack (7 cases) / rules / memory / step guard / game log | `poetry run python scripts/test_counterattack.py --case all`; `poetry run python scripts/test_counterattack_rules.py`; `poetry run python scripts/test_opponent_memory.py`; `poetry run python scripts/test_step_guard.py`; `poetry run python scripts/check_game_log.py --last 10` |
 | Opponent memory in game (game 3 pre-raises WORKER_RUSH) | `poetry run python scripts/run_matches.py --opponent worker_rush --map all --total 3 --seed 100 --opponent-id local-memory-check` (an id keeps its memory across batches: delete `data/opponents/<id>.json` to start fresh) |
 | Same games on two commits (A/B) | add `--game-seed N` (game i uses N + i); `--opener NAME` fixes the opener |
-| Ladder zip | `poetry run python scripts/create_ladder_zip.py`, then `unzip -l publish/*.zip \| head` |
+| Ladder zip | `poetry run python scripts/create_ladder_zip.py` (prints the content hash), then `unzip -l publish/*.zip \| head` |
+| M6 error guard | `poetry run python scripts/test_error_guard.py` (`--offline` for the no-game checks) |
+| M6 ladder environment (Docker running: `dockerd > /tmp/dockerd.log 2>&1 &`, or as a background task with the 2-hour limit) | `poetry run python scripts/ladder_env_test.py` (`--list`, `--matches 10 --keep-data`); workdir `ladder_env/` |
+| M6 upload / ladder games (`UPLOAD_API_TOKEN`, `UPLOAD_BOT_ID` set) | `poetry run python scripts/upload_to_ai_arena.py --upload`; `poetry run python scripts/ladder_watch.py` |
 
 Four batches can run in parallel on a 4-core machine (about 40-70 minutes for 10 games each).
 Each finished game prints a `ROW` line; if the container restarts mid-batch, rerun the same
@@ -117,9 +125,8 @@ Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M5 acceptance evidence
   `STEP guard on` lines, `METRIC game {...}` (every §8 metric), `MEMORY` lines (the opponent's
   record and any pre-raise) and `COUNTER` lines. The game log in the bot data holds the same
   JSON lines.
-- **Ladder environment test** (§8): run the actual zip once in `aiarena/local-play-bootstrap`
-  before uploading (the `--OpponentId` path and `./data` writes are the new M5 code paths a
-  local `run_matches.py` game only partly exercises: it passes the id with `--opponent-id`).
+- **Ladder environment test** (§8): done before the upload (`scripts/ladder_env_test.py`, see
+  "M6 checks before the upload"); rerun it before every later upload.
 - **Counterattacks against bots.** The built-in AI rarely leaves its army seen and far from home,
   so most M5 evidence is staged; the first ladder games are the first real test of §4.6's
   thresholds (`COUNTER_*`, `OUT_OF_POSITION_*` in `bot/constants.py`). Locally: 8 launches in 30
@@ -134,32 +141,50 @@ Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M5 acceptance evidence
   ladder's `STEP ... ms` / `STEP guard on` lines and the `METRIC game` step fields give the real
   numbers.
 
-## Starting M6
+## M6 checks before the upload (bot code 4d53ca5)
 
-- **Deliverable / acceptance (DESIGN.md §7):** upload with bot data enabled; watch the first
-  ladder games. Acceptance: no crashes or timeouts in the first 20 games.
-- **Spec sections to read:** §2 (AI Arena packaging, bot data), §6 (TimeOut: 30 s without a
-  response loses; `on_start` < 5 s), §8 ("Ladder environment": local-play-bootstrap with the real
-  zip before every upload), §9 (risks 2, 3, 5, 15).
-- **Where the code is:** M5 is on branch `claude/eloquent-albattani-lhjcsi` (bot code 8c00b0a,
-  docs after it); `main` is still M4 (e345c04). Merging M5 to `main` waits for the user's go-ahead.
-- **Zip:** `poetry run python scripts/create_ladder_zip.py` → `publish/Citadel.zip` (386 files,
-  5.5 MB on 8c00b0a; `run.py`/`ladder.py`/`config.yml`/`protoss_builds.yml` at the top level, no
-  `data/`). Check with `unzip -l publish/Citadel.zip | head`.
-- **Upload tools (template):** `.github/workflows/ladder_zip.yml` runs on every push to `main`:
-  builds the zip on Linux, uploads the `ladder-zip` artifact, then runs
-  `scripts/upload_to_ai_arena.py` with the repo secrets `UPLOAD_API_TOKEN` and `UPLOAD_BOT_ID`.
-  That script uploads only if `AutoUploadToAiarena` is True in `config.yml` (it is False), and
-  PATCHes `https://aiarena.net/api/bots/<id>/` with `bot_data_enabled` from `BotDataEnabled`
-  (True). Uploading needs the user's AI Arena account (bot id, API token), or the user uploads
-  the zip by hand on the bot page and turns "bot data enabled" on there.
-- **Ladder environment test:** `aiarena/local-play-bootstrap` (`docker compose up`; unzip the
-  ladder zip into `bots/Citadel/`, add a line to `matches`, then read `results.json`, `replays/`,
-  `logs/`). In this cloud container the docker CLI (29.3.1) and compose (v5.1.1) are installed but
-  no daemon runs (`/var/run/docker.sock` is missing), and the run needs GitHub and Docker Hub
-  access: try starting `dockerd` here, or the user runs it on their own machine.
-- **Environment:** the cloud container restarted during long runs in M4 and M5 and killed the
-  batches; `run_matches.py --start N` resumes a batch.
+| Check | Result |
+|---|---|
+| Zip | `publish/Citadel.zip`, 256 files, 9.9 MB, content hash `f02e94a724e15fcf985cca65aa2dfbacace36df9e989a38276fa781a1b9ef4ee` (md5 of the tested build `07db06fe540df9dec7e1105fbc8ab491`); libraries identical to the Poetry environment; imports in the ladder bot image in 1.4 s |
+| Error guard (`test_error_guard.py`) | 15/15; Victory with errors injected in five parts every call and in ares's after-step for 30 s |
+| M1 regression with the guard, Hard × 10 (T/Z/P/Random) | 10/10 wins, 0 crashes, 0 errors caught, §8 line 10/10 |
+| Ladder environment (`ladder_env_test.py`, 10 matches, 7 maps) | 10/10 played to a result with no Citadel crash, time-out or initialization error; startup 441-1074 ms; no guarded error or traceback; WORKER_RUSH pre-raised in the third worker-rush game; `./data` 18 KB with every memory file and 10 game-log lines. One attempt of match 10 ended `Error` (the two SC2 processes never started the game, scored as an arena error); rerun alone, it played normally |
+
+Details and the per-match table: `docs/VERIFY_NOTES.md`, "M6 acceptance evidence".
+
+## Finishing M6 (next session: upload, then the first 20 ladder games)
+
+The environment variables `UPLOAD_API_TOKEN` (the AI Arena API token) and `UPLOAD_BOT_ID` (the
+bot's id on aiarena.net, created by the user as Citadel / Protoss / Python) are set in the cloud
+environment's settings; a new session picks them up. Check with
+`test -n "$UPLOAD_API_TOKEN" && test -n "$UPLOAD_BOT_ID" && echo set` (never print the token).
+The code is on branch `claude/eloquent-albattani-lhjcsi` (M5 and M6); `main` is still M4 (e345c04).
+
+1. **Rebuild the zip and match it to the tested one.** `poetry run python scripts/create_ladder_zip.py`
+   must print `Content hash: f02e94a724e15fcf985cca65aa2dfbacace36df9e989a38276fa781a1b9ef4ee`
+   (`publish/` is not in git, so the tested file itself isn't in a new session). A different hash
+   means the bot code or a library differs: rerun the M6 checks above before uploading.
+2. **Upload with bot data enabled.** `poetry run python scripts/upload_to_ai_arena.py --upload`
+   (PATCH `/api/bots/<id>/` with the zip and `bot_data_enabled` from `config.yml`'s
+   `BotDataEnabled: True`). Then `poetry run python scripts/ladder_watch.py` prints the bot's
+   `bot_data_enabled` and `bot_zip_md5hash`: it must say `True`, and the md5 must equal
+   `md5sum publish/Citadel.zip`. `AutoUploadToAiarena` stays False (otherwise every push to `main`
+   would upload through the GitHub Action, if the repo had the secrets).
+3. **The user joins Citadel to the ladder competition** on the bot's page on aiarena.net (the API
+   used here doesn't do that).
+4. **Watch.** `poetry run python scripts/ladder_watch.py` lists the games after the upload (result,
+   cause, opponent, map, length, AI Arena's average step time) and, from Citadel's match logs
+   (saved in `ladder_logs/`), STARTUP ms, the `METRIC game` step times, guarded errors and
+   tracebacks; its last line is the acceptance: `M6 acceptance: N/20 games so far, K with a Citadel
+   crash/timeout/initialization failure: PASS/FAIL/WAITING`. Ladder games come at AI Arena's pace
+   (maybe a day or more for 20): schedule check-ins (`send_later`, every few hours) until it reads
+   PASS or FAIL. Report any guarded error (`errors=`) even when the game was fine.
+5. **If Citadel crashes or times out:** read its log in `ladder_logs/<match>.zip`, fix, rerun the
+   checks above (including `ladder_env_test.py`: start `dockerd` as a background task with the
+   2-hour limit; the images are about 11 GB), upload again, and count 20 games from the new upload
+   (the plan's rule).
+6. **When M6 passes:** fill in the ladder table in VERIFY_NOTES "M6 acceptance evidence", update
+   this file, and ask the user to merge M5 + M6 into `main` (their decision: after M6 passes).
 
 ## Open questions for the user
 

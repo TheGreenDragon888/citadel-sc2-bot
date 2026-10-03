@@ -3,6 +3,7 @@ Zips the relevant files and directories so that Bot can be updated
 to ladder or tournaments.
 TODO: check all files and folders are present before zipping
 """
+import hashlib
 import importlib.util
 import os
 import platform
@@ -142,6 +143,16 @@ def get_library_from_site_packages(library_name, project_directory):
     shutil.copytree(library_path, destination_directory)
 
 
+def zip_content_hash(zip_path: str) -> str:
+    """sha256 over every file's name and contents (not timestamps): two builds of the same commit
+    and poetry.lock give the same hash, so a rebuilt zip can be matched to a tested one."""
+    digest = hashlib.sha256()
+    with zipfile.ZipFile(zip_path) as archive:
+        for name in sorted(archive.namelist()):
+            digest.update(name.encode() + b"\0" + hashlib.sha256(archive.read(name)).digest())
+    return digest.hexdigest()
+
+
 def installed_package_dir(package: str) -> str:
     """The folder of `package` as installed in this Python environment (run the script with
     `poetry run python`, so it is the Poetry environment)."""
@@ -214,4 +225,5 @@ if __name__ == "__main__":
     # copy everything we need into a zip file
     zip_files_and_directories(zipfile_name)
 
+    print(f"Content hash: {zip_content_hash(zipfile_name)}")
     print(f"Ladder zip complete.")

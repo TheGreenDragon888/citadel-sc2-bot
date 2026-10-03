@@ -82,6 +82,21 @@ changes, and `ENDGAME` lines.
 Citadel writes files only under `./data` (`bot/data_files.py`), which AI Arena keeps between
 games when "bot data enabled" is on. Local test runs fill `./data` too; delete it to start over.
 
+## Ladder (M6)
+
+- **Error guard**: each part of a step, the event hooks and ares's after-step run in
+  `bot/error_guard.py`'s guard. An error there is logged (`ERROR in <part>`, with a traceback for
+  the first three per part) and counted in the game's `METRIC game` line (`errors`), and the game
+  goes on: on the ladder an unhandled error loses the game as a Crash.
+- **Zip**: `scripts/create_ladder_zip.py` puts in the zip the python-sc2, map-analyzer and
+  cython-extensions the Poetry environment has (the tested versions) and prints a content hash, so
+  a rebuild can be matched to the zip that was tested.
+- **Ladder environment** (DESIGN.md §8): `scripts/ladder_env_test.py` plays the zip in AI Arena's
+  arena client in Docker (10 matches); see its docstring for the set-up.
+- **Upload and watch**: with `UPLOAD_API_TOKEN` and `UPLOAD_BOT_ID` set,
+  `scripts/upload_to_ai_arena.py --upload` uploads `publish/Citadel.zip` with bot data enabled, and
+  `scripts/ladder_watch.py` lists Citadel's ladder games, their result causes and its own log lines.
+
 ## Commands
 
 | Task | Command |
@@ -113,5 +128,8 @@ games when "bot data enabled" is on. Local test runs fill `./data` too; delete i
 | Opponent memory in game (game 3 pre-raises WORKER_RUSH) | `poetry run python scripts/run_matches.py --opponent worker_rush --map all --total 3 --seed 100 --opponent-id local-memory-check` |
 | §6 step guard, in game | `poetry run python scripts/test_step_guard.py` |
 | Check `./data/logs/games.jsonl` (every §8 field) and the size of `./data` | `poetry run python scripts/check_game_log.py --last 10` |
-| Build the ladder zip | `poetry run python scripts/create_ladder_zip.py` |
+| Build the ladder zip (prints the content hash) | `poetry run python scripts/create_ladder_zip.py` |
+| M6 error guard, offline and in game | `poetry run python scripts/test_error_guard.py` |
+| M6 ladder environment (Docker running) | `poetry run python scripts/ladder_env_test.py` |
+| M6 upload / ladder games (`UPLOAD_API_TOKEN`, `UPLOAD_BOT_ID` set) | `poetry run python scripts/upload_to_ai_arena.py --upload`; `poetry run python scripts/ladder_watch.py` |
 | Check the zip layout | `unzip -l publish/*.zip \| head` (`run.py` must be at the top level) |

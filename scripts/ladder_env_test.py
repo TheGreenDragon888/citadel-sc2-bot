@@ -51,6 +51,7 @@ sys.path.insert(0, str(ROOT))
 
 from bot.constants import DATA_MAX_BYTES, GAME_LOG_FILE, LOGS_SUBDIR, STARTUP_WARN_MS  # noqa: E402
 from bot.memory.opponent_store import file_name  # noqa: E402
+from scripts.create_ladder_zip import zip_content_hash  # noqa: E402
 
 IMAGE_TAG: str = "v0.8.0"  # local-play-bootstrap's images (docker-compose.yml at BOOTSTRAP_COMMIT)
 PROXY_IMAGE: str = f"aiarena/arenaclient-proxy:{IMAGE_TAG}"
@@ -389,7 +390,10 @@ def main() -> int:
     with zipfile.ZipFile(zip_path) as archive:
         files = len(archive.namelist())
     digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()[:12]
-    log(f"ZIP {zip_path.relative_to(ROOT)}: {files} files, {zip_path.stat().st_size} bytes, sha256 {digest}")
+    log(
+        f"ZIP {zip_path.relative_to(ROOT)}: {files} files, {zip_path.stat().st_size} bytes, sha256 {digest}, "
+        f"content hash {zip_content_hash(str(zip_path))}"
+    )
     prepare(workdir, zip_path, args.keep_data, [MATCHES[n - 1] for n in numbers])
 
     rows: list[dict] = []
