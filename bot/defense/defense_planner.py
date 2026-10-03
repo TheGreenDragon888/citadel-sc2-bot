@@ -44,6 +44,8 @@ from bot.constants import (
     FORGE_FIRST_BANK,
     HOLD_SHIFT_STEP,
     HOLD_SHIFT_STEPS,
+    MEMORY_KEEPS_OPENER,
+    MEMORY_SOURCE,
     NATURAL_HOLD_OFFSET,
     ONE_BASE_BATTERIES,
     POOL_12_LING_CLEAR_RADIUS,
@@ -197,6 +199,7 @@ class DefensePlanner:
                 getattr(self, f"_plan_{threat.name.lower()}")(plan, army)
         if bot.time < self._no_expand_until:
             plan.allow_expand = False
+        self._end_opener_at_expand(plan)
         # the unit priority list without repeats, in order
         seen: set[UnitTypeId] = set()
         plan.unit_priority = [u for u in plan.unit_priority if not (u in seen or seen.add(u))]
@@ -222,6 +225,30 @@ class DefensePlanner:
             self.opener_ended_by = ", ".join(sorted({f.threat.name for f in overriding}))
             logger.info(
                 f"OPENER ended at {self.bot.time_formatted} (step {runner.build_step}) by {self.opener_ended_by}"
+            )
+            runner.set_build_completed()
+
+    def _end_opener_at_expand(self, plan: DefensePlan) -> None:
+        """A flag pre-raised from memory that leaves the opener running (MEMORY_KEEPS_OPENER, user
+        decision) ends it once the opener reaches its `expand` step while the plan holds
+        expansions: that step only completes when a Nexus starts (ares `build_order_parser.py`
+        EXPAND), which the plan won't allow, so the opener would stall there until
+        OPENER_TIMEOUT_S. In-game POOL_12 ended the opener at this same step in the M5 A/B."""
+        runner = self.bot.build_order_runner
+        if runner.build_completed or plan.allow_expand or runner.build_step >= len(runner.build_order):
+            return
+        step = runner.build_order[runner.build_step]
+        # ares sends a Protoss structure's probe at one supply less (`do_step`)
+        if step.command != self.bot.base_townhall_type or self.bot.supply_used < step.start_at_supply - 1:
+            return
+        kept = sorted(
+            {f.threat.name for f in self.flags.active() if f.source == MEMORY_SOURCE and f.threat.name in MEMORY_KEEPS_OPENER}
+        )
+        if kept:
+            self.opener_ended_by = ", ".join(kept)
+            logger.info(
+                f"OPENER ended at {self.bot.time_formatted} (step {runner.build_step}) by {self.opener_ended_by} "
+                f"(memory): its expand step, which the plan holds"
             )
             runner.set_build_completed()
 

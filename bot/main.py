@@ -14,6 +14,7 @@ from bot.constants import (
     ARMY_EVERY_STEPS,
     INTEL_EVERY_STEPS,
     MACRO_EVERY_STEPS,
+    MEMORY_KEEPS_OPENER,
     MEMORY_LAST_GAMES,
     MEMORY_SOURCE,
     OPENER_TIMEOUT_S,
@@ -122,7 +123,8 @@ class CitadelBot(AresBot):
     def _load_memory(self) -> None:
         """§5: load the opponent's record; pre-raise the cheese it showed in 2 of its last 3 games
         as STRUCTURE evidence (phase-only expiry) that acts like the same flag raised in game,
-        ending the opener where that flag would (user decision)."""
+        ending the opener where that flag would (user decision), except MEMORY_KEEPS_OPENER
+        threats, whose plan applies while the opener runs on (`DefensePlanner._maybe_end_opener`)."""
         try:
             self.memory = OpponentStore(self.opponent_id)
             self.memory.load()
@@ -134,7 +136,9 @@ class CitadelBot(AresBot):
                     MEMORY_SOURCE,
                     self.time,
                     reason=f"opponent memory: raised in {games} of the last {MEMORY_LAST_GAMES} games",
-                    override_opener=self.planner.override_for(threat, Evidence.STRUCTURE),
+                    override_opener=(
+                        self.planner.override_for(threat, Evidence.STRUCTURE) and name not in MEMORY_KEEPS_OPENER
+                    ),
                 )
                 self.preraised.append(name)
         except Exception:  # noqa: BLE001 - memory must never stop the game

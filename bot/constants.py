@@ -780,6 +780,10 @@ MEMORY_LAST_GAMES: int = 3  # §5: the same cheese flag in >= MEMORY_MIN_GAMES o
 MEMORY_MIN_GAMES: int = 2  # ... is pre-raised at 0:00 as STRUCTURE evidence with a phase-only expiry
 MEMORY_KEEP_GAMES: int = 20  # threats_seen keeps entries from this many recent games
 MEMORY_SOURCE: str = "memory"  # flag source of a pre-raised flag (never counted for the next game)
+# Pre-raised flags that apply their plan but leave the ares opener running (user decision after the
+# M5 12-pool A/B): the same flag raised in game, or the opener reaching its `expand` step (a Nexus
+# the plan won't allow), ends it. Every other pre-raised cheese ends the opener at 0:00.
+MEMORY_KEEPS_OPENER: Tuple[str, ...] = ("POOL_12",)
 # §5 has no phase rule for WORKER_RUSH (UNIT evidence); a pre-raised one ends after this time once
 # at most WORKER_RUSH_END_AT enemy workers are within BRIDGE_HOME_RADIUS of our bases (user decision)
 WORKER_RUSH_MEMORY_END_S: float = 150.0
