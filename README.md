@@ -70,7 +70,9 @@ changes, and `ENDGAME` lines.
   on §4.6's rules. Logs: `COUNTER launch`, `COUNTER recall`, `COUNTER outcome`.
 - **Opponent memory** (§5): `bot/memory/opponent_store.py` keeps `./data/opponents/<OpponentId>.json`
   (the ladder's `--OpponentId`; local games have none, so no memory). A cheese seen in 2 of the
-  opponent's last 3 games is raised at 0:00. Logs: `MEMORY` lines.
+  opponent's last 3 games is raised at 0:00 and acts like the same flag seen in game: it ends
+  the opener, except POOL_12, whose plan applies while the opener runs on to its natural step.
+  Logs: `MEMORY` lines.
 - **Telemetry** (§8): each game appends one JSON line with every §8 metric to
   `./data/logs/games.jsonl` (the last 200 games) and prints it as `METRIC game {...}`.
 - **Step guard** (§6): a warning for each step over 30 ms (`STEP ... ms`, naming the slow parts);

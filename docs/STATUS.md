@@ -24,7 +24,7 @@ findings and Citadel's choices are in `docs/VERIFY_NOTES.md`.
 | `bot/intel/detectors.py` | Citadel's detectors: worker rush, cannon structures/probe, early Pool, early lings, proxy (missing/far production), no natural; also the §5 phase rules (`expiry_context`) and scouting state (`main_scouted_at`, `enemy_workers_in_main`, `natural_seen_at`) |
 | `bot/intel/scout_planner.py` | M3 `ScoutPlanner`: when each §4.3 scouting task starts and with which unit (Defense > Scouting), expansion checks, §5 re-scouts, Hallucination; `tags` keeps scouts out of the army |
 | `bot/intel/scout_tasks.py` | M3 task classes (`MainProbeTask`, `PatrolProbeTask`, `LookTask`/`ProbeLookTask`, `AdeptShadeTask`, `OracleTask`, `PostTask`, `PhoenixTask`) and `Mover` (danger-aware paths, `KeepUnitSafe`, keeps out of static defense's reach) |
-| `bot/defense/defense_planner.py` | active flags → one `DefensePlan` (per-threat `_plan_*`), ends the ares opener on override flags |
+| `bot/defense/defense_planner.py` | active flags → one `DefensePlan` (per-threat `_plan_*`), ends the ares opener on override flags; M5: a POOL_12 pre-raised from memory ends it at the opener's expand step (`_end_opener_at_expand`) |
 | `bot/defense/worker_defense.py` | probe pulls (worker rush, cannon rush, lings in a mineral line) and the cancel-when-dying rule |
 | `bot/defense/static_defense.py` | main/natural Batteries, extra Gateways, Core first vs 12-pool, Cannon-range placement blocking, build-order retargeting, dead-builder handling |
 | `bot/army/engagement.py` | M4 fight evaluation: Citadel's `EngagementResult` from the combat simulator with our HP+shields and the defender set; §4.5.2 inputs (`attack_inputs`, `enemies_near`, `static_defense_near`); unit values |
@@ -90,7 +90,7 @@ contain the matched text), then kill the orphaned `SC2_x64` clients (parent PID 
 
 Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M4 acceptance evidence".
 
-## M5 checks on the final code (2f082d0)
+## M5 checks on the final code (2f082d0; 8c00b0a for the pre-raised POOL_12)
 
 | Check | Result |
 |---|---|
@@ -98,10 +98,11 @@ Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M4 acceptance evidence
 | M5 acceptance, 30 local games (VeryHard × 10 per race, opponent ids `m5z-vh-<race>`, `--game-seed 3000`) | 0 crashes, §8 log line 30/30: PASS; wins Terran 10/10, Zerg 9/10, Protoss 10/10 (M4 bar ≥ 7 each); 8 counterattacks |
 | Offline: counterattack rules / opponent memory / step guard / game log | 36/36 / 38/38 / PASS / PASS (200 games, 0 malformed; `./data` 372 KB) |
 | M2/M3 regression, 4 cheese bots × 10 (seed 100, `--game-seed 5000`, opponent ids, so games 3-10 pre-raise) | wins: worker rush 10/10, cannon rush 8/10, 12-pool 9/10, proxy 10/10 (M2 ≥ 8/10: PASS); correct flag 40/40; no scout lost before 4:00 40/40 |
-| Pre-raise A/B (same seeds, with and without memory) | cannon rush game 3 won both ways; 12-pool without memory 10/10 and steady at 4:00, with POOL_12 pre-raised 3 of 10 starts weak (see the open question below) |
+| Pre-raise A/B (same seeds, with and without memory) | cannon rush game 3 won both ways; 12-pool without memory 10/10 and steady at 4:00, with POOL_12 pre-raised (opener ended at 0:00) 3 of 10 starts weak |
+| Pre-raised POOL_12 keeps the opener (user decision, 8c00b0a) | 12-pool 10/10, every start steady at 4:00 (14-23 army supply, 0-1 probes lost); VeryHard Zerg with it pre-raised in every game 9/10; opener ended at its expand step at 1:07-1:08 in all 20; 0 crashes, 20/20 log lines |
 | M1 regression, Hard × 10 (T/Z/P/Random) | 10/10 wins, 0 crashes, 10 counterattacks; 44+ probes at 6:00 in 6/10 (39-42 in the four Pool-first Zerg games, POOL_12 at 1:10-1:14) |
 | `test_attack_decision.py` / `test_threat_flags.py` / `test_m3_checks.py` | 16/16 / 20/20 / 14/14 |
-| Ladder zip | `publish/Citadel.zip`, 386 files, 5.5 MB, `run.py`/`ladder.py`/`config.yml`/`protoss_builds.yml` at the top level, `sc2_helper` included, no `data/` |
+| Ladder zip (rebuilt on 8c00b0a) | `publish/Citadel.zip`, 386 files, 5.5 MB, `run.py`/`ladder.py`/`config.yml`/`protoss_builds.yml` at the top level, `sc2_helper` included, no `data/` |
 
 Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M5 acceptance evidence".
 
@@ -123,6 +124,11 @@ Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M5 acceptance evidence
   so most M5 evidence is staged; the first ladder games are the first real test of §4.6's
   thresholds (`COUNTER_*`, `OUT_OF_POSITION_*` in `bot/constants.py`). Locally: 8 launches in 30
   VeryHard games and 10 in 10 Hard games, most recalled within seconds (see "Known issues").
+- **Pre-raises on the ladder.** A cheese seen in 2 of an opponent's last 3 games is raised at 0:00
+  (`MEMORY ... recurring cheese` and `FLAG raise ... (STRUCTURE, memory)` lines). POOL_12 keeps
+  the opener until its natural step (user decision after the M5 A/B); the others end it at once.
+  A pre-raise costs economy when the opponent switches plans (VeryHard Zerg with POOL_12
+  pre-raised: 29-43 probes at 6:00), and helps against the cheese it expects.
 - **Step times.** Local bot-vs-bot batches run both bots in one Python process and ran five at a
   time on 4 cores; their slow steps (up to 2 s, in every section) are probably the machine. The
   ladder's `STEP ... ms` / `STEP guard on` lines and the `METRIC game` step fields give the real
@@ -141,18 +147,6 @@ Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M5 acceptance evidence
   batches; `run_matches.py --start N` resumes a batch.
 
 ## Open questions for the user
-
-- **Pre-raised POOL_12 ends the opener at 0:00 (M5 user decision: "same as in game").** Against
-  the 12-pool bot this made the early defense less reliable: on the same seeds, raising POOL_12 in
-  game (1:08-1:13, the opener running until then) gave 10/10 wins with 12-19 army supply and 0-2
-  probes lost at 4:00 in every game; pre-raised, 3 of 10 starts had 4-8 army supply and 5-8 probes
-  lost at 4:00 (one loss; 9/10 overall, the M2 bar still holds). In those starts the essentials
-  took both gases at 0:41 and the main Battery's extra Pylon came at 2:27 and lost its builder.
-  Options: keep it; let a pre-raised flag apply its plan (no Nexus, batteries, Gateways) but leave
-  the opener running until the flag is raised in game; or keep ending the opener and change the
-  essentials under POOL_12 (one gas, after the Core; a Pylon placed for the Battery early).
-  Against the worker rush the pre-raise helped (42-55 probes at 6:00 against 33); against the
-  proxy bot it held the one-base plan to 7:00 (all won, 28-39 probes at 6:00 against 54-55).
 
 - **A natural Nexus started before POOL_12 is raised.** §4.2 says to "cancel or delay the natural
   Nexus if it is not yet started", so Citadel keeps one that is already placed. Both 12-pool
@@ -176,7 +170,7 @@ Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M5 acceptance evidence
   (`engage=0/0/0`); M4's code lost the Ley Lines game of the Zerg A/B too.
 - **Gas piles up under POOL_12.** Every 12-pool game had 469-774 gas banked at 4:00 (the plan's
   units are Zealots and Adepts and "tech waits"); one gas, or fewer gas probes, would put more
-  into units. M2 behaviour; see also the open question on the pre-raise.
+  into units. M2 behaviour.
 - **Cannon rush 8/10 (M3: 10/10).** In M5 the main variant lost on Ley Lines (10:00) and Pylon
   (11:33), both with CANNON_RUSH pre-raised; replayed, the Ley Lines game was won with and without
   memory, so the main variant is close either way (the Pylon one is the "Cannon finishes next to

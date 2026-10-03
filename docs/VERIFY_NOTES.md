@@ -1143,6 +1143,17 @@ what was destroyed (the counterattack's kills).
 
 **Startup.** `on_start` took 0.7-1.6 s in the M5 test games (§6's limit is 5 s).
 
+**An opener's `expand` step only finishes when a Nexus starts.** ares parses `expand` as a step
+whose command is `base_townhall_type` (Nexus), started once minerals reach 285 for Protoss, and
+whose end condition is a Nexus at 0-5% progress (`ares-sc2/src/ares/build_runner/build_order_parser.py:113-125`).
+The runner moves past a step only when `set_step_complete` is called from
+`on_building_construction_started` (`ares-sc2/src/ares/main.py:577`) or the end condition holds
+(`build_order_runner.py:474-476`), and a Protoss structure's probe is sent one supply early once
+its start condition holds (`build_order_runner.py:290-298`). So a Nexus order the defense plan
+drops (`static_defense.py` `_retarget_builds`) leaves the opener waiting at that step until
+`OPENER_TIMEOUT_S`; Citadel ends the opener there when only a pre-raised POOL_12 holds expansions
+(below).
+
 ## M5 Citadel choices
 
 Where §4.6, §5, §6 and §8 leave a choice open, M5 decided as below. Every value is in
@@ -1150,7 +1161,7 @@ Where §4.6, §5, §6 and §8 leave a choice open, M5 decided as below. Every va
 
 | Area | Choice | Why |
 |---|---|---|
-| Scope (user decisions) | Pre-raised flags act like the same flag raised in game, including ending the ares opener (WORKER_RUSH, PROXY, POOL_12, Cannon-structure CANNON_RUSH); cheese for the pre-raise = WORKER_RUSH, CANNON_RUSH (not the weak Forge-first source), POOL_12, PROXY and ONE_BASE_ALLIN; a pre-raised WORKER_RUSH ends after 2:30 with ≤ 1 enemy worker near our bases (§5 gives it no phase rule); inside the counterattack target, what can fight back first, then workers, production, townhall; the 30 games = 10 VeryHard per race, each batch with a local opponent id; recall also when the enemy army heads back, and no launch that a recall rule would end at once (below) | Plan approval; the last two after the staged test and the first 30-game run below |
+| Scope (user decisions) | Pre-raised flags act like the same flag raised in game, including ending the ares opener (WORKER_RUSH, PROXY, Cannon-structure CANNON_RUSH; POOL_12 changed after the acceptance runs, see "Pre-raised POOL_12" below); cheese for the pre-raise = WORKER_RUSH, CANNON_RUSH (not the weak Forge-first source), POOL_12, PROXY and ONE_BASE_ALLIN; a pre-raised WORKER_RUSH ends after 2:30 with ≤ 1 enemy worker near our bases (§5 gives it no phase rule); inside the counterattack target, what can fight back first, then workers, production, townhall; the 30 games = 10 VeryHard per race, each batch with a local opponent id; recall also when the enemy army heads back, and no launch that a recall rule would end at once (below) | Plan approval; the last two after the staged test and the first 30-game run below |
 | Remembered army (§4.6 1) | ares's army cache (every enemy fighter seen and not known dead), as for §4.7 in M4; "seen within 15 s" = the cached observation is ≤ 15 s old | §11.2: the 30 s memory is too short for a whole army |
 | Army centre (§4.6 2) | Value-weighted centre of the units seen within 15 s only | Up to 40% of the value can be minutes old and would pull the centre to where units used to be |
 | Path distance (§4.6 2) | The straight line where it is already ≥ 60 (a path is never shorter); otherwise `find_raw_path` on the clean ground grid, cached per 4-tile cell; the straight line if there is no ground path | §6 "cache pathing results"; 0.7 ms per query |
@@ -1168,6 +1179,7 @@ Where §4.6, §5, §6 and §8 leave a choice open, M5 decided as below. Every va
 | Step guard (§6) | Skips the scout planner, the counterattack's detection and launch (recall checks keep running), and the telemetry snapshots (4:00-10:00 and 30 s) for 16 steps; every step over 30 ms is logged with the parts that took ≥ 2 ms | Defense keeps priority; detection holds the path queries |
 | Opponent memory (§5) | `threats_seen` entries also carry the game number and the detector source; one entry per (threat, source) per game with its first raise time; the last 20 games kept; `first_aggression_time` = the earliest over all games; flags pre-raised from memory are never recorded; Cannon flags from an enemy probe alone (`cannon_probe`) don't count toward the pre-raise either (Citadel's addition to the user's Forge-first decision); an id is reduced to letters, digits, `_`, `-`, `.` before it names a file; no id → no memory; an unreadable file → a fresh record | "Last 3 games" needs game numbers; a pre-raise must not keep itself going; M2 already doesn't let a probe alone end the opener |
 | Game log (§8) | `./data/logs/games.jsonl`, one JSON line per game (also `METRIC game` on stdout), the last 200 games; the oldest lines are dropped first if `./data` would pass 4.5 MB; lists capped at 100 entries; written atomically | §2 keeps `./data` under 5 MB |
+| Pre-raised POOL_12 (user decision after the A/B below) | A POOL_12 flag from memory applies its plan from 0:00 (no Nexus, the main Battery, 2 Gateways, Zealot then Adepts, the wall gap held) but leaves the opener running (`MEMORY_KEEPS_OPENER`); the same flag raised in game ends it as before, and otherwise it ends when the opener reaches its `expand` step (`DefensePlanner._end_opener_at_expand`), which the plan holds and which would stall (finding above) | Option B of three put to the user (keep; keep the opener; change the fallback build). In every no-memory 12-pool game the in-game flag ended the opener at that same step (step 4, 1:08-1:13) |
 | Opener essentials' gas (M2 code) | The two Assimilators in `OPENER_ESSENTIALS` wait until a Gateway is placed (`gateway_started`, at most until 1:30), as in every opener | A flag pre-raised from memory ends the opener at 0:00, and the essentials then took both gases at 0:10-0:16 before the first Pylon: against the 12-pool bot (pre-raised POOL_12, Pylon, seed 105) a 31 s supply block (0:18-0:49), the Gateway at 0:57, 14 probes and no army at 6:00 (a loss); replayed with the fix: a 13 s block (0:19-0:32, as in the openers), Gateway 0:33, gas 0:41, 35 probes and 24 army supply at 6:00 |
 | Proxy check settle time (M3 code) | §4.4 rows 7/10 wait `PROXY_CHECK_SETTLE_S` (3 s) after the enemy main counts as scouted | With CANNON_RUSH pre-raised, the opener's scouting step never runs and the scout planner's probe reached the cannon rusher's main earlier: the main counted as scouted at 1:35 and its Forge came into vision at 1:36, after row 10 had raised a false PROXY (M3's Forge exception, row 3, comes too late); seen in both pre-raised cannon-rush games (d24ba02 and 5555cfa) |
 | Writes | Every file write goes through `bot/data_files.py`, which refuses any path outside `./data` | §2 |
@@ -1179,8 +1191,9 @@ Where §4.6, §5, §6 and §8 leave a choice open, M5 decided as below. Every va
 Acceptance (DESIGN.md §7 M5): the counterattack triggers and recalls correctly in at least 3
 staged tests; no crash in 30 local games (user decision: 10 VeryHard games per race, each batch
 with a local opponent id so opponent memory and telemetry are written and read in every game).
-Final code: commit 2f082d0 (later commits change docs only). Every run below is on 2f082d0 unless
-it says otherwise.
+Final code: commit 8c00b0a, which is 2f082d0 plus the pre-raised POOL_12 change (user decision
+after the A/B below; it acts only when POOL_12 is pre-raised from memory and is tested in its own
+section). Every other run below is on 2f082d0 unless it says otherwise.
 
 **Staged counterattack tests** (`scripts/test_counterattack.py`, 7 cases against a scripted Terran,
 see the file's docstring for the setup), on two maps:
@@ -1303,8 +1316,35 @@ poetry run python scripts/run_matches.py --opponent twelve_pool --map all --star
   0:33 and both gases at 0:41 (20 minerals banked at 1:00 against 230 while the opener runs to
   1:12), and the main Battery needed a Pylon of its own, placed at 2:27 next to the wall, whose
   builder died to Zerglings. **The pre-raise as decided (it ends the opener) makes the 12-pool
-  defense less reliable**; the M2 bar still holds (9/10). Raised as an open question in
-  `docs/STATUS.md`.
+  defense less reliable**; the M2 bar still holds (9/10). Put to the user with three options; they
+  chose to keep the opener running (next section).
+
+**Pre-raised POOL_12 that keeps the opener (8c00b0a).** Every game started with POOL_12 pre-raised
+(each lane's opponent id began as a copy of the 12-pool record, `{'POOL_12': 3}`; the VeryHard
+Zerg games used a fresh copy per game, so the pre-raise held in all ten), same seeds as above:
+
+```
+poetry run python scripts/run_matches.py --opponent twelve_pool --map all --start <N> --total <M> --seed 100 --game-seed 5000 --opponent-id <copy>
+poetry run python scripts/run_matches.py --difficulty VeryHard --race Zerg --map all --start <g> --total <g> --game-seed 3000 --opponent-id <copy-g>
+```
+
+| Batch | Wins | Opener ended | 4:00 army supply / probes lost | Probes at 6:00 | Crashes / log lines |
+|---|---|---|---|---|---|
+| 12-pool, POOL_12 raised in game (2f082d0, no memory) | 10/10 | 1:08-1:13, step 4, by the in-game flag | 12-19 / 0-2 | 28-42 | 0 / 10 |
+| 12-pool, pre-raised, opener ended at 0:00 (2f082d0) | 8/9 finished | 0:00 | 4-8 / 5-8 in 3 of 10 starts, 12-18 / 0-2 in the rest | 19-43 | 0 / 9 |
+| **12-pool, pre-raised, opener kept (8c00b0a)** | **10/10** | 1:07-1:08, step 4, at its expand step | **14-23 / 0-1** | 33-43 | 0 / 10 |
+| VeryHard Zerg, pre-raised in every game (8c00b0a) | 9/10 (Ley Lines seed 3002, lost on every M5 commit) | 1:07-1:08, step 4 | 20-25 / 0 | 29-43 | 0 / 10 |
+
+In all 20 games the log shows `FLAG raise POOL_12 (STRUCTURE, memory) at 0:00` without
+`[ends opener]`, the opener's Pylon, Gateway, worker scout and first gas, then `OPENER ended at
+01:07 (step 4) by POOL_12 (memory): its expand step, which the plan holds`, and the main Battery
+at 2:20-2:25. **Result:** the pre-raise no longer weakens the 12-pool defense (10/10, every start
+steady at 4:00). Against VeryHard Zerg, which doesn't 12-pool every game, the pre-raise still costs
+economy (29-43 probes at 6:00 against 40-65 without it in the 30-game run; the plan holds the
+natural until 3 units and no Zerglings near) and the wins take longer (12:43-15:12), as on
+2f082d0 (39-42 probes in its four pre-raised games). WORKER_RUSH, PROXY, CANNON_RUSH and
+ONE_BASE_ALLIN pre-raises are unchanged. Offline tests on 8c00b0a: 38/38, 36/36, 20/20, 14/14,
+16/16; the ladder zip rebuilt (386 files, 5.5 MB, `MEMORY_KEEPS_OPENER` in its `bot/constants.py`).
 
 **Step times in the cheese batches.** The 12-pool, proxy and worker-rush batches ran 5 at a time
 with the Hard batch and the staged suites, four of the five bot-vs-bot (two SC2 clients each, and
