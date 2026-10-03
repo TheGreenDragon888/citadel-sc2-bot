@@ -1,3 +1,5 @@
+import hashlib
+import sys
 from os import path, environ
 from typing import Union
 
@@ -13,7 +15,9 @@ BOT_ZIP_PUBLICLY_DOWNLOADABLE: str = "BotZipPubliclyDownloadable"
 BOT_DATA_PUBLICLY_DOWNLOADABLE: str = "BotDataPubliclyDownloadable"
 BOT_DATA_ENABLED: str = "BotDataEnabled"
 MY_BOT_NAME: str = "MyBotName"
-ZIPFILE_NAME: str = "bot.zip"
+# the zip scripts/create_ladder_zip.py writes: publish/<MyBotName>.zip (the template read "bot.zip",
+# which no step writes)
+PUBLISH_DIR: str = "publish"
 
 TOKEN: str = environ.get(API_TOKEN_ENV)
 BOT_ID: str = environ.get(BOT_ID_ENV)
@@ -51,12 +55,20 @@ if __name__ == "__main__":
     can_upload: bool = False
     if upload := retrieve_value_from_config(AUTO_UPLOAD_TO_AIARENA):
         can_upload = upload
+    # `--upload`: upload now even with AutoUploadToAiarena off (M6: one upload from a dev
+    # machine, without making every push to main upload)
+    if "--upload" in sys.argv[1:]:
+        can_upload = True
 
     if not can_upload:
         logger.info(
             "Auto update to aiarena not enabled, please set "
             "AutoUploadToAiarena option in config to `True`"
         )
+
+    elif not TOKEN or not BOT_ID:
+        logger.error(f"Set {API_TOKEN_ENV} and {BOT_ID_ENV} (environment variables) to upload")
+        sys.exit(1)
 
     else:
         logger.info("Uploading bot")
@@ -72,7 +84,10 @@ if __name__ == "__main__":
         if bot_data_enabled is None:
             bot_data_enabled = True
 
-        with open(ZIPFILE_NAME, "rb") as bot_zip:
+        zip_path = path.join(PUBLISH_DIR, f"{retrieve_value_from_config(MY_BOT_NAME) or 'MyBot'}.zip")
+        with open(zip_path, "rb") as f:
+            logger.info(f"{zip_path}: md5 {hashlib.md5(f.read()).hexdigest()} (AI Arena reports bot_zip_md5hash)")
+        with open(zip_path, "rb") as bot_zip:
             request_headers = {
                 "Authorization": f"Token {TOKEN}",
             }

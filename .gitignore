@@ -141,3 +141,8 @@ sc2-helper/
 # bot runtime data and local test output
 data/
 replays/
+
+# M6 ladder-environment test workdir (scripts/ladder_env_test.py)
+/ladder_env/
+# M6 ladder match logs downloaded by scripts/ladder_watch.py
+/ladder_logs/
