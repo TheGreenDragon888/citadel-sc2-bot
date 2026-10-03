@@ -138,11 +138,26 @@ Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M5 acceptance evidence
 
 - **Deliverable / acceptance (DESIGN.md §7):** upload with bot data enabled; watch the first
   ladder games. Acceptance: no crashes or timeouts in the first 20 games.
-- **Spec sections to read:** §2 (AI Arena packaging, bot data), §6 (TimeOut), §8 (ladder
-  environment: local-play-bootstrap), §9 (risks 2, 3, 5, 15).
-- **Tools already in the repo:** `scripts/create_ladder_zip.py` (zip), `scripts/upload_to_ai_arena.py`
-  (the template's uploader; `AutoUploadToAiarena: False` in `config.yml`), and the template's
-  GitHub Actions workflow in `.github/`. Uploading needs the user's AI Arena account and token.
+- **Spec sections to read:** §2 (AI Arena packaging, bot data), §6 (TimeOut: 30 s without a
+  response loses; `on_start` < 5 s), §8 ("Ladder environment": local-play-bootstrap with the real
+  zip before every upload), §9 (risks 2, 3, 5, 15).
+- **Where the code is:** M5 is on branch `claude/eloquent-albattani-lhjcsi` (bot code 8c00b0a,
+  docs after it); `main` is still M4 (e345c04). Merging M5 to `main` waits for the user's go-ahead.
+- **Zip:** `poetry run python scripts/create_ladder_zip.py` → `publish/Citadel.zip` (386 files,
+  5.5 MB on 8c00b0a; `run.py`/`ladder.py`/`config.yml`/`protoss_builds.yml` at the top level, no
+  `data/`). Check with `unzip -l publish/Citadel.zip | head`.
+- **Upload tools (template):** `.github/workflows/ladder_zip.yml` runs on every push to `main`:
+  builds the zip on Linux, uploads the `ladder-zip` artifact, then runs
+  `scripts/upload_to_ai_arena.py` with the repo secrets `UPLOAD_API_TOKEN` and `UPLOAD_BOT_ID`.
+  That script uploads only if `AutoUploadToAiarena` is True in `config.yml` (it is False), and
+  PATCHes `https://aiarena.net/api/bots/<id>/` with `bot_data_enabled` from `BotDataEnabled`
+  (True). Uploading needs the user's AI Arena account (bot id, API token), or the user uploads
+  the zip by hand on the bot page and turns "bot data enabled" on there.
+- **Ladder environment test:** `aiarena/local-play-bootstrap` (`docker compose up`; unzip the
+  ladder zip into `bots/Citadel/`, add a line to `matches`, then read `results.json`, `replays/`,
+  `logs/`). In this cloud container the docker CLI (29.3.1) and compose (v5.1.1) are installed but
+  no daemon runs (`/var/run/docker.sock` is missing), and the run needs GitHub and Docker Hub
+  access: try starting `dockerd` here, or the user runs it on their own machine.
 - **Environment:** the cloud container restarted during long runs in M4 and M5 and killed the
   batches; `run_matches.py --start N` resumes a batch.
 
