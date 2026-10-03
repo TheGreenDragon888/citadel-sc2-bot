@@ -1179,10 +1179,11 @@ Where §4.6, §5, §6 and §8 leave a choice open, M5 decided as below. Every va
 Acceptance (DESIGN.md §7 M5): the counterattack triggers and recalls correctly in at least 3
 staged tests; no crash in 30 local games (user decision: 10 VeryHard games per race, each batch
 with a local opponent id so opponent memory and telemetry are written and read in every game).
-Final code: commit d24ba02 (later commits change docs only).
+Final code: commit 2f082d0 (later commits change docs only). Every run below is on 2f082d0 unless
+it says otherwise.
 
 **Staged counterattack tests** (`scripts/test_counterattack.py`, 7 cases against a scripted Terran,
-see the file's docstring for the setup), on d24ba02, on two maps:
+see the file's docstring for the setup), on two maps:
 
 ```
 poetry run python scripts/test_counterattack.py --case all --map PylonAIE_v4
@@ -1191,59 +1192,142 @@ poetry run python scripts/test_counterattack.py --case all --map TorchesAIE_v4
 
 | Case | What happens | PylonAIE_v4 | TorchesAIE_v4 |
 |---|---|---|---|
-| `return` | the enemy army walks back to the target once the squad is near it | PASS: recall "enemy army heading back: 101 from the target by ground, 124 at launch"; 7/7 home after 18 s | PASS: heading back (75 vs 95); 7/7 home after 22 s |
-| `timeout` | the enemy army stays away | PASS: recall "out for 60.0 s > 60 s"; 6 SCVs killed, first kill an SCV; 7/7 home | PASS: same; 6 SCVs, first kill an SCV; 7/7 home |
-| `defense` | 16 Marauders, 12 Marines, 3 sieged Tanks appear in our main 15 s after launch | PASS: recall "defense: home threat ..., home level 1 < 4"; 7/7 home after 9 s | PASS: same; 7/7 home after 10 s |
-| `abort` | 10 Marauders and 3 sieged Tanks appear at the target as the squad nears it | PASS: recall "level 3 <= 4"; 6/7 home (1 lost after the recall) | PASS: "level 1 <= 4"; 6/7 home |
+| `return` | the enemy army walks back to the target once the squad is near it | PASS: recall "enemy army heading back: 101 from the target by ground, 126 at launch"; 7/7 home after 18 s | PASS: heading back (73 vs 97); 7/7 home after 22 s |
+| `timeout` | the enemy army stays away | PASS: recall "out for 60.0 s > 60 s"; 6 SCVs killed, first kill an SCV; 7/7 home after 20 s | PASS: same; 6 SCVs, first kill an SCV; 7/7 home after 22 s |
+| `defense` | 16 Marauders, 12 Marines, 3 sieged Tanks appear in our main 15 s after launch | PASS: recall "defense: home threat at (69, 172), home level 1 < 4"; 7/7 home after 9 s | PASS: same; 7/7 home after 11 s |
+| `abort` | 10 Marauders and 3 sieged Tanks appear at the target as the squad nears it | PASS: recall "level 3 <= 4"; 6/7 home (1 lost after the recall) | PASS: "level 1 <= 4" 4 s after they appeared; 6/7 home (1 lost before the recall) |
 | `merge` | the main attack's supply gate is lowered once the squad is out | PASS: "merged into the main attack (7 units)", squad in the ATTACK squad | PASS: same |
-| `in_position` (negative) | the enemy army waits next to its natural | PASS: no flag, no launch (detector: "centre 16 from an enemy base") | PASS |
+| `in_position` (negative) | the enemy army waits next to its natural | PASS: no flag, no launch (detector: "centre 16 from an enemy base") | PASS (centre 10) |
 | `early` (negative) | real COUNTER_FROM_S (5:00) | PASS: no flag, no launch, no detector run before 5:00 | PASS |
 
-In every positive case ARMY_OUT_OF_POSITION was raised at 0:30 (enemy army value 1600, 81% seen
-within 15 s, centre 79-103 from the nearest enemy base) and the counterattack launched at once
-against the enemy natural (defence 0; the main has 2 Bunkers and 6 Marines) with 6 Adepts and 1
-Stalker: 14 of 40 army supply, the 35% cap, Adepts first, no Immortals, not the test's held
-Observer. **Result: PASS** (4 trigger-and-recall cases out of the ≥ 3 needed, on each map; the
-merge and both negative cases pass too).
+Summary lines: `CHECK SUMMARY trigger+recall cases passed: 4/4; merge: PASS; in_position: PASS;
+early: PASS` on both maps. In every positive case ARMY_OUT_OF_POSITION was raised at 0:31-0:32
+(enemy army value 1600, 81% seen within 15 s, centre 79-103 from the nearest enemy base) and the
+counterattack launched at once against the enemy natural (defence 0; the main has 2 Bunkers and 6
+Marines) with 6 Adepts and 1 Stalker: 14 of 40 army supply, the 35% cap, Adepts first, no
+Immortals, not the test's held Observer. **Result: PASS** (4 trigger-and-recall cases out of the
+≥ 3 needed, on each map; the merge and both negative cases pass too). The two tracebacks in each
+log are python-sc2's `ConnectionAlreadyClosed` after the test leaves the game; the harness keeps
+the verdict (`CHECK case ...: (connection closed after leaving ...)`). The same 7/7 on both maps on
+d24ba02.
 
-Offline: `poetry run python scripts/test_counterattack_rules.py` 36/36 (squad, target, every
-recall rule including heading back, the launch block).
+Offline, on the same code:
 
-**30 local games** on d24ba02:
+| Command | Result |
+|---|---|
+| `poetry run python scripts/test_counterattack_rules.py` | 36/36 (squad, target, every recall rule including heading back, the launch block) |
+| `poetry run python scripts/test_opponent_memory.py` | 38/38 (memory file, pre-raise rule, `./data` boundary, game log bounds) |
+| `poetry run python scripts/test_step_guard.py` | PASS (a 250 ms step at 640 turns the guard on for steps 641-656: no scout planner, the counterattack tick runs guarded, no snapshots; all back after) |
+| `poetry run python scripts/check_game_log.py` | 200 games (the 200 cap reached), 300 KB, 0 malformed; all of `./data` 372 KB (limit 4.5 MB): PASS |
+| `test_m3_checks.py` / `test_threat_flags.py` / `test_attack_decision.py` | 14/14 / 20/20 / 16/16 |
+
+**30 local games:**
 
 ```
-poetry run python scripts/run_matches.py --difficulty VeryHard --race Terran --map all --total 10 --opponent-id m5f-vh-terran --game-seed 3000
-poetry run python scripts/run_matches.py --difficulty VeryHard --race Zerg --map all --total 10 --opponent-id m5f-vh-zerg --game-seed 3000
-poetry run python scripts/run_matches.py --difficulty VeryHard --race Protoss --map all --total 10 --opponent-id m5f-vh-protoss --game-seed 3000
+poetry run python scripts/run_matches.py --difficulty VeryHard --race Terran --map all --total 10 --opponent-id m5z-vh-terran --game-seed 3000
+poetry run python scripts/run_matches.py --difficulty VeryHard --race Zerg --map all --total 10 --opponent-id m5z-vh-zerg --game-seed 3000
+poetry run python scripts/run_matches.py --difficulty VeryHard --race Protoss --map all --total 10 --opponent-id m5z-vh-protoss --game-seed 3000
 ```
+
+(three batches in parallel; after a container restart each was resumed with `--start N`, so the
+summary lines printed at the end cover games N-10; the table counts all ten `ROW` lines.)
 
 | Race | Crashes | §8 log line written | Wins (M4 bar ≥ 7) | Counterattacks (how they ended) | Pre-raised |
 |---|---|---|---|---|---|
-| Terran | **0** | 10/10 | 10/10 | 2 (level 2, level 0) | none |
-| Zerg | **0** | 10/10 | 8/10 (Ley Lines 10:15, Pylon 10:16) | 2 (enemy army within 20 of the squad ×2) | POOL_12 in 4 games (from game 5) |
-| Protoss | **0** | 10/10 | 10/10 | 3 (level 4, enemy army within 20 of the squad, within 35 of the target) | none |
+| Terran | **0** | 10/10 | 10/10 | 2 (enemy army within 20 of the squad; defense: home level 1) | none |
+| Zerg | **0** | 10/10 | 9/10 (Ley Lines 10:48) | 4 (level 2 after killing 7 workers and 6 units for 1050 value; heading back, 1 unit killed; enemy army within 20 of the squad ×2) | POOL_12 in 4 games (5, 6, 9, 10) |
+| Protoss | **0** | 10/10 | 10/10 | 2 (enemy army within 20 of the squad ×2) | none |
 
-**Result: PASS** (`M5 no crash: 10/10 games without a crash, §8 log line written 10/10` for each
-race; 0 crashes in 30 games).
+**Result: PASS** (0 crashes in 30 games; every `ROW` has `log=ok`; each batch's summary line reads
+`M5 no crash: N/N games without a crash, §8 log line written N/N ...: PASS`).
 
-- Every game's record was found by its game id in `./data/logs/games.jsonl`;
-  `poetry run python scripts/check_game_log.py` checked all 125 lines written locally so far
-  (every §8 field present, 0 malformed): 163 KB, about 1.3 KB per game; all of `./data` 201 KB
-  (limit 4.5 MB).
-- Opponent memory: each batch's record (`./data/opponents/m5f-vh-<race>.json`) has 10 games; the
-  Zerg one saw POOL_12 in games 3 and 4 and pre-raised it from game 5 on (games 5, 6, 9, 10: 3 wins).
-- Step time over the 30 games (3 in parallel, plus the staged tests): mean 2.9-6.5 ms per game,
-  p99 13-35 ms (none over 40), max 33-216 ms; the step guard turned on 7 times in 4 games; startup
-  0.4-2.9 s (§6: 5 s).
-- Counterattacks in these games: 7, each recalled within 2-16 s without a kill (level ≤ 4 three
-  times once the squad saw the defenders, the enemy army within 20 of the squad three times, within
-  35 of the target once); the enemy armies were 60-68 from their bases, just past the threshold.
+- Every game's record was found by its game id in `./data/logs/games.jsonl`; the file has held
+  its 200-game cap since the cheese batches below (the oldest local test games dropped first).
+- Opponent memory: each batch's record (`./data/opponents/m5z-vh-<race>.json`) has 10 games. The
+  Zerg one saw POOL_12 in games 3 and 4 and pre-raised it in games 5 and 6; with POOL_12 not raised
+  in game 5 or 6 (both pre-raised, which isn't recorded) the last three games no longer had it in
+  two, so games 7 and 8 started without it; they raised it again and games 9 and 10 pre-raised it
+  (`MEMORY ... recurring cheese {'POOL_12': 2}` / `none` lines).
+- Step time over the 30 games (3 batches in parallel with a cheese batch): mean 3.1-7.6 ms per
+  game, p99 13-50 ms (over 40 in 2 games), max 86-468 ms; the step guard turned on 13 times in 7
+  games; startup 0.56-3.6 s (§6: 5 s).
+- Counterattacks: 8 in 30 games. One did what §4.6 is for (Zerg game 7: 3 Adepts and 9 Stalkers
+  at the enemy third at 9:03, 7 workers and 6 units killed, recalled at level 2 after 40 s, 6 of 12
+  home); one was recalled when the army turned home (heading back, 27 s out); one by the defense
+  rule (1 s out, an attack on our base); the other five by "enemy army within 20 of the squad"
+  after 1-16 s: the enemy army was 60-68 from its bases, just past the threshold, and on the
+  squad's way (see "Known issues" in `docs/STATUS.md`).
 
-Earlier runs on superseded commits (same commands, other opponent ids, no game seed for the
-first): a2da122 (before the two recall/launch decisions) 29 games, 0 crashes, 29/29 log lines,
-Terran 10/10, Zerg 6/10, Protoss 9/9 (a container restart stopped game 10); eb06fe4 (before the
-launch decision) 27 games, 0 crashes, 27/27 log lines, Terran 9/9, Zerg 7/9, Protoss 9/9 (a
-container restart stopped the batches).
+The Zerg loss (Ley Lines, game seed 3002) is the same game lost on d24ba02 (10:15) and 5555cfa
+(11:34): a Pool-first Zerg (POOL_12 at 1:12), then a Roach/Ling attack we never engage
+(`engage=0/0/0`); M4's code lost the Ley Lines game of the A/B below too.
+
+**Regressions** (`--seed 100 --game-seed 5000`, each with its own opponent id so the pre-raise is
+exercised from game 3 on):
+
+```
+poetry run python scripts/run_matches.py --opponent <bot> --map all --total 10 --seed 100 --game-seed 5000 --opponent-id m5z-<bot>
+poetry run python scripts/run_matches.py --difficulty Hard --map all --total 10 --race Terran Zerg Protoss Random --game-seed 6000
+```
+
+| Batch | Wins (M2 bar ≥ 8/10) | Correct flag (M3) | Crashes / log lines | Pre-raised | Notes |
+|---|---|---|---|---|---|
+| worker rush | 10/10 | 10/10 | 0 / 10 | WORKER_RUSH from game 3 (8 games) | raised in game at 0:35-0:45 too; 42-55 probes at 6:00 in the pre-raised games, 33 in games 1-2 |
+| cannon rush | 8/10 | 10/10 | 0 / 10 | CANNON_RUSH from game 3 (8 games) | lost the main variant on Ley Lines (10:00) and Pylon (11:33), both pre-raised; see below |
+| 12-pool | 9/10 | 10/10 | 0 / 10 | POOL_12 from game 3 (8 games) | lost Pylon game 5 (10:55); see below |
+| proxy rax | 10/10 | 10/10 | 0 / 10 | PROXY + ONE_BASE_ALLIN from game 3 (8 games) | the pre-raised games stay on one base until ONE_BASE_ALLIN's phase end at 7:00 (the proxy bot never takes a natural); in games 1-2 the in-game flags came at 1:30-2:38, after the opener had placed the natural: 28-39 probes at 6:00 against 54-55, wins in 11:18-13:54 against 8:49-9:23 |
+| Hard × 10 (T/Z/P/Random) | 10/10 | — | 0 / 10 | — | 10 counterattacks (7 ended by the enemy army within 20 of the squad, 1 heading back, 1 merged into the main attack, 1 defense; none killed anything); 44+ probes at 6:00 in 6/10, the four under 44 (39-42) all Pool-first Zerg with POOL_12 at 1:10-1:14 |
+
+No scout was lost before 4:00 in the 40 cheese games (`scouts=0/...` in every `ROW`).
+
+**Do the pre-raised flags cost the two losses?** Both cheese losses above had the flag pre-raised
+at 0:00, so each game was replayed on the same seeds with and without memory (a copy of the
+batch's opponent file under a new id, or no id):
+
+```
+poetry run python scripts/run_matches.py --opponent cannon_rush --map all --start 3 --total 3 --seed 100 --game-seed 5000 [--opponent-id <copy>]
+poetry run python scripts/run_matches.py --opponent twelve_pool --map all --start <N> --total <M> --seed 100 --game-seed 5000 [--opponent-id <copy>]
+```
+
+- Cannon rush, game 3 (Ley Lines, main variant): won with the pre-raise (10:08, 52 probes at 6:00)
+  and without it (10:05, 47 probes; CANNON_RUSH raised in game at 0:47 on the rusher's first
+  Pylon). The same game was lost on d24ba02 and 2f082d0 and won on 5555cfa, all pre-raised: the
+  main variant is close (M2's known pattern), and the pre-raise only moves the plan 47 s earlier.
+- 12-pool: all 10 games again without memory (four `--start/--total` slices in parallel): **10/10
+  wins**, POOL_12 raised in game at 1:08-1:13, army supply 12-19 and 0-2 probes lost at 4:00 in
+  every game. With POOL_12 pre-raised (games 3-10 of the batch, and two replays of game 5): 8 of 9
+  finished games won, and 3 of 10 starts were weak at 4:00 (army supply 4, 6 and 8 with 5-8
+  probes lost: games 5 and 7 of the batch and the first game 5 replay, which a container restart
+  stopped at 15:00); the other 7 had 12-18 and 0-2. Probes at 6:00: 28-42 without memory, 19-43
+  with it. In the weak starts the opener had ended at 0:00 and the essentials put the Gateway at
+  0:33 and both gases at 0:41 (20 minerals banked at 1:00 against 230 while the opener runs to
+  1:12), and the main Battery needed a Pylon of its own, placed at 2:27 next to the wall, whose
+  builder died to Zerglings. **The pre-raise as decided (it ends the opener) makes the 12-pool
+  defense less reliable**; the M2 bar still holds (9/10). Raised as an open question in
+  `docs/STATUS.md`.
+
+**Step times in the cheese batches.** The 12-pool, proxy and worker-rush batches ran 5 at a time
+with the Hard batch and the staged suites, four of the five bot-vs-bot (two SC2 clients each, and
+both bots in one Python process: `run_matches.py` runs them with `asyncio.gather`), on 4 cores.
+They logged 28-49 steps over 200 ms per batch (max 1.4-2.1 s) against 1-12 per batch in the other
+runs; the slow steps fell in every section (ares 39 of the steps over 300 ms, macro 23, micro 14,
+scouts 4, worker defense 3, army 2, intel 1), at any game time, which points at the shared machine
+rather than one code path. The step guard turned on each time and the games went on normally. On
+the ladder each bot runs in its own process; M6's first games give the real numbers.
+
+**Ladder zip** (`poetry run python scripts/create_ladder_zip.py`, then `unzip -l publish/*.zip`):
+`publish/Citadel.zip`, 386 files, 5.5 MB; `run.py`, `ladder.py`, `config.yml` and
+`protoss_builds.yml` at the top level; `sc2_helper` included; no `data/` folder.
+
+Earlier runs on superseded commits (same 30-game commands, other opponent ids; the first without a
+game seed):
+
+| Commit | Change after it | Games | Crashes | Log lines | Terran | Zerg | Protoss |
+|---|---|---|---|---|---|---|---|
+| a2da122 | the two recall/launch decisions | 29 | 0 | 29/29 | 10/10 | 6/10 | 9/9 (a restart stopped game 10) |
+| eb06fe4 | the launch decision | 27 | 0 | 27/27 | 9/9 | 7/9 | 9/9 (a restart stopped the batches) |
+| d24ba02 | essentials' gas waits for a Gateway | 30 | 0 | 30/30 | 10/10 | 8/10 | 10/10 |
+| 5555cfa | proxy check settle time | 30 | 0 | 30/30 | 10/10 | 9/10 | 9/10 |
 
 **Zerg A/B, M4 vs M5 code.** The first 30-game run (a2da122) went 6/10 against VeryHard Zerg (M4:
 9/10): four early losses on one base to a Pool-first, then Roach/Zergling attack at 4:00-5:00. To
@@ -1263,5 +1347,6 @@ poetry run python scripts/run_matches.py --difficulty VeryHard --race Zerg --map
 Same outcome in 9 of 10 games; the one difference is a 27-minute M4 loss that M5 won. M5's code
 doesn't weaken play against VeryHard Zerg: the earlier 6/10 came from the AI's random builds (all
 four losses met the 4:00 Roach attack, which also beats M4 in game 3) and from ares cycling openers
-afresh under a new opponent id (B2_PvZSafe in 8 of those 10 games); all four losses were holding against Roaches at 4:05-4:17. The POOL_12 plan against a
-Pool-into-Roach build is in "Known issues" (`docs/STATUS.md`).
+afresh under a new opponent id (B2_PvZSafe in 8 of those 10 games); all four losses were holding
+against Roaches at 4:05-4:17. The POOL_12 plan against a Pool-into-Roach build is in "Known
+issues" (`docs/STATUS.md`).

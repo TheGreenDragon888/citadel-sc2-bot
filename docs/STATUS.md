@@ -12,7 +12,7 @@ findings and Citadel's choices are in `docs/VERIFY_NOTES.md`.
 | M2 | Done (see the evidence in `docs/VERIFY_NOTES.md`, "M2 acceptance evidence") | ares bridge, detectors, ThreatFlag expiry, defense plans |
 | M3 | Done (see `docs/VERIFY_NOTES.md`, "M3 acceptance evidence") | per-matchup scout planner, §4.4 rows 3 and 15 |
 | M4 | Done (see `docs/VERIFY_NOTES.md`, "M4 acceptance evidence") | squads, `EngagementResult` gates, retreat hysteresis, end-game rules (`bot/army/`) |
-| M5 | Final runs on 2f082d0 finishing (see "M5 checks" below) | counterattack (§4.6), opponent memory (§5), telemetry to `./data/logs` (§8), step guard (§6) |
+| M5 | Done (see `docs/VERIFY_NOTES.md`, "M5 acceptance evidence") | counterattack (§4.6), opponent memory (§5), telemetry to `./data/logs` (§8), step guard (§6) |
 | M6 | Next | upload with bot data enabled; watch the first ladder games (DESIGN.md §7) |
 
 ## Code map (M2-M5 additions)
@@ -90,14 +90,20 @@ contain the matched text), then kill the orphaned `SC2_x64` clients (parent PID 
 
 Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M4 acceptance evidence".
 
-## M5 checks (finishing)
+## M5 checks on the final code (2f082d0)
 
-Final bot commit: 2f082d0. Done on it: staged tests 7/7 on Pylon and Torches; 30 VeryHard games
-(0 crashes, 30/30 log lines; Terran 10/10, Zerg 9/10, Protoss 10/10); worker rush 10/10, cannon
-rush 8/10, 12-pool 9/10; Hard 10/10; offline tests; ladder zip. Still running: the last proxy-rax
-game, and replays of 12-pool game 5 and cannon-rush game 3 with and without opponent memory (both
-losses had the flag pre-raised). The evidence section in `docs/VERIFY_NOTES.md` is updated once
-they finish.
+| Check | Result |
+|---|---|
+| M5 acceptance, staged counterattack (7 cases, `test_counterattack.py`) | PylonAIE_v4 7/7, TorchesAIE_v4 7/7; trigger-and-recall cases 4/4 on each map (≥ 3 needed): PASS |
+| M5 acceptance, 30 local games (VeryHard × 10 per race, opponent ids `m5z-vh-<race>`, `--game-seed 3000`) | 0 crashes, §8 log line 30/30: PASS; wins Terran 10/10, Zerg 9/10, Protoss 10/10 (M4 bar ≥ 7 each); 8 counterattacks |
+| Offline: counterattack rules / opponent memory / step guard / game log | 36/36 / 38/38 / PASS / PASS (200 games, 0 malformed; `./data` 372 KB) |
+| M2/M3 regression, 4 cheese bots × 10 (seed 100, `--game-seed 5000`, opponent ids, so games 3-10 pre-raise) | wins: worker rush 10/10, cannon rush 8/10, 12-pool 9/10, proxy 10/10 (M2 ≥ 8/10: PASS); correct flag 40/40; no scout lost before 4:00 40/40 |
+| Pre-raise A/B (same seeds, with and without memory) | cannon rush game 3 won both ways; 12-pool without memory 10/10 and steady at 4:00, with POOL_12 pre-raised 3 of 10 starts weak (see the open question below) |
+| M1 regression, Hard × 10 (T/Z/P/Random) | 10/10 wins, 0 crashes, 10 counterattacks; 44+ probes at 6:00 in 6/10 (39-42 in the four Pool-first Zerg games, POOL_12 at 1:10-1:14) |
+| `test_attack_decision.py` / `test_threat_flags.py` / `test_m3_checks.py` | 16/16 / 20/20 / 14/14 |
+| Ladder zip | `publish/Citadel.zip`, 386 files, 5.5 MB, `run.py`/`ladder.py`/`config.yml`/`protoss_builds.yml` at the top level, `sc2_helper` included, no `data/` |
+
+Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M5 acceptance evidence".
 
 ## Carry-forward for M6 (upload with bot data enabled; first ladder games)
 
@@ -115,7 +121,12 @@ they finish.
   local `run_matches.py` game only partly exercises: it passes the id with `--opponent-id`).
 - **Counterattacks against bots.** The built-in AI rarely leaves its army seen and far from home,
   so most M5 evidence is staged; the first ladder games are the first real test of §4.6's
-  thresholds (`COUNTER_*`, `OUT_OF_POSITION_*` in `bot/constants.py`).
+  thresholds (`COUNTER_*`, `OUT_OF_POSITION_*` in `bot/constants.py`). Locally: 8 launches in 30
+  VeryHard games and 10 in 10 Hard games, most recalled within seconds (see "Known issues").
+- **Step times.** Local bot-vs-bot batches run both bots in one Python process and ran five at a
+  time on 4 cores; their slow steps (up to 2 s, in every section) are probably the machine. The
+  ladder's `STEP ... ms` / `STEP guard on` lines and the `METRIC game` step fields give the real
+  numbers.
 
 ## Starting M6
 
@@ -129,7 +140,19 @@ they finish.
 - **Environment:** the cloud container restarted during long runs in M4 and M5 and killed the
   batches; `run_matches.py --start N` resumes a batch.
 
-## Open question for the user
+## Open questions for the user
+
+- **Pre-raised POOL_12 ends the opener at 0:00 (M5 user decision: "same as in game").** Against
+  the 12-pool bot this made the early defense less reliable: on the same seeds, raising POOL_12 in
+  game (1:08-1:13, the opener running until then) gave 10/10 wins with 12-19 army supply and 0-2
+  probes lost at 4:00 in every game; pre-raised, 3 of 10 starts had 4-8 army supply and 5-8 probes
+  lost at 4:00 (one loss; 9/10 overall, the M2 bar still holds). In those starts the essentials
+  took both gases at 0:41 and the main Battery's extra Pylon came at 2:27 and lost its builder.
+  Options: keep it; let a pre-raised flag apply its plan (no Nexus, batteries, Gateways) but leave
+  the opener running until the flag is raised in game; or keep ending the opener and change the
+  essentials under POOL_12 (one gas, after the Core; a Pylon placed for the Battery early).
+  Against the worker rush the pre-raise helped (42-55 probes at 6:00 against 33); against the
+  proxy bot it held the one-base plan to 7:00 (all won, 28-39 probes at 6:00 against 54-55).
 
 - **A natural Nexus started before POOL_12 is raised.** §4.2 says to "cancel or delay the natural
   Nexus if it is not yet started", so Citadel keeps one that is already placed. Both 12-pool
@@ -142,10 +165,23 @@ they finish.
 
 ## Known issues (not blocking M4 or M5)
 
-- **Cannon rush 8/10 (M3: 10/10).** The Ultralove natural variant tied at 60:00 once and the Pylon
-  main variant lost once in the final run: in both the first few units were lost near the rush
-  Cannons before the army grew (the Ultralove seed won on 3d230e1; the Pylon one is the "Cannon
-  finishes next to our main Nexus" pattern below). M2's bar (≥ 8/10) still holds.
+- **Counterattacks recalled on the way.** In local games most launches end within seconds by
+  "enemy army within 20 of the squad" (5 of 8 in the 30 VeryHard games, 7 of 10 vs Hard): an
+  army 60-68 from its bases, just past `OUT_OF_POSITION_PATH`, often stands on the squad's way
+  to the target. One VeryHard counterattack did what §4.6 is for (7 workers and 6 units killed,
+  6 of its 12 units lost). A launch check on the squad's path, or a larger threshold, would
+  change §4.6, so it waits for ladder data.
+- **Zerg Ley Lines, game seed 3002.** Lost in all three `--game-seed 3000` runs (d24ba02, 5555cfa, 2f082d0):
+  a Pool-first Zerg (POOL_12 at 1:12), then a Roach/Ling attack the army never engages
+  (`engage=0/0/0`); M4's code lost the Ley Lines game of the Zerg A/B too.
+- **Gas piles up under POOL_12.** Every 12-pool game had 469-774 gas banked at 4:00 (the plan's
+  units are Zealots and Adepts and "tech waits"); one gas, or fewer gas probes, would put more
+  into units. M2 behaviour; see also the open question on the pre-raise.
+- **Cannon rush 8/10 (M3: 10/10).** In M5 the main variant lost on Ley Lines (10:00) and Pylon
+  (11:33), both with CANNON_RUSH pre-raised; replayed, the Ley Lines game was won with and without
+  memory, so the main variant is close either way (the Pylon one is the "Cannon finishes next to
+  our main Nexus" pattern below). In M4 the Ultralove natural variant tied once. M2's bar (≥ 8/10)
+  still holds.
 - **Late-game Zerg.** The one VeryHard Zerg loss went to 25:33 against Mutalisks, Ultralisks,
   Brood Lords, Swarm Hosts and Corruptors: the §4.5.1 air switch (Stalker share up vs air) isn't
   built and the vs-Z mix has no Archons (High Templar are cut). The army was recalled home five
