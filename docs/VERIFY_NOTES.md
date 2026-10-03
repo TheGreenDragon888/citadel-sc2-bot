@@ -1446,3 +1446,59 @@ locked versions too.
 **Import time in the bot image.** Importing the unzipped bot (`from bot.main import CitadelBot`
 plus `sc2`, `map_analyzer`, `cython_extensions`, `sc2_helper`) took 1.4-1.5 s warm and 15.5 s on
 the first run after a machine restart (cold disk cache).
+
+**ares's behaviors after a failure** (`ares-sc2/src/ares/behavior_exectioner.py:51-61`):
+`BehaviorExecutioner.execute` runs every registered behavior and only then empties its list, so a
+behavior that raises leaves the list in place and the next step would run all of it again
+(behind the new ones). python-sc2 runs `issue_events` (the `on_unit_*`/`on_building_*` hooks)
+before `on_step` and ares's `_after_step` (`ares-sc2/src/ares/main.py:437-451`: behaviors,
+drop/archon/placement actions, grid reset, warp-ins, then python-sc2's `_after_step`, which sends
+the step's actions, `sc2/bot_ai_internal.py:856-875`) after it, both outside the `on_step` try
+(`sc2/main.py:153-167`). ares refills its other per-step action lists at the start of each step
+(`ares-sc2/src/ares/main.py:853-856`).
+
+**The arena client in practice** (runtime, `scripts/ladder_env_test.py`):
+- The proxy comments out each `matches` line it has played (`#1,Citadel,...`), so a rerun of
+  the same file plays nothing.
+- `results.json` entries hold `type` (`Player1Win`, `Player2Win`, `Tie`, `Player1Crash`,
+  `InitializationError`, ...), `game_steps` and `bot1_avg_step_time`/`bot2_avg_step_time`
+  (seconds; 0.0044-0.0071 for Citadel in the first runs).
+- Each bot's output is in `logs/bot_controller<seat>/<bot name>/stderr.log`; Citadel's `./data`
+  is `bots/Citadel/data`, which stays between matches as the ladder's bot data does.
+- `--OpponentId` is the opponent's ID column in `matches`.
+- A bot that dies before joining gives `InitializationError` for the match, whichever bot it was.
+- The port picker of both the proxy and the sc2 controller binds every candidate port on IPv6 and
+  IPv4 (`common/src/utilities/portpicker/mod.rs` at tag v0.6.10; the v0.8.0 binary carries the
+  same "Could not allocate port" message), so on a kernel without IPv6 (this container) the sc2
+  controller answers "Could not allocate port" and the proxy panics setting up the game's port
+  config.
+- The template's `ladder.py` uses `sc2.portconfig` without importing it: it works for Citadel
+  because `run.py` imports `sc2.main` first; a bot whose `run.py` doesn't fails with
+  `AttributeError: module 'sc2' has no attribute 'portconfig'`.
+
+**The AI Arena API** (`aiarena/aiarena-web` at `c5edb81`, `aiarena/api/`): token auth
+(`Authorization: Token <token>`, from the profile's token page) for every endpoint;
+`PATCH /api/bots/<id>/` takes `bot_zip`, `bot_zip_publicly_downloadable`, `bot_data`,
+`bot_data_publicly_downloadable`, `bot_data_enabled`, `wiki_article_content`
+(`views/serializers.py:167-181`), the zip validated by the bot model; `GET /api/bots/<id>/` reports
+`bot_data_enabled`, `bot_zip_updated` and `bot_zip_md5hash` (`views/include.py:1-17`);
+`GET /api/match-participations/?bot=<id>` gives `match`, `result` (win/loss/tie/none),
+`result_cause` (game_rules, crash, timeout, race_mismatch, match_cancelled,
+initialization_failure, error), `avg_step_time` and `match_log`
+(`core/models/match_participation.py:18-49`; a "crash" in AI Arena's own terms is a loss caused by
+crash, timeout or initialization_failure, `:71-72`); `/api/match-participations/<id>/match-log/`
+downloads the bot's log for the bot's owner only (`:122-123`); lists are paged 100 at a time
+(`aiarena/settings/default.py:161-162`).
+
+## M6 Citadel choices
+
+| Area | Choice | Why |
+|---|---|---|
+| Error guard (user decision) | Every part of `on_step` (ares's step, mining, opener timeout, bridge, detectors, flag expiry, defense planner, scouts, worker defense, static defense, Gateway upkeep, defense behaviors, chrono, macro plan, wall, army, endgame, micro, telemetry, step time), ares's after-step, the event hooks ares or Citadel implement (one guard per call in `on_unit_destroyed`) and ares's `on_end` run in `ErrorGuard.guard(part)`; `on_start` is not (python-sc2 already catches it and resigns, a Defeat, not a Crash, and a half-built bot shouldn't play) | An error costs one part for one step instead of the game |
+| What the guard lets through | python-sc2's `ProtocolError` (and its `ConnectionAlreadyClosed`) and BaseExceptions such as `CancelledError` | They mean the game or connection is over; python-sc2 ends the game as before |
+| Error logging | A full traceback for the first `ERROR_TRACEBACKS_PER_PART` (3) errors of a part, then one line per `ERROR_LOG_EVERY_S` (60 game seconds) with the count; `errors` (per part) and `errors_first` in the game record (version 2), `err=` in `run_matches.py` rows | A part failing every step would otherwise fill the ladder log |
+| A failure inside ares's after-step | Empty ares's behavior list, reset its grids, then run python-sc2's after-step so the step's actions are still sent (skipped when the error came from python-sc2's own part) | Finding above; without it the list grows every step |
+| Ladder zip libraries | Copied from the Poetry environment (`SITE_PACKAGES_LIBRARIES`) | Finding above: the zip must hold what was tested |
+| Ladder environment test (user decision: hybrid) | Official v0.8.0 proxy and bot images; the official v0.8.0 `sc2_controller` from its image layer (sha256-checked), run in the proxy image with this machine's SC2 4.10 (the SC2 image, 7.8 GB compressed, doesn't fit this machine's disk next to the 11 GB bot image); the IPv4 shim (`scripts/ladder_env/ipv4only.c`) for the proxy and sc2 controller only, on a kernel without IPv6 | Same bot image, launch command, timeouts and result rules as the ladder |
+| Upload | `scripts/upload_to_ai_arena.py --upload` from a dev machine with `UPLOAD_API_TOKEN`/`UPLOAD_BOT_ID`; `AutoUploadToAiarena` stays False | One tested zip, uploaded once; with auto-upload on, every push to `main` would upload |
+| Counting the first 20 games | `scripts/ladder_watch.py`: games played after the latest zip upload (`bot_zip_updated`), oldest first; a Citadel failure is a loss with `result_cause` crash, timeout or initialization_failure; if one happens, the fix is uploaded and the count starts again from that upload | AI Arena's own crash definition; the plan stated the restart |

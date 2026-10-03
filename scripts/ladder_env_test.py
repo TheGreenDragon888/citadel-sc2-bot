@@ -154,6 +154,7 @@ services:
 """
 
 CHEESE_RUN = '''"""Ladder entry point for the scripted {name} bot, written by scripts/ladder_env_test.py."""
+import sc2.main  # noqa: F401  (loads sc2.portconfig, which the template's ladder.py uses unimported)
 from sc2.data import Race
 from sc2.player import Bot
 
