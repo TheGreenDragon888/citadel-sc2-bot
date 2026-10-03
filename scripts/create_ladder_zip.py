@@ -3,6 +3,7 @@ Zips the relevant files and directories so that Bot can be updated
 to ladder or tournaments.
 TODO: check all files and folders are present before zipping
 """
+import importlib.util
 import os
 import platform
 import shutil
@@ -49,6 +50,7 @@ else:
         "ares-sc2/tests",
         "ares-sc2/docs",
         "map_analyzer/pickle_gameinfo",
+        "__pycache__",
     ]
     FILETYPES_TO_IGNORE: Tuple = (".c", ".pyd", ".pyx", ".pyi")
     ROOT_DIRECTORY = "./"
@@ -56,11 +58,12 @@ else:
 ZIP_DIRECTORIES: Dict[str, Dict] = {
     "bot": {"zip_all": True, "folder_to_zip": "bot"},
     "ares-sc2": {"zip_all": True, "folder_to_zip": ""},
-    "python-sc2": {"zip_all": False, "folder_to_zip": "sc2"},
     # "sc2_helper": {"zip_all": True, "folder_to_zip": "sc2_helper"},
-    "SC2MapAnalysis": {"zip_all": False, "folder_to_zip": "map_analyzer"},
-    "cython-extensions-sc2": {"zip_all": False, "folder_to_zip": "cython_extensions"},
 }
+# Libraries copied from the Poetry environment the bot is tested in (versions pinned by
+# poetry.lock). The template cloned each library's default branch instead, which put other
+# versions in the zip than the tested ones (docs/VERIFY_NOTES.md, "M6 findings").
+SITE_PACKAGES_LIBRARIES: List[str] = ["sc2", "map_analyzer", "cython_extensions"]
 
 
 def zip_dir(dir_path, zip_file):
@@ -102,6 +105,10 @@ def zip_files_and_directories(zipfile_name: str) -> None:
             path_to_dir = path.join(ROOT_DIRECTORY, directory, values["folder_to_zip"])
             zip_dir(path_to_dir, zip_file)
 
+    # write the libraries from the Poetry environment (zip root: `sc2/`, `map_analyzer/`, ...)
+    for library in SITE_PACKAGES_LIBRARIES:
+        zip_dir(installed_package_dir(library), zip_file)
+
     # write individual files
     for single_file in ZIP_FILES:
         _path: str = path.join(ROOT_DIRECTORY, single_file)
@@ -133,6 +140,18 @@ def get_library_from_site_packages(library_name, project_directory):
 
     # Copy the library directory into the project directory
     shutil.copytree(library_path, destination_directory)
+
+
+def installed_package_dir(package: str) -> str:
+    """The folder of `package` as installed in this Python environment (run the script with
+    `poetry run python`, so it is the Poetry environment)."""
+    spec = importlib.util.find_spec(package)
+    if spec is None or not spec.submodule_search_locations:
+        raise ValueError(f"Package '{package}' is not installed; run `poetry install` first.")
+    package_dir = path.realpath(list(spec.submodule_search_locations)[0])
+    if "site-packages" not in package_dir.split(os.sep):
+        raise ValueError(f"Package '{package}' found at {package_dir}, not in site-packages.")
+    return package_dir
 
 
 def check_git_status():
@@ -172,133 +191,7 @@ def get_zipfile_name() -> str:
     return zipfile_name
 
 
-def on_error(func, path, exc_info):
-    """
-    Error handler for ``shutil.rmtree``.
-
-    If the error is due to an access error (read only file)
-    it attempts to add write permission and then retries.
-
-    If the error is for another reason it re-raises the error.
-
-    Usage : ``shutil.rmtree(path, onerror=onerror)``
-    """
-    import stat
-
-    # Is the error an access error?
-    if not os.access(path, os.W_OK):
-        os.chmod(path, stat.S_IWUSR)
-        func(path)
-    else:
-        raise
-
-def try_build_cython_extensions(build_env=None):
-    """
-    Attempt to build Cython extensions with different approaches
-
-    Args:
-        build_env: Optional environment variables dictionary
-
-    Returns:
-        bool: True if build succeeded, False otherwise
-    """
-    import subprocess
-
-    if build_env is None:
-        build_env = os.environ.copy()
-
-    try:
-        # Approach 1: Try with pip install
-        subprocess.run(
-            "cd cython-extensions-sc2 && poetry run pip install -e .",
-            shell=True,
-            env=build_env,
-            check=True
-        )
-        return True
-    except subprocess.CalledProcessError:
-        print("Second build approach failed, trying setup.py directly...")
-
-        try:
-            # Approach 2: Use setup.py directly with different flags
-            subprocess.run(
-                "cd cython-extensions-sc2 && poetry run python setup.py build_ext --inplace",
-                shell=True,
-                env=build_env,
-                check=True
-            )
-            return True
-        except subprocess.CalledProcessError:
-            print("All build approaches failed.")
-            return False
-
-
 if __name__ == "__main__":
-    print("Cloning python-sc2...")
-    destination_directory = os.path.join("./", "python-sc2")
-    if os.path.exists(destination_directory):
-        shutil.rmtree(destination_directory, ignore_errors=False, onerror=on_error)
-
-    # clone python-sc2
-    run("git clone https://github.com/august-k/python-sc2", shell=True)
-    # clone map-analyzer
-    run("git clone https://github.com/raspersc2/SC2MapAnalysis", shell=True)
-    # cython extensions
-    run("git clone https://github.com/AresSC2/cython-extensions-sc2", shell=True)
-
-    # Set environment variables to control the Cython build process
-    build_env = os.environ.copy()
-    if platform.system() != "Windows":
-        build_env["LDFLAGS"] = "-Wl,--allow-multiple-definition"
-        # For Python 3.12 compatibility
-        build_env["CFLAGS"] = "-fPIC"
-
-    # Try building with our helper function
-    if try_build_cython_extensions(build_env):
-        print("Successfully built Cython extensions")
-    else:
-        print("WARNING: Cython extension build failed, exiting script")
-        exit(1)
-
-    # Still run poetry build to create the distribution package
-    # run("cd cython-extensions-sc2 && poetry build", shell=True)
-
-
-    # clone sc2-helper
-    # run("git clone https://github.com/danielvschoor/sc2-helper", shell=True)
-    # # install rust build tools
-    # run("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh", shell=True)
-    # # activate Rust
-    # run("source $HOME/.cargo/env", shell=True)
-    # # compile rust code
-    # run("cd sc2-helper && cargo build --release", shell=True)
-    # run("cd ..", shell=True)
-
-    """
-    Move the sc2 helper binary to correct place
-    """
-    # source_file = "sc2-helper/target/release/libsc2_helper.so"
-    # # Define the destination directory path
-    # destination_directory = "sc2-helper/sc2_helper/"
-    # # Define the new name for the file
-    # new_file_name = "sc2_helper.so"
-    # # Combine the destination directory path and the new file name
-    # new_file_path = os.path.join(destination_directory, new_file_name)
-    # # Move the file to the destination directory with the new name
-    # shutil.move(source_file, new_file_path)
-
-    # print structure out for debugging purposes
-    current_directory = os.getcwd()
-    print("Current Directory:", current_directory)
-
-    # List all files and directories in the current directory
-    for item in os.listdir(current_directory):
-        item_path = os.path.join(current_directory, item)
-        if os.path.isdir(item_path):
-            print("Directory:", item)
-        elif os.path.isfile(item_path):
-            print("File:", item)
-
     # get name of bot from config if possible (otherwise use default name)
     os.makedirs(path.join(ROOT_DIRECTORY, PUBLISH_DIR), exist_ok=True)
     zipfile_name = path.join(PUBLISH_DIR, get_zipfile_name())
@@ -308,34 +201,17 @@ if __name__ == "__main__":
     # makes the process wait, otherwise files get zipped before compile is complete
     p.communicate()
     p_status = p.wait()
-
-    # compile the cython code
-    # print("Compiling cython code...")
-    # p = Popen(["poetry", "build"], cwd=f"{ROOT_DIRECTORY}ares-sc2")
-    # # makes the process wait, otherwise files get zipped before compile is complete
-    # p.communicate()
-    # p_status = p.wait()
+    assert p_status == 0, "poetry install failed"
 
     # at the moment -> ensure debug=False
     print("Checking config values...")
     check_config_values()
 
-    print("Copying sc2 folder from site packages...")
+    for library in SITE_PACKAGES_LIBRARIES:
+        print(f"Zipping {library} from {installed_package_dir(library)}")
 
     print(f"Zipping files and directories to {zipfile_name}...")
     # copy everything we need into a zip file
     zip_files_and_directories(zipfile_name)
-
-    print(f"Cleaning up...")
-
-    destination_directory = os.path.join("./", "python-sc2")
-    if os.path.exists(destination_directory):
-        shutil.rmtree(destination_directory, onerror=on_error)
-    destination_directory = os.path.join("./", "sc2-helper")
-    if os.path.exists(destination_directory):
-        shutil.rmtree(destination_directory, onerror=on_error)
-    destination_directory = os.path.join("./", "SC2MapAnalysis")
-    if os.path.exists(destination_directory):
-        shutil.rmtree(destination_directory, onerror=on_error)
 
     print(f"Ladder zip complete.")

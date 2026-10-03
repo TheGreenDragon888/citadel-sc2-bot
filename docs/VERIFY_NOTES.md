@@ -1390,3 +1390,59 @@ four losses met the 4:00 Roach attack, which also beats M4 in game 3) and from a
 afresh under a new opponent id (B2_PvZSafe in 8 of those 10 games); all four losses were holding
 against Roaches at 4:05-4:17. The POOL_12 plan against a Pool-into-Roach build is in "Known
 issues" (`docs/STATUS.md`).
+
+## M6 findings
+
+Found while preparing the upload (M6). Sources: the arena client's source
+(`aiarena/sc2-ai-match-controller`, `main` at `88b3204`, 2026-09-28; the `v0.8.0` images that
+`aiarena/local-play-bootstrap` uses have no git tag, so the exact commit behind them is not
+confirmed) and the `aiarena/arenaclient-bot:v0.8.0` image.
+
+**The ladder's bot image.** `aiarena/arenaclient-bot:v0.8.0`: Python 3.12.12
+(`/usr/local/bin/python`), Debian 12 with glibc 2.36; it carries numpy 2.0.2, scipy 1.17.0,
+scikit-learn 1.8.0, scikit-image 0.26.0, loguru 0.7.3, aiohttp 3.13.3, protobuf 6.33.4,
+s2clientprotocol, PyYAML 6.0.3, burnysc2 7.1.3 and others (`pip list` in the image). The zip's own
+`sc2/` folder comes first on `sys.path` (`python run.py` puts `/bot` first), so the image's
+burnysc2 is not used. The zip's compiled files need glibc 2.34 at most (`objdump -T`:
+`sc2_helper` 2.34, `cython_extensions` and `map_analyzer` 2.14).
+
+**How the bot is started** (`bot_controller/src/main.rs`): `python run.py --GamePort <port>
+--LadderServer <host IP> --StartPort <pass port> --OpponentId <id>` with `/bot` as the working
+directory (so `./data` is `/bot/data`); stdout and stderr go to `/bot/logs/stdout.log` and
+`/bot/logs/stderr.log`. The template's `ladder.py` reads all four arguments and honours
+`--LadderServer` (§9 risk 5).
+
+**What the ladder scores as Crash or TimeOut** (`sc2_controller/src/websocket/player.rs`,
+`game/game_config.rs`, `game/game_result.rs`):
+- `timeout_secs: 30` (`game_config.rs:58`): every request the bot sends must come within 30 s of
+  the previous response (`player.rs:45`, `:287`), from the join request on, so `on_start` and every
+  step count; a miss is `PlayerNTimeOut` (`player.rs:407-416`, `game_result.rs:95-96`).
+- The bot's websocket closing or an unexpected message is `PlayerNCrash` (`player.rs:375-399`).
+  python-sc2 re-raises any exception from `on_step` and leaves the game
+  (`sc2/main.py:158-166` in the venv's python-sc2), so one unhandled error in a step loses the
+  game as a Crash; an exception in `on_start` is caught and logged (`sc2/main.py:140-144`).
+- `max_frame_time: 40` is stored (`game_config.rs:8`, `:57`) and read nowhere; there is no strike
+  count in the source (local-play-bootstrap's `config.toml` still lists `MAX_FRAME_TIME = 40` and
+  `STRIKES = 10`). The controller only records the average step time (`runtime_vars.rs:48-53`).
+  This matches §6 ("documented but not enforced").
+- `max_game_time: 80640` loops ends the game as a Tie (`player.rs`, "Max time reached"), §4.7.
+- `disable_debug: true`: debug requests get an empty response and never reach the game.
+
+**The template's zip carried other library versions than the tested ones.**
+`scripts/create_ladder_zip.py` cloned the default branch of each library at build time, while the
+Poetry environment every local test ran in has the versions `poetry.lock` pins:
+
+| Library | Tested (Poetry environment) | In the zip before M6 |
+|---|---|---|
+| python-sc2 | `august-k/python-sc2` `develop` @ `7ec25cf` | `august-k/python-sc2` default branch: `Units.__call__` needs an argument, `query_available_abilities_with_tag` gets `self.units`/`self.structures`, other typing changes |
+| map-analyzer | `spudde123/SC2MapAnalysis` `develop` (0.2.0) | `raspersc2/SC2MapAnalysis` default branch: no `CREEPTUMORQUEEN`/`CREEPTUMORBURROWED` in the pathing blockers, no `DESTRUCTIBLEEXPEDITIONGATE6X6` |
+| cython-extensions-sc2 | 0.17.0 (PyPI manylinux wheel) | 0.18.0, built from source (its build step also reinstalled the Poetry environment's copy until `poetry install` put 0.17.0 back) |
+
+M6 changes the script to copy `sc2`, `map_analyzer` and `cython_extensions` from the Poetry
+environment's site-packages (`installed_package_dir`, `SITE_PACKAGES_LIBRARIES`), and leaves
+`__pycache__` folders out. The template's GitHub Action runs `poetry install` first, so it zips the
+locked versions too.
+
+**Import time in the bot image.** Importing the unzipped bot (`from bot.main import CitadelBot`
+plus `sc2`, `map_analyzer`, `cython_extensions`, `sc2_helper`) took 1.4-1.5 s warm and 15.5 s on
+the first run after a machine restart (cold disk cache).
