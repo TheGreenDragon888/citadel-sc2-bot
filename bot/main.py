@@ -4,6 +4,7 @@ from typing import Optional
 from ares import AresBot
 from ares.behaviors.macro import MacroPlan
 from loguru import logger
+from sc2.bot_ai import BotAI
 from sc2.data import Result
 from sc2.ids.unit_typeid import UnitTypeId
 from sc2.unit import Unit
@@ -30,6 +31,7 @@ from bot.defense.defense_planner import DefensePlanner
 from bot.defense.static_defense import StaticDefense
 from bot.defense.wall_fallback import WallFallback
 from bot.defense.worker_defense import WorkerDefense
+from bot.error_guard import ErrorGuard
 from bot.intel.ares_bridge import AresBridge
 from bot.intel.detectors import Detectors
 from bot.intel.scout_planner import ScoutPlanner
@@ -80,6 +82,9 @@ class CitadelBot(AresBot):
         self.preraised: list[str] = []  # threats pre-raised from memory at 0:00
         # §6 step guard: through this iteration, skip the non-critical modules
         self.guard_until: int = -1
+        # M6 error guard (user decision): an error in one part of a step is logged and counted,
+        # and the game goes on (an unhandled one is a Crash on the ladder)
+        self.errors: ErrorGuard = ErrorGuard(self)
 
     async def on_start(self) -> None:
         started = time.perf_counter()
@@ -159,79 +164,120 @@ class CitadelBot(AresBot):
         # §6 step guard: after a step over STEP_GUARD_MS, the scout planner, the counterattack's
         # detection and launch, and the telemetry snapshots wait STEP_GUARD_STEPS steps
         guarded = iteration <= self.guard_until
+        # M6 error guard: each part runs in `guard(<part>)`, so an error skips only that part
+        guard = self.errors.guard
         marks: list[tuple[str, float]] = []
-        await super(CitadelBot, self).on_step(iteration)
+        with guard("ares step"):
+            await super(CitadelBot, self).on_step(iteration)
         marks.append(("ares", time.perf_counter()))
         # ares only moves workers that a Mining behavior tells to mine; register it every step.
         # No long-distance mining while rush Cannons may cover other bases' minerals (§4.2), or
         # while our unit holds the wall gap (the probes would walk out past it into the lings)
         plan = self.planner.plan
-        self.register_behavior(
-            self.economy.mining_behavior(
-                long_distance=Threat.CANNON_RUSH not in plan.active and not plan.hold_wall_gap
+        with guard("mining"):
+            self.register_behavior(
+                self.economy.mining_behavior(
+                    long_distance=Threat.CANNON_RUSH not in plan.active and not plan.hold_wall_gap
+                )
             )
-        )
 
-        if not self.build_order_runner.build_completed and self.time > OPENER_TIMEOUT_S:
-            logger.warning(
-                f"OPENER {self.opener} still running at {self.time_formatted} "
-                f"(step {self.build_order_runner.build_step}); ending it"
-            )
-            self.build_order_runner.set_build_completed()
-            self.planner.opener_ended_by = "timeout"  # BuildExecutor adds the opener essentials
+        with guard("opener timeout"):
+            if not self.build_order_runner.build_completed and self.time > OPENER_TIMEOUT_S:
+                logger.warning(
+                    f"OPENER {self.opener} still running at {self.time_formatted} "
+                    f"(step {self.build_order_runner.build_step}); ending it"
+                )
+                self.build_order_runner.set_build_completed()
+                self.planner.opener_ended_by = "timeout"  # BuildExecutor adds the opener essentials
 
         # §3 step 2: intel, flag expiry and the defense plan
         if iteration % INTEL_EVERY_STEPS == 0:
-            self.bridge.update()
-            self.detectors.update()
-            self.flags.expire(self.time, self.detectors.expiry_context(self.supply_army))
-            self.planner.update()
+            with guard("ares bridge"):
+                self.bridge.update()
+            with guard("detectors"):
+                self.detectors.update()
+            with guard("flag expiry"):
+                self.flags.expire(self.time, self.detectors.expiry_context(self.supply_army))
+            with guard("defense planner"):
+                self.planner.update()
         marks.append(("intel", time.perf_counter()))
         plan = self.planner.plan
         if iteration % MACRO_EVERY_STEPS == 0 and not guarded:
             # §3 step 4; the ATTACK/REINFORCE/HARASS squads and the army's Observer are not free to scout
-            self.scouts.step(pinned=self.army.held_tags | plan.pinned_unit_tags | self.army.busy_tags)
+            with guard("scouts"):
+                self.scouts.step(pinned=self.army.held_tags | plan.pinned_unit_tags | self.army.busy_tags)
         marks.append(("scouts", time.perf_counter()))
-        self.worker_defense.step(plan)  # §3 step 5: every step
+        with guard("worker defense"):
+            self.worker_defense.step(plan)  # §3 step 5: every step
         marks.append(("worker_defense", time.perf_counter()))
 
         if iteration % MACRO_EVERY_STEPS == 0:
-            self.static_defense.step(plan)
-            self.production.gateway_upkeep()
+            with guard("static defense"):
+                self.static_defense.step(plan)
+            with guard("gateway upkeep"):
+                self.production.gateway_upkeep()
             # units before structures: in test games Batteries and Pylons took every mineral
             # while Marines walked in
-            defense = self.production.defense_behaviors(plan) + self.static_defense.behaviors(plan)
-            await self.economy.chrono(gateways_first=plan.chrono_gateways)
-            if self.build_order_runner.build_completed:
-                self._register_macro_plan(defense)
-            elif defense:
-                # during the opener the build runner makes Pylons; defense spends before it
-                # can act again (Defense > Economy, §3)
-                defense_plan = MacroPlan()
-                for behavior in defense:
-                    defense_plan.add(behavior)
-                self.register_behavior(defense_plan)
+            defense: list = []
+            with guard("defense behaviors"):
+                defense = self.production.defense_behaviors(plan) + self.static_defense.behaviors(plan)
+            with guard("chrono"):
+                await self.economy.chrono(gateways_first=plan.chrono_gateways)
+            with guard("macro plan"):
+                if self.build_order_runner.build_completed:
+                    self._register_macro_plan(defense)
+                elif defense:
+                    # during the opener the build runner makes Pylons; defense spends before it
+                    # can act again (Defense > Economy, §3)
+                    defense_plan = MacroPlan()
+                    for behavior in defense:
+                        defense_plan.add(behavior)
+                    self.register_behavior(defense_plan)
         marks.append(("macro", time.perf_counter()))
 
         if iteration % ARMY_EVERY_STEPS == 0:
-            holder = self.wall.step(hold_gap=plan.hold_wall_gap)
-            # the wall-gap holder and scouts are controlled elsewhere
-            self.army.held_tags = ({holder} if holder is not None else set()) | self.external_tags
-            self.army.scout_tags = self.scouts.tags
-            plan.pinned_unit_tags = self.army.held_tags | self.scouts.tags | set(self.worker_defense.jobs)
-            self.army.hold_point = plan.army_hold_point
-            self.army.leash = plan.army_leash
-            self.endgame.update()
-            self.army.step(iteration, guarded)
+            holder = None
+            with guard("wall"):
+                holder = self.wall.step(hold_gap=plan.hold_wall_gap)
+            with guard("army"):
+                # the wall-gap holder and scouts are controlled elsewhere
+                self.army.held_tags = ({holder} if holder is not None else set()) | self.external_tags
+                self.army.scout_tags = self.scouts.tags
+                plan.pinned_unit_tags = self.army.held_tags | self.scouts.tags | set(self.worker_defense.jobs)
+                self.army.hold_point = plan.army_hold_point
+                self.army.leash = plan.army_leash
+                with guard("endgame"):
+                    self.endgame.update()
+                self.army.step(iteration, guarded)
         marks.append(("army", time.perf_counter()))
-        self.army.micro(iteration)  # §3 step 5: squad micro every step
+        with guard("micro"):
+            self.army.micro(iteration)  # §3 step 5: squad micro every step
         marks.append(("micro", time.perf_counter()))
 
-        self.telemetry.step(snapshot=not guarded)
+        with guard("telemetry"):
+            self.telemetry.step(snapshot=not guarded)
         marks.append(("telemetry", time.perf_counter()))
-        if guarded:
-            self.telemetry.guarded_steps += 1
-        self._check_step_time(iteration, self.telemetry.record_step_time(started), started, marks)
+        with guard("step time"):
+            if guarded:
+                self.telemetry.guarded_steps += 1
+            self._check_step_time(iteration, self.telemetry.record_step_time(started), started, marks)
+
+    async def _after_step(self) -> int:
+        """M6 error guard over ares's after-step, which runs every registered behavior (Citadel's
+        among them) after `on_step` and outside python-sc2's error handling; python-sc2's own
+        after-step at its end sends the step's actions."""
+        sent_at = self._time_after_step  # python-sc2 sets it when its after-step starts
+        with self.errors.guard("ares after step"):
+            return await super(CitadelBot, self)._after_step()
+        if self._time_after_step != sent_at:
+            return self.state.game_loop  # the error came from python-sc2's part
+        # ares's part stopped early. Its behavior list is emptied only after every behavior ran
+        # (`BehaviorExecutioner.execute`), so drop what is left, or next step would run it again;
+        # then still reset ares's grids and send this step's actions
+        self.behavior_executioner.behaviors = []
+        with self.errors.guard("ares grid reset"):
+            self.manager_hub.grid_manager.reset_grids(self.actual_iteration)
+        return await BotAI._after_step(self)
 
     def _check_step_time(self, iteration: int, ms: float, started: float, marks: list[tuple[str, float]]) -> None:
         """§6: a warning for any step over STEP_WARN_MS (with the parts that took the time); a
@@ -287,27 +333,52 @@ class CitadelBot(AresBot):
         enemy = self._enemy_units_previous_map.get(unit_tag)
         enemy_structure = self._enemy_structures_previous_map.get(unit_tag)
         role = "?"
-        if own is not None and self.static_defense is not None:
-            role = next((str(r) for r, tags in self.mediator.get_unit_role_dict.items() if unit_tag in tags), "?")
-            self.static_defense.on_worker_died(unit_tag, own.position)  # before ares hands its order on
-        await super(CitadelBot, self).on_unit_destroyed(unit_tag)
+        guard = self.errors.guard
+        with guard("unit destroyed"):
+            if own is not None and self.static_defense is not None:
+                role = next((str(r) for r, tags in self.mediator.get_unit_role_dict.items() if unit_tag in tags), "?")
+                self.static_defense.on_worker_died(unit_tag, own.position)  # before ares hands its order on
+        with guard("ares unit destroyed"):
+            await super(CitadelBot, self).on_unit_destroyed(unit_tag)
+        # one guard per call, so an error in one doesn't skip the others (e.g. §5 expiry rule (a))
         if self.army is not None:
-            self.army.forget(unit_tag)
+            with guard("unit destroyed"):
+                self.army.forget(unit_tag)
         if self.scouts is not None:
-            self.scouts.on_unit_destroyed(unit_tag)
+            with guard("unit destroyed"):
+                self.scouts.on_unit_destroyed(unit_tag)
         if self.flags is not None:
-            self.flags.on_unit_destroyed(unit_tag, self.time)  # §5 expiry rule (a)
+            with guard("unit destroyed"):
+                self.flags.on_unit_destroyed(unit_tag, self.time)  # §5 expiry rule (a)
         if own is not None and self.telemetry is not None:
-            self.telemetry.on_own_unit_destroyed(own, role)
+            with guard("unit destroyed"):
+                self.telemetry.on_own_unit_destroyed(own, role)
         if enemy is not None and self.telemetry is not None:
-            self.telemetry.on_enemy_unit_destroyed(enemy)
+            with guard("unit destroyed"):
+                self.telemetry.on_enemy_unit_destroyed(enemy)
         if self.army is not None and (enemy or enemy_structure) is not None:
-            self.army.counter.on_enemy_destroyed(enemy or enemy_structure)  # §8 counterattack outcomes
+            with guard("unit destroyed"):
+                self.army.counter.on_enemy_destroyed(enemy or enemy_structure)  # §8 counterattack outcomes
 
     async def on_unit_took_damage(self, unit: Unit, amount_damage_taken: float) -> None:
-        await super(CitadelBot, self).on_unit_took_damage(unit, amount_damage_taken)
-        if self.worker_defense is not None:
-            self.worker_defense.on_structure_damaged(unit)
+        with self.errors.guard("ares unit took damage"):
+            await super(CitadelBot, self).on_unit_took_damage(unit, amount_damage_taken)
+        with self.errors.guard("unit took damage"):
+            if self.worker_defense is not None:
+                self.worker_defense.on_structure_damaged(unit)
+
+    # ares's other event hooks, under the M6 error guard (python-sc2 calls them outside on_step)
+    async def on_unit_created(self, unit: Unit) -> None:
+        with self.errors.guard("ares unit created"):
+            await super(CitadelBot, self).on_unit_created(unit)
+
+    async def on_building_construction_started(self, unit: Unit) -> None:
+        with self.errors.guard("ares construction started"):
+            await super(CitadelBot, self).on_building_construction_started(unit)
+
+    async def on_building_construction_complete(self, unit: Unit) -> None:
+        with self.errors.guard("ares construction complete"):
+            await super(CitadelBot, self).on_building_construction_complete(unit)
 
     async def on_end(self, game_result: Result) -> None:
         if self.telemetry is not None:
@@ -315,10 +386,12 @@ class CitadelBot(AresBot):
                 self.telemetry.end_report(self.flags, self.army)
                 result = game_result.name if isinstance(game_result, Result) else str(game_result)
                 record = self.telemetry.game_record(
-                    result, self.flags, self.army, self.opener, self.ruleset, self.wall_ok, self.memory, self.preraised
+                    result, self.flags, self.army, self.opener, self.ruleset, self.wall_ok, self.memory, self.preraised,
+                    self.errors,
                 )
                 self.telemetry.write_game_record(record)  # §8: ./data/logs
             except Exception:  # noqa: BLE001 - never crash at the end of a game
                 logger.exception("LOG game record failed")
         self._save_memory(game_result)
-        await super(CitadelBot, self).on_end(game_result)
+        with self.errors.guard("ares on_end"):
+            await super(CitadelBot, self).on_end(game_result)

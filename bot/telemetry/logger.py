@@ -291,7 +291,7 @@ class Telemetry:
 
     def game_record(
         self, result: str, flags=None, army=None, opener: str = "", ruleset: Optional[str] = None,
-        wall_ok: Optional[bool] = None, memory=None, preraised: Optional[list[str]] = None,
+        wall_ok: Optional[bool] = None, memory=None, preraised: Optional[list[str]] = None, errors=None,
     ) -> dict[str, Any]:
         """Every §8 metric for this game as one JSON-ready dict."""
         bot = self.bot
@@ -305,7 +305,7 @@ class Telemetry:
 
         counter = army.counter if army is not None else None
         return {
-            "version": 1,
+            "version": 2,
             "game_id": self.game_id,
             "date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "result": result,
@@ -350,6 +350,9 @@ class Telemetry:
                 "count": self.step_count, "over_warn": self.steps_over_warn,
                 "guard_activations": self.guard_activations, "guarded_steps": self.guarded_steps,
             },
+            # M6 error guard: errors caught per part, and each part's first one ("m:ss Type: message")
+            "errors": dict(errors.counts) if errors is not None else {},
+            "errors_first": dict(errors.first) if errors is not None else {},
         }
 
     def write_game_record(self, record: dict[str, Any]) -> bool:

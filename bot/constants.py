@@ -802,3 +802,8 @@ STEP_GUARD_MS: float = 200.0  # a step above this ...
 STEP_GUARD_STEPS: int = 16  # ... skips the scout planner, counterattack evaluation and snapshot for this many steps
 STARTUP_WARN_MS: float = 5000.0  # §6: keep on_start under 5 s
 STEP_SECTION_LOG_MS: float = 2.0  # a slow step's warning lists the parts that took at least this long
+
+# M6 error guard (user decision): an error in one part of a step is logged and the game goes on
+# (on the ladder an unhandled error ends the game as a Crash, VERIFY_NOTES "M6 findings")
+ERROR_TRACEBACKS_PER_PART: int = 3  # full tracebacks logged per part; later errors there ...
+ERROR_LOG_EVERY_S: float = 60.0  # ... get one line per part this often (game seconds) with the count

@@ -284,7 +284,7 @@ def format_row(r: dict) -> str:
     if r["engage"] is not None:
         line += f"  engage={r['engage']} value={r['value']} step={r['step']}"
     if r["counter"] is not None:
-        line += f"  counter={r['counter']} pre={r['pre'] or '-'} mem={cell(r['mem'])} log={'ok' if r['log_ok'] else 'MISSING'} guard={r['guard']}"
+        line += f"  counter={r['counter']} pre={r['pre'] or '-'} mem={cell(r['mem'])} log={'ok' if r['log_ok'] else 'MISSING'} guard={r['guard']} err={cell(r['err'])}"
     if r["scout_tasks"] is not None:
         line += f"  scouts={r['scouts_lost']}/{r['scout_tasks']}"
     if r["flag_ok"] is not None:
@@ -383,6 +383,8 @@ def main() -> int:
             mean = telemetry.step_total_ms / telemetry.step_count if telemetry.step_count else 0.0
             step = f"{mean:.1f}/{telemetry.step_p99_ms():.0f}/{telemetry.step_max_ms:.0f}"
         counter = pre = mem = guard = None
+        errors = getattr(bot, "errors", None)
+        err = errors.total if errors is not None else None
         log_ok = False
         if army is not None:
             outcomes = army.counter.outcomes
@@ -421,6 +423,7 @@ def main() -> int:
                 "mem": mem,
                 "log_ok": log_ok,
                 "guard": guard,
+                "err": err,
                 "game_s": game_seconds,
                 "real_s": time.perf_counter() - started,
                 "error": error,
@@ -493,6 +496,12 @@ def main() -> int:
     print(
         f"M5 no crash: {len(rows) - counts[CRASH]}/{len(rows)} games without a crash, §8 log line written "
         f"{written}/{len(rows)}, counterattacks {launched}: {'PASS' if ok else 'FAIL'}"
+    )
+    # M6 error guard: errors it caught (each would have been a Crash on the ladder)
+    with_errors = [r for r in rows if r["err"]]
+    print(
+        f"M6 errors caught: {sum(r['err'] or 0 for r in rows)} in {len(with_errors)}/{len(rows)} games"
+        + (f" (games {', '.join(str(r['i']) for r in with_errors)})" if with_errors else "")
     )
     if not args.opponent:
         # M4: wins per opponent race

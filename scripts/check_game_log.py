@@ -35,6 +35,8 @@ TOP: dict[str, tuple] = {
     "first_aggression": (dict, type(None)), "army_value": (dict,), "engage": (list,), "counterattacks": (list,),
     "startup_ms": (int, float, type(None)), "step_ms": (dict,), "preraised": (list,),
 }
+# added in a later record version: key -> (first version with it, type(s))
+SINCE: dict[str, tuple[int, tuple]] = {"errors": (2, (dict,)), "errors_first": (2, (dict,))}
 NESTED: dict[str, tuple[str, ...]] = {
     "probes": ("4:00", "6:00", "8:00"),
     "bases": ("6:00", "10:00"),
@@ -52,6 +54,13 @@ def problems(record: Any) -> list[str]:
         return ["not a JSON object"]
     out = []
     for key, types in TOP.items():
+        if key not in record:
+            out.append(f"missing {key}")
+        elif not isinstance(record[key], types):
+            out.append(f"{key} is {type(record[key]).__name__}")
+    for key, (version, types) in SINCE.items():
+        if record.get("version", 1) < version:
+            continue
         if key not in record:
             out.append(f"missing {key}")
         elif not isinstance(record[key], types):
@@ -110,7 +119,8 @@ def main() -> int:
             f"engage={actions.count('launch')}/{actions.count('retreat')}/{actions.count('recall')} "
             f"counter={len(counters)}({','.join(c.get('reason', '')[:12] for c in counters)}) "
             f"probes6={(r.get('probes') or {}).get('6:00')} startup={r.get('startup_ms')} "
-            f"step={step.get('mean')}/{step.get('p99')}/{step.get('max')} guard={step.get('guard_activations')}"
+            f"step={step.get('mean')}/{step.get('p99')}/{step.get('max')} guard={step.get('guard_activations')} "
+            f"errors={sum((r.get('errors') or {}).values())}"
         )
     if args.show and records:
         print(json.dumps(records[-1], indent=1))
