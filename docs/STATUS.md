@@ -13,7 +13,7 @@ findings and Citadel's choices are in `docs/VERIFY_NOTES.md`.
 | M3 | Done (see `docs/VERIFY_NOTES.md`, "M3 acceptance evidence") | per-matchup scout planner, §4.4 rows 3 and 15 |
 | M4 | Done (see `docs/VERIFY_NOTES.md`, "M4 acceptance evidence") | squads, `EngagementResult` gates, retreat hysteresis, end-game rules (`bot/army/`) |
 | M5 | Done (see `docs/VERIFY_NOTES.md`, "M5 acceptance evidence") | counterattack (§4.6), opponent memory (§5), telemetry to `./data/logs` (§8), step guard (§6) |
-| M6 | In progress: pre-upload checks done (see `docs/VERIFY_NOTES.md`, "M6 acceptance evidence"); upload and the first 20 ladder games pending | zip with the tested libraries, error guard, ladder-environment test, upload and watch scripts |
+| M6 | In progress: pre-upload checks done (see `docs/VERIFY_NOTES.md`, "M6 acceptance evidence"); tested zip uploaded with bot data on and joined to the ladder; the first 20 ladder games pending | zip with the tested libraries, error guard, ladder-environment test, upload and watch scripts |
 
 ## Code map (M2-M6 additions)
 
@@ -167,6 +167,13 @@ session's container, and AI Arena's API answers 403 without the token, so step 0
 was asked to add both variables in the cloud environment's settings. Done that session: step 1's
 rebuild matches the tested zip (content hash `f02e94a7...`, 9,854,928 bytes, 256 files), but only
 on Python 3.12, see the next paragraph.
+
+**Session of 2026-10-04, later (branch `claude/modest-einstein-9l4qe7`, fast-forwarded to
+ba098e0).** Both variables were set. Steps 0 and 3 are done: `ladder_watch.py` printed
+`bot_data_enabled=True zip md5 07db06fe540df9dec7e1105fbc8ab491 updated 2026-10-04T15:11:01Z`,
+and `GET /api/competition-participations/?bot=1358` shows Citadel in competition 37 ("Sc2 AI
+Arena 2026 Pre-Season 2", open), active, in placements, 0 matches at 15:25 UTC. Step 4 (watching)
+is under way with `send_later` check-ins. The 3.12 venv workaround below worked as written.
 
 **The Poetry environment must be Python 3.12** (the ladder image's version; README, Setup). In the
 cloud container `poetry env use python3.12` (even with `/usr/bin/python3.12`) builds a 3.11
