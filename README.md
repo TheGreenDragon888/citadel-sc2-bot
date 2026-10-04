@@ -22,7 +22,13 @@ git clone --recursive <repo-url>          # --recursive also fetches the ares-sc
 cd citadel-sc2-bot
 poetry env use python3.12
 poetry install
+poetry run python --version               # must say 3.12 (the ladder's Python)
 ```
+
+If `poetry run python --version` says another version (seen in the cloud container), make the
+environment with Python's own `venv` and point Poetry at it:
+`poetry env remove --all`, `python3.12 -m venv <dir>`, `poetry env use <dir>/bin/python`,
+`poetry install`. The ladder zip must be built in a 3.12 environment.
 
 StarCraft II lives at `~/StarCraftII` and python-sc2 finds it through `SC2PATH`.
 Copy the 7 pool maps from `maps/` into `~/StarCraftII/Maps` (the folder name is case-sensitive).

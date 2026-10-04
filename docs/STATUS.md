@@ -46,7 +46,7 @@ findings and Citadel's choices are in `docs/VERIFY_NOTES.md`.
 | `bot/main.py` | M5 adds the §6 step guard (`_check_step_time`), on_start timing, memory load/pre-raise and the end-of-game writes, and `external_tags` (units a dev test drives) |
 | `scripts/test_counterattack.py` / `test_counterattack_rules.py` / `test_opponent_memory.py` / `test_step_guard.py` / `check_game_log.py` | M5: 7 staged counterattack cases vs a scripted Terran; offline rules; offline memory + `./data` + log bounds; in-game guard window; game log validator |
 | `bot/error_guard.py` | M6 error guard (user decision): each part of a step, the event hooks and ares's after-step run in `ErrorGuard.guard(part)`; an error is logged and counted (`errors` in the game record) and the game goes on |
-| `scripts/create_ladder_zip.py` | M6: zips `sc2`, `map_analyzer`, `cython_extensions` from the Poetry environment (the tested versions) and prints the zip's content hash |
+| `scripts/create_ladder_zip.py` | M6: zips `sc2`, `map_analyzer`, `cython_extensions` from the Poetry environment (the tested versions) and prints the zip's content hash; stops unless run on Python 3.12 (the ladder's) |
 | `scripts/test_error_guard.py` | M6: offline guard checks and one game with errors injected in five parts and in ares's after-step |
 | `scripts/ladder_env_test.py` (+ `scripts/ladder_env/ipv4only.c`) | M6 §8 ladder-environment test: the real zip in AI Arena's arena client (official proxy/bot images and sc2_controller, this machine's SC2), 10 matches, Citadel's `./data` kept between them |
 | `scripts/upload_to_ai_arena.py` / `scripts/ladder_watch.py` | M6: upload `publish/Citadel.zip` (`--upload`) and read Citadel's ladder games, causes and logs from the AI Arena API (`UPLOAD_API_TOKEN`, `UPLOAD_BOT_ID`) |
@@ -159,6 +159,23 @@ bot's id on aiarena.net, created by the user as Citadel / Protoss / Python) are 
 environment's settings; a new session picks them up. Check with
 `test -n "$UPLOAD_API_TOKEN" && test -n "$UPLOAD_BOT_ID" && echo set` (never print the token).
 The code is on branch `claude/eloquent-albattani-lhjcsi` (M5 and M6); `main` is still M4 (e345c04).
+
+**Session of 2026-10-04 (branch `claude/lucid-gauss-cgaphp`, fast-forwarded to 8e59c89).** The
+user uploaded the zip by hand. `UPLOAD_API_TOKEN` and `UPLOAD_BOT_ID` were **not set** in that
+session's container, and AI Arena's API answers 403 without the token, so step 0's check
+(`ladder_watch.py`: `bot_data_enabled=True`, md5 `07db06fe...`) and step 4 are still open; the user
+was asked to add both variables in the cloud environment's settings. Done that session: step 1's
+rebuild matches the tested zip (content hash `f02e94a7...`, 9,854,928 bytes, 256 files), but only
+on Python 3.12, see the next paragraph.
+
+**The Poetry environment must be Python 3.12** (the ladder image's version; README, Setup). In the
+cloud container `poetry env use python3.12` (even with `/usr/bin/python3.12`) builds a 3.11
+environment, and a zip built there carries `cython_extensions/bootstrap.cpython-311-...so`, which
+the ladder's Python 3.12 can't import (content hash `327d607c...` instead of `f02e94a7...`).
+What works: `poetry env remove --all`, then `/usr/bin/python3.12 -m venv
+/root/.cache/pypoetry/virtualenvs/ares-sc2-starter-bot-SiapW_LM-py3.12`, `poetry env use
+<that path>/bin/python`, `poetry install`; check with `poetry run python --version`.
+`create_ladder_zip.py` now stops on any Python other than 3.12 (`LADDER_PYTHON`).
 
 0. **The user uploads the tested zip by hand** (their choice after the pre-upload checks): the file
    sent to them is `publish/Citadel.zip`, md5 `07db06fe540df9dec7e1105fbc8ab491`, content hash

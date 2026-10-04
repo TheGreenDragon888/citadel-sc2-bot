@@ -9,6 +9,7 @@ import os
 import platform
 import shutil
 import site
+import sys
 import zipfile
 from os import path, remove, walk
 from subprocess import Popen, run
@@ -22,6 +23,10 @@ ZIPFILE_NAME: str = "bot.zip"
 PUBLISH_DIR: str = "publish"
 
 CONFIG_FILE: str = "config.yml"
+# Python of AI Arena's bot image (aiarena/arenaclient-bot:v0.8.0, docs/VERIFY_NOTES.md "M6
+# findings"). The zip carries compiled libraries (cython_extensions has one build per Python
+# version), so a zip built in another Python's environment fails to import on the ladder.
+LADDER_PYTHON: Tuple[int, int] = (3, 12)
 ZIP_FILES: List[str] = [
     "config.yml",
     "config.yaml",
@@ -188,6 +193,16 @@ def check_config_values():
         assert not config["Debug"], "Debug is not False"
 
 
+def check_python_version() -> None:
+    """Stop unless this script runs in the ladder's Python version (see LADDER_PYTHON)."""
+    if sys.version_info[:2] != LADDER_PYTHON:
+        want = ".".join(map(str, LADDER_PYTHON))
+        raise SystemExit(
+            f"Python {sys.version.split()[0]} at {sys.executable}; the ladder runs Python {want}. "
+            f"Build the zip from a Python {want} Poetry environment (README, Setup)."
+        )
+
+
 def get_zipfile_name() -> str:
     """Attempt to get bot name from config."""
     __user_config_location__: str = path.abspath(".")
@@ -203,6 +218,7 @@ def get_zipfile_name() -> str:
 
 
 if __name__ == "__main__":
+    check_python_version()
     # get name of bot from config if possible (otherwise use default name)
     os.makedirs(path.join(ROOT_DIRECTORY, PUBLISH_DIR), exist_ok=True)
     zipfile_name = path.join(PUBLISH_DIR, get_zipfile_name())
