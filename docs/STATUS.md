@@ -160,6 +160,11 @@ environment's settings; a new session picks them up. Check with
 `test -n "$UPLOAD_API_TOKEN" && test -n "$UPLOAD_BOT_ID" && echo set` (never print the token).
 The code is on branch `claude/eloquent-albattani-lhjcsi` (M5 and M6); `main` is still M4 (e345c04).
 
+0. **The user uploads the tested zip by hand** (their choice after the pre-upload checks): the file
+   sent to them is `publish/Citadel.zip`, md5 `07db06fe540df9dec7e1105fbc8ab491`, content hash
+   `f02e94a7...`. If they did, skip steps 1 and 2's upload: run `poetry run python
+   scripts/ladder_watch.py` and check that it reports `bot_data_enabled=True` and zip md5
+   `07db06fe540df9dec7e1105fbc8ab491`; then go on with step 3.
 1. **Rebuild the zip and match it to the tested one.** `poetry run python scripts/create_ladder_zip.py`
    must print `Content hash: f02e94a724e15fcf985cca65aa2dfbacace36df9e989a38276fa781a1b9ef4ee`
    (`publish/` is not in git, so the tested file itself isn't in a new session). A different hash
