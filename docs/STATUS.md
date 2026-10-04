@@ -174,6 +174,9 @@ ba098e0).** Both variables were set. Steps 0 and 3 are done: `ladder_watch.py` p
 and `GET /api/competition-participations/?bot=1358` shows Citadel in competition 37 ("Sc2 AI
 Arena 2026 Pre-Season 2", open), active, in placements, 0 matches at 15:25 UTC. Step 4 (watching)
 is under way with `send_later` check-ins. The 3.12 venv workaround below worked as written.
+Still 0 matches at 21:29 UTC: competition 37's round 76 started at 14:48 UTC, before Citadel
+was created (15:11), and rounds 72-75 each took 18-20 h (`GET /api/rounds/?competition=37`), so
+Citadel's first ladder games are expected in round 77 (about 09:00-12:00 UTC on 2026-10-05).
 
 **The Poetry environment must be Python 3.12** (the ladder image's version; README, Setup). In the
 cloud container `poetry env use python3.12` (even with `/usr/bin/python3.12`) builds a 3.11
