@@ -1,5 +1,12 @@
 # M7 plan: fixes from the MetaScoreCritic1212VII postmortem
 
+> **Where M7 is executed from:** `docs/M7_PLAN.md`, which has the file-level steps and the final decisions:
+> - D7 and D11 accepted;
+> - D9: respond to capital air for every race in M7;
+> - D10: High Templar and Archons allowed (Storm and Archon splash for PvZ; the air switch keeps the spec's Stalkers + Archons).
+>
+> Where this file differs (the D9 "respond vs Protoss only" recommendation, D10's Void Ray/Phoenix suggestion), `docs/M7_PLAN.md` wins.
+
 Source: `docs/postmortems/2026-10-05-MetaScoreCritic1212VII.md` (finding numbers below match it). Code references are at `8036973`.
 
 ## Ground rules this plan follows

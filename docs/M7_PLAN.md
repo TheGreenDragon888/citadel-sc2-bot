@@ -1,0 +1,266 @@
+# M7 execution plan (codebase)
+
+**M7 (user decision): fixes and additions from the first ladder losses.**
+- **The what and why** is in `docs/postmortems/2026-10-05-MetaScoreCritic1212VII-fix-plan.md`, with the evidence in the postmortem next to it.
+- **This file is the how:** the order of work, the files and functions each step touches, new constants, tests, VERIFY items, commits and the evidence each phase ends with.
+- **Item IDs** (O1, B1, C1, K1, E1 …) match the fix plan.
+
+## Decisions this plan builds on
+
+| # | Decision |
+|---|---|
+| D1, D2 | Drop the PvP 4:30 and PvZ 6:30 Hallucinated Phoenix scouts. |
+| D3 | Blink Stalkers, with Blink micro, for basic combat and against capital ships. Blink micro comes off the v1 cut list. |
+| D4, D8 | The capital-air answer includes Void Rays and/or Tempests. Void Rays are expected to be best vs Tempests; Tempests vs Carriers, Battlecruisers and Brood Lords. The staged test E0 sets the shares. |
+| D5 | A 4th base when gas-starved with a mineral bank. |
+| D6 | The milestone is M7. |
+| D7 | Twilight order: Blink first vs P and T; Charge first vs Z, then Blink. |
+| D9 | CAPITAL_AIR is detected for every race, **and M7 responds to it for every race** (vs P: Tempest/Carrier/Mothership; vs T: Battlecruiser; vs Z: Brood Lord). |
+| D10 | **High Templar and Archons are allowed.** Psionic Storm and Archon splash are core vs Z. The §4.5.1 air switch keeps the spec's wording (more Stalkers plus Archons), now buildable. |
+| D11 | M7's targets against the built-in AI's air builds are proposed after the baseline batches. |
+
+**Defaults I'll use unless you say otherwise:**
+- **R1. High Templar and Storm vs Zerg only** in M7. Against Terran, Storm is strong against bio, but it's extra scope and Colossi already cover it. Archons still come in the air switch for every race.
+- **R2. No Phoenix in M7.** Archons, Storm and Stalkers cover Mutalisks; Phoenix would be one more unit to control.
+- **R3. One ladder upload per finished phase, after M6 passes.** Each upload restarts the 20-game no-crash count, but development of the next phase continues meanwhile.
+
+## How the work runs
+- **Commits:** one per working step (CLAUDE.md), on the session's development branch. `main` is brought up to date after M7's acceptance, or when you decide, as with M5/M6.
+- **One review stop at kickoff:** DESIGN.md is the source of truth, so its M7 diff is shown to you before any bot code changes. After that, each phase ends with its evidence and a stop. Ambiguities found on the way get asked, not picked.
+- **Rules:**
+  - every threshold is a TUNE value in `bot/constants.py`;
+  - unit stats are read from game data;
+  - Unit objects are never stored across steps (tags only);
+  - no new dependencies;
+  - nothing is written outside `./data`;
+  - the `ares-sc2` submodule isn't edited.
+- **VERIFY items** are checked in the ares or python-sc2 source (or with a staged game when the source can't answer) and written to `docs/VERIFY_NOTES.md` "M7 findings" before the code relies on them.
+- **Testable code:** new rules go in plain functions that take plain values, as in `attack_decision.py` and `counterattack.py`, so they can be tested offline by a `scripts/test_*.py` that prints PASS/FAIL and exits 1 on failure.
+
+## Step S: environment and baseline (once per session that runs games)
+
+```bash
+cd ~
+wget http://blzdistsc2-a.akamaihd.net/Linux/SC2.4.10.zip
+unzip -P iagreetotheeula SC2.4.10.zip
+cp ~/citadel-sc2-bot/maps/*.SC2Map ~/StarCraftII/Maps/
+ln -s Maps ~/StarCraftII/maps
+```
+
+What each line does (from `docs/RESEARCH.md` and the README):
+- `cd ~` goes to your home folder.
+- `wget …` downloads Blizzard's Linux SC2 4.10 (about 4 GB).
+- `unzip -P iagreetotheeula …` extracts it. The password stands for accepting Blizzard's AI licence. The result is `~/StarCraftII`.
+- `cp …` copies the 7 pool maps into SC2's map folder.
+- `ln -s Maps ~/StarCraftII/maps` makes a link named `maps` pointing at `Maps`, because the 4.10 client looks for the lowercase name.
+
+Then the Poetry environment on Python 3.12 (README "Setup"; STATUS has the cloud-container workaround), and the offline tests as a smoke check: `poetry run python scripts/test_attack_decision.py` (and the other offline scripts in STATUS "Test commands").
+
+**Baseline batches** run on the current code (`8036973`) and are recorded in VERIFY_NOTES "M7 baseline". Each repeats with the same games on every later phase:
+
+```bash
+poetry run python scripts/run_matches.py --difficulty VeryHard --race Protoss --build Air --map all --total 10 --game-seed 7000
+poetry run python scripts/run_matches.py --difficulty VeryHard --race Terran  --build Air --map all --total 10 --game-seed 7100
+poetry run python scripts/run_matches.py --difficulty VeryHard --race Zerg    --build Air --map all --total 10 --game-seed 7200
+```
+
+- `--build Air` picks the built-in AI's air build.
+- `--game-seed` fixes the randomness so the same 10 games replay on later commits.
+- The 4-core machine runs about four batches at once, 40-70 minutes each (STATUS).
+- The existing M4/M5 numbers in STATUS serve as the regression baseline.
+- After these runs I propose D11's targets.
+
+## Step K0: kickoff (docs only, then the review stop)
+
+| File | Change |
+|---|---|
+| `docs/DESIGN.md` §1 | Win condition: "3 bases, and a 4th when gas-starved with a mineral bank". Army: Stalker/Immortal/Colossus/Zealot, with High Templar/Archons vs Z. "Beyond v1" keeps only Carriers and Skytoss as the main army. |
+| §3 | Architecture: add `army/blink.py`, `army/templar.py`, `intel/air_intel.py`. `micro.py`'s line gains "out-ranged rule, blink". |
+| §4.2, §4.4 | Air/cloak detector rows (9, 13) are M7. New "Capital air" row: Fleet Beacon / Fusion Core / Greater Spire → WARNING; capital units seen → ACTIVE; response per race. |
+| §4.3 | Delete the PvP ~4:30 and PvZ ~6:30 Hallucinated Phoenix rows. The hallucination rule notes it needs an existing Sentry (the vs-T mix). |
+| §4.5.1 | Vs Z mix gets High Templar next to the Archon share. Air switch: more Stalkers + Archons (every race), with hysteresis. Capital-air mixes per race (shares from E0). Upgrades: per-building chains, Twilight order (D7), Psionic Storm vs Z. |
+| §4.5.2 | Launch inputs (cached whole army, fresh intel, cooldown after a home fight); which units answer a threat; the out-ranged rule and hold-point fallback; retreat shooting; the out-range penalty marked "only if O1's evidence shows the simulator misjudges". |
+| §5 | `Threat.CAPITAL_AIR` with its expiry (WARNING: STRUCTURE rules; ACTIVE: unit TTL). AIR_HARASS's "satisfied" state, which §5 already describes, is implemented. |
+| §7 | M7 row (deliverable: Phases 0-4; acceptance below). Cut list: remove "High Templar" and "Blink micro"; "Skytoss" becomes "Carriers and Skytoss as the main army". |
+| §8 | New metrics: fight inputs, tech seen, losses by intent, blinks, storms, Archon morphs, capital-air entries. |
+| `docs/STATUS.md` | M7 row "In progress", links to this file. |
+| `docs/VERIFY_NOTES.md` | Empty "M7 findings", "M7 baseline" and "M7 acceptance evidence" sections. |
+
+Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your review of the DESIGN.md diff.**
+
+---
+
+## Phase 0: observability
+
+| Item | Files and functions | Change |
+|---|---|---|
+| O1 | `bot/army/engagement.py:level` | Store the last call's inputs: `(own_text, own_value, enemy_text, enemy_value)`, where the text is unit counts by type, highest value first, at most `FIGHT_LOG_TYPES` (TUNE, 6) types. A new pure helper `composition_text(pairs)` builds it from `(type_name, value)` pairs. |
+| O1 | `bot/army/army.py:_log`, `_home_defense` | `ENGAGE`/`DEFEND` lines append the stored inputs. `self.decisions` entries become `(t, action, level, reason, own_value, enemy_value)`. |
+| O1 | `bot/telemetry/logger.py:end_report`, `game_record` | Unpack the 6-tuple. Engage entries get `own_value`/`enemy_value`. Record `"version": 3`. |
+| O1 | `scripts/check_game_log.py` | Accept versions 2 and 3. |
+| O2 | `bot/intel/detectors.py:update` | `self.first_seen: dict[str, float]`. A new enemy structure type logs `INTEL first seen <TYPE> at <t> <pos>`; so does a cached unit in `CAPITAL_AIR_TYPES`, a new constant also used by E2: Tempest, Carrier, Mothership, Battlecruiser, Brood Lord, Brood Lord cocoon. |
+| O2 | `logger.py:game_record` | `tech_seen: [{type, t}]`, capped by `GAME_LOG_MAX_EVENTS`. |
+| O3 | `bot/main.py:on_unit_destroyed` | Read `self.army.intents.get(tag)` **before** `self.army.forget(tag)` (forget drops it) and pass it to `telemetry.on_own_unit_destroyed(own, role, intent)`. |
+| O3 | `logger.py:on_own_unit_destroyed` | For army units: an `UNIT lost <TYPE> at <pos> (<t>, <intent> <d> from its point)` line; `lost_by_intent` and `lost_far` counts (distance > `LOST_FAR_DISTANCE`, TUNE 12) in the game record. |
+| all | `scripts/run_matches.py:format_row` | A new `m7` column with the fields that later phases fill (`far=` deaths far from their point, `blink=`, `storm=`, `archon=`, `cap=` capital-air state). |
+
+- **Tests:** `check_game_log.py --last 1` on a local game; an offline case for `composition_text` in a new `scripts/test_m7_rules.py`, which later phases extend.
+- **Acceptance:** one local game shows the three new line types; `check_game_log.py` passes; M1 regression (Hard × 10, T/Z/P/Random) unchanged.
+- **Commits:** O1, O2, O3 each.
+
+## Phase 1: bugs (no spec change beyond K0's §4.3 rows)
+
+| Item | Files and functions | Change |
+|---|---|---|
+| B1 | `army.py:_decide` (l.232-234) | `_reinforce(defenders)` only if `self.decision.state == ATTACK` after `_evaluate_attack`. |
+| B1 | `army.py:_retreat_attack_squad` (l.276) | Also set `self.attack_center = None`. |
+| B1 | `army.py:_set_intents` | When the state isn't ATTACK, `squads.assign(squads.tags(Role.REINFORCE), Role.DEFEND)` first. |
+| B1 | `logger.py` | Count `reinforce_after_retreat` (a `reinforcements out` in the same decision tick as a retreat or recall). It must stay 0. |
+| B2 | `army.py:micro` (l.635) | `micro.move(unit, point, attack=mode == FIGHT)`, so HOLD walks back with a plain move. |
+| B2 | `micro.py:move` | A `force: bool = False` parameter that skips the "same target" check (used below). |
+| B2 | VERIFY + `army.py:micro` | Staged test `scripts/test_outranged.py --case idle_hold`: does an idle unit at the hold point chase a Tempest beyond the leash? If yes: a HOLD unit beyond the leash with `unit.engaged_target_tag` set gets `micro.move(..., attack=False, force=True)`. |
+| B3 | `army.py:micro` | For DEFEND units in FIGHT with `self.defend_target`: keep only visible enemies within `ENGAGE_ENEMY_RADIUS` of `defend_target`. |
+| B4 | `scout_planner.py:step` (l.396-397) | Call `_rescouts()` before `_expansion_checks()`. New helper `_main_rescout_due()` (the condition at l.457-461). While it's true, `_expansion_checks` doesn't take an Observer (it uses a probe, or waits). |
+| B4 | `logger.py` | Count main rescouts in the game record. |
+| B5 | `constants.py:HALLUCINATION_AT_S` | `{"Terran": 330.0}`; update the `scout_planner.py` docstring (l.18-25). |
+
+- **Tests:**
+  - `test_m7_rules.py` gains `_main_rescout_due` cases (pure version).
+  - `test_m3_checks.py`, `test_attack_decision.py` and `test_threat_flags.py` unchanged and passing.
+  - `scripts/test_outranged.py` (new, staged, case `idle_hold`): Citadel vs a scripted Protoss `StagedEnemy` (as in `test_counterattack.py`); a debug-spawned Tempest attacks our hold point.
+- **Acceptance:**
+  - Air batches on the same seeds: `reinforce_after_retreat` = 0, `lost_far` for HOLD lower than baseline.
+  - Main rescouts at least every ~90 s from 6:00 while an Observer is free.
+  - Regressions at their recorded levels: M1 Hard × 10; M2/M3 cheese × 10 each (≥ 8/10, flags 40/40, no scout lost before 4:00); M4 VeryHard × 10 per race (≥ 7 each).
+- **Ladder:** after M6 passes, Phases 0 + 1 are the first M7 upload: zip on Python 3.12, `ladder_env_test.py`, upload, `ladder_watch.py`.
+
+## Phase 2: combat
+
+| Item | Files and functions | Change |
+|---|---|---|
+| C1 | `micro.py` | Pure helper `outranged(unit_air_range, unit_ground_range, unit_can_air, unit_can_ground, unit_flying, enemy_range_vs_unit, enemy_flying, margin) -> bool`, plus an adapter from Unit objects (ranges from game data). `fight(...)` gains `committed: bool`. When not committed and inside an out-ranger's reach, `KeepUnitSafe` on the influence grid comes before shooting. |
+| C1 | `army.py:micro` | Pass `committed = (mode == FIGHT)`. HOLD, MOVE and RETREAT units use the out-ranged step. |
+| C1 | `army.py` (anchor) | New `_fallback_anchor(anchor)`: while visible out-rangers that home defense can't beat (level < `DEFEND_ENGAGE`) have the anchor in reach, step it toward the main by `HOLD_FALLBACK_STEP`, at most `HOLD_FALLBACK_STEPS` times. Same pattern as `defense_planner.py` l.260-263 (`HOLD_SHIFT_*`). Logged as `ARMY hold point back to …`. |
+| C2 | `army.py:_home_defense` | Keep the evaluated threat group's tags. Defenders that can't hit any of it (`micro._can_hit`) are left out of the `engagement.level` call. |
+| C2 | `army.py:_set_intents` | Those units get `(HOLD, anchor)`, in the last-stand branch too. |
+| C3 | `micro.py:retreat` | Pure `retreat_may_shoot(own_speed, threat_speeds, target_fights_back) -> bool`. Shoot only units that fight back, and only if `unit.movement_speed` (game data) beats every visible threat's. |
+| C4 | `attack_decision.py:evaluate` | New input `since_home_fight_s`; no launch while it's < `LAUNCH_AFTER_DEFEND_S`. |
+| C4 | `army.py:_evaluate_launch` | Second simulation vs the cached army: `get_cached_enemy_army` fighters with `age ≤ LAUNCH_CACHE_MAX_AGE_S` (TUNE). Its level must also be ≥ `ATTACK_START`. Fresh intel: the cached army's fresh fraction (as in `army_position.py`, `OUT_OF_POSITION_FRESH_S`) must be ≥ `LAUNCH_INTEL_FRESH_FRACTION`. If it isn't, set `self.wants_intel = True`, and launch anyway after `LAUNCH_INTEL_WAIT_S`. |
+| C4 | `scout_planner.py` | New `army_look` task: while `army.wants_intel`, a free Observer looks at the cached enemy army's last centre, then the enemy main (`LookTask`). |
+| C5 | `engagement.py` | **Only if O1's ladder or batch logs show the simulator rating out-ranging enemies as wins:** pure `outrange_penalty(own, enemy) -> int` (value share of enemies that out-range all our units able to hit them, or that none can hit → whole levels, `OUTRANGE_PENALTY_PER_SHARE`), subtracted in `level()`. |
+| C5 | `scripts/test_engagement.py` | New scenario: 8 Tempests + 6 Zealots vs 30 Stalkers + 4 Colossi, to measure the raw simulator first. |
+
+- **VERIFY:**
+  - Do Tempests' ground attacks add influence to ares's ground grid?
+  - What does `KeepUnitSafe` do with no safe cell nearby?
+  - Does `Unit.movement_speed` exclude upgrades (python-sc2 `unit.py:322` says so)?
+  - Is the `age` of cached army units the time since last seen (`unit.py:471`)?
+- **Tests:**
+  - `test_m7_rules.py`: `outranged`, `retreat_may_shoot`, the C2 eligibility function, and `outrange_penalty` if built.
+  - `test_attack_decision.py`: cooldown cases.
+  - `test_outranged.py`: new cases `hold_vs_tempest` (no unit dies beyond the leash; the hold point moves back) and `committed` (FIGHT units still engage).
+- **Acceptance:**
+  - Air batches (same seeds): value lost/killed ratio and launch-then-retreat-within-60-s count better than Phase 1.
+  - Regressions: M1, M2/M3, M4 (≥ 7 each), M5 staged counterattack 7/7.
+- **Ladder:** second upload.
+
+## Phase 3: Blink and Templar
+
+| Item | Files and functions | Change |
+|---|---|---|
+| K1 | `constants.py` | Replace `UPGRADES_VS_P` / `UPGRADES_VS_ZT` with `UPGRADE_CHAINS[race][building] = (upgrades…)`: Forge (weapons/armor), Twilight (P, T: Blink → Charge; Z: Charge → Blink, D7), Robotics Bay (Extended Thermal Lance), Templar Archives (Z: Psionic Storm). |
+| K1 | `production.py:_next_upgrade` → `next_upgrades(chains, ready_buildings, pending) -> list[UpgradeId]` | Pure. One upgrade per chain, issued only when that chain's building is ready, so an upgrade never makes ares build a tech building. `behaviors()` adds one `UpgradeController([u])` per returned upgrade. |
+| K1 | `constants.py:OPENER_SCHEDULES` | A shared post-opener `ScheduleItem` for the Twilight Council (`TWILIGHT_AT_S` per race, TUNE) and, vs Z, the Templar Archives (`TEMPLAR_ARCHIVES_AT_S`). The executor already handles "structure" items after the opener (`build_executor.py:_behavior`). |
+| K2 | `bot/army/blink.py` (new) | Pure rules: `blink_back(shield_fraction, threatened) -> bool`; `blink_in_point(unit_pos, target_pos, weapon_range, blink_range)`; `blink_finish(target_hp_shield, our_volley, landing_safe, local_level)`. Landing check: `landing_ok(point)` = pathable, visible (`bot.is_visible`), grid influence ≤ `BLINK_DANGER_MAX`, and not up a cliff without vision (`get_terrain_z_height`). |
+| K2 | `micro.py` | `fight` (committed) tries blink-in on out-rangers. Its per-out-ranger budget `BLINK_IN_PER_TARGET_S` is held by the army as tag → last blink time. `retreat` and `harass` try blink-back first. Readiness: `AbilityId.EFFECT_BLINK_STALKER in unit.abilities`. The command is `unit(AbilityId.EFFECT_BLINK_STALKER, point)`. |
+| K2 | `logger.py` | Count blinks by kind. |
+| K3 | `constants.py:ARMY_COMPOSITION_PCT["Zerg"]` | Add `HIGHTEMPLAR` (TUNE) next to an Archon share (the spec's 15%). Archons are **not** given to ares's SpawnController: its Archon morph merges any two idle Templar (`spawn_controller.py:_handle_archon_morph`), which would eat the storm casters. |
+| K3 | `bot/army/templar.py` (new) | `TemplarController`, run every step after army micro. **Storm:** an HT with Storm available uses ares `AutoUseAOEAbility` (avoids our own ground and air units; won't stack storms). **Positioning:** otherwise it stays `TEMPLAR_BEHIND` behind its squad's centre with `KeepUnitSafe`, never in front. **Morph:** pairs of HTs below the storm energy for `TEMPLAR_MORPH_AFTER_S`, or HTs beyond `TEMPLAR_MAX_CASTERS`, morph into Archons (two-tag command, VERIFY which path below). |
+| K3 | `army.py` | HTs belong to squads like other fighters, but their micro goes to `TemplarController` (skipped in `micro()` like `SUPPORT`). Archons are ordinary fighters (not kiters; splash isn't simulated). |
+| K3 | `production.py:composition` | Air switch (every race): Stalker share up, Archon share via HTs. Vs P and T those HTs morph straight into Archons, with no Storm research there (R1). Vs P and T this also needs a Templar Archives (ProductionController's tech_up adds it). |
+| K3 | `logger.py` | Count storms cast and Archons morphed. |
+
+- **VERIFY:**
+  - the Blink and Psionic Storm ability ids and their energy/cooldown behaviour in `unit.abilities` under AIE data (energy costs are measured, VERIFY_NOTES §11.7 style);
+  - the safe-spot accessor if one exists in ares;
+  - the Archon morph command: ares `_do_archon_morph` (`custom_bot_ai.py:365`) vs python-sc2 combining two identical `MORPH_ARCHON` commands;
+  - `client.debug_upgrade` (python-sc2 `client.py:881`) for the staged tests.
+- **Tests:**
+  - Offline in `test_m7_rules.py`: `next_upgrades` chain cases (every race, buildings missing or ready), Blink rules, morph-pair selection (pure).
+  - New staged `scripts/test_blink.py` (debug-spawned, all upgrades on): Blink Stalkers vs Tempests and vs Stalkers; blink counts and value traded.
+  - New staged `scripts/test_templar.py`: storm on a ling/hydra clump; no storm on our own units; low-energy pair morphs.
+- **Acceptance:**
+  - Blink researched by its schedule time in every P/T game; Charge then Blink vs Z.
+  - Storms cast in VeryHard Zerg games.
+  - Air batches (same seeds) better than Phase 2.
+  - VeryHard Zerg × 10 at least M4's 9/10.
+  - All regressions hold.
+- **Ladder:** third upload.
+
+## Phase 4: economy, detector, capital-air response
+
+| Item | Files and functions | Change |
+|---|---|---|
+| E0 | `scripts/test_air_counters.py` (new, staged, dev-only) | Scripted enemy (as `test_counterattack.py:StagedEnemy`) with kiting Tempests (P), Battlecruisers (T), or Brood Lords + Corruptors (Z). Our side gets the same resource value (game-data costs) of each candidate: Void Rays, Tempests, Stalkers, Blink Stalkers, Archons + Stalkers, and mixes. 5 runs per case. Result table → VERIFY_NOTES; it sets the E3 shares. Can run as early as Phase 3 (it needs K2 for the Blink case). |
+| E1 | `constants.py:MAX_BASES` → `bases_cap()` in `build_executor.py:bases_target` | 3, or 4 when minerals ≥ `FOURTH_BASE_BANK` and gas-starved for `FOURTH_BASE_GAS_STARVED_S`, 3 bases saturated, and `DefensePlan.allow_expand`. `economy.py:132` uses it. `PROBE_TARGET` follows the cap. |
+| E1 | `production.py` (l.209-212) | Gas-starved with minerals ≥ `MINERAL_FLOAT_BANK`: Zealots may exceed their share (`freeflow`, capped by supply). |
+| E2 | `bot/intel/air_intel.py` (new) | Pure core: `measure(cached: list[(type_name, value, flying, can_attack, age)], now) -> AirReading(capital_value, air_value, army_value, air_share)`. Fading by `CAPITAL_AIR_FRESH_S`; explicit capital list (Carriers have no weapons in game data). Plus an adapter reading `get_cached_enemy_army` each intel tick. |
+| E2 | `threat_flags.py` | `Threat.CAPITAL_AIR`. Expiry: WARNING (STRUCTURE, never on a timer); ACTIVE (UNIT, `CAPITAL_AIR_UNIT_TTL`). AIR_HARASS "satisfied" state. |
+| E2 | `detectors.py` | `air_harass` source (Stargate / Spire / Starport with Tech Lab) and `capital_air` source (Fleet Beacon / Fusion Core / Greater Spire → WARNING; `AirReading.capital_value ≥ CAPITAL_AIR_MIN_VALUE` → ACTIVE). Logs `INTEL capital air …`. |
+| E2 | `defense_planner.py`, `static_defense.py` | `_plan_air_harass`: Forge now, then 1 Cannon + 1 Battery per mineral line (new placement helper next to `_main_batteries`, l.197); satisfied once every mineral line has detection. With E1's mineral sink, the bank pays for it first. |
+| E3 | `production.py:composition` | Mix selection: normal → air switch (AIR_HARASS active and air share ≥ `AIR_SWITCH_SHARE`, 0.30) → capital air (CAPITAL_AIR ACTIVE). Hysteresis `AIR_SWITCH_HOLD_S`. Capital-air tables per race in `ARMY_COMPOSITION_PCT` (vs P: Void Rays (+ Tempests vs Carriers); vs T and Z: Tempests; Blink Stalkers up and Colossi cut in all three), shares from E0. WARNING (any race): one Stargate goes down early and Blink moves up the Twilight chain. ACTIVE adds the Fleet Beacon when the mix needs Tempests. |
+| E3 | `micro.py` | `TEMPEST` and `VOIDRAY` targeting: capital or massive first (Tempest), armored or capital first (Void Ray). Prismatic Alignment via `UseAbility` when ≥ `VOIDRAY_ALIGN_MIN_ARMORED` armored enemies are in range. `TEMPEST` added to `KITERS`. |
+| E3 | `logger.py` | `capital_air` entries (race, first WARNING and ACTIVE, peak values) and the mix changes. |
+
+- **VERIFY:**
+  - the Prismatic Alignment ability id and availability under AIE data;
+  - Carriers' empty weapon list in game data (python-sc2 `unit.py:230-273` special-cases only Battlecruiser and Oracle);
+  - `BROODLORDCOCOON` in the cache;
+  - whether ares's ProductionController adds Stargate, Fleet Beacon and Templar Archives for the mix (`MAX_PRODUCTION_STRUCTURES` = 12).
+- **Tests:**
+  - Offline: `air_intel.measure` cases (Carrier counted, fading, air share); `test_threat_flags.py` CAPITAL_AIR expiry and AIR_HARASS satisfied; `bases_cap` cases; mix-selection hysteresis.
+  - Staged: E0.
+- **Acceptance (M7's):**
+  - The three Air batches (same seeds) meet D11's targets.
+  - Unspent minerals at 10:00 well below the postmortem's 2,670.
+  - All regressions hold: M1; M2/M3; M4 (≥ 7 each); M5 7/7.
+  - No crash or time-out in the first 20 ladder games after the final upload.
+
+---
+
+## New and changed files at a glance
+- **New, in the bot:**
+  - `bot/army/blink.py`
+  - `bot/army/templar.py`
+  - `bot/intel/air_intel.py`
+- **New dev-only scripts** (not in the ladder zip):
+  - `scripts/test_m7_rules.py` (offline)
+  - `scripts/test_outranged.py`, `scripts/test_blink.py`, `scripts/test_templar.py`, `scripts/test_air_counters.py` (staged)
+- **Changed:**
+  - `bot/army/army.py`, `micro.py`, `engagement.py`, `attack_decision.py`
+  - `bot/intel/detectors.py`, `threat_flags.py`, `scout_planner.py`
+  - `bot/defense/defense_planner.py`, `static_defense.py`
+  - `bot/macro/production.py`, `economy.py`, `build_executor.py`
+  - `bot/telemetry/logger.py`, `bot/main.py`, `bot/constants.py`
+  - `scripts/run_matches.py`, `check_game_log.py`, `test_attack_decision.py`, `test_threat_flags.py`, `test_engagement.py`
+- **Docs:** DESIGN.md (K0), VERIFY_NOTES, STATUS.
+
+## Main risks and how the plan handles them
+- **Regressions in matchups the postmortem didn't touch.** Every phase reruns the full M1-M5 regression on recorded seeds.
+- **The out-ranged rule and the stricter launch gate make the army passive.** Measured as launches per game and 60:00 ties in the batches. The §4.7 end-game gates still apply.
+- **Gas.** Blink, Storm, Lance, Templar Archives, Void Rays and Tempests all compete for it. E1 adds the 4th base and mineral sink; until Phase 4 lands, the gas pressure shows up as later units in the batches.
+- **Ares's Archon morph would merge storm casters.** The plan keeps Archons out of ares's SpawnController and morphs them itself (K3).
+- **Simulator blind spots** (no Blink, Storm, splash or range gap). Levels err conservative after C5 (if needed), and the logged inputs (O1) show where they're wrong.
+- **Step time.** The new per-unit checks run inside micro's existing nearby-enemy lists. The §6 step guard and the `step=` column in batches catch spikes.
+
+## Rough effort
+
+| Part | Effort |
+|---|---|
+| K0 + S | half a session (S includes the 4 GB download and the baseline batches) |
+| Phase 0 + 1 | 1 session plus a regression run |
+| Phase 2 | 1-2 sessions plus tuning batches |
+| Phase 3 | 2 sessions (Blink and Templar are the largest new code) |
+| Phase 4 | 2-3 sessions, including E0 |
+
+Each regression run is about 5-7 hours of games on 4 cores. Batches can overlap with writing the next step.
