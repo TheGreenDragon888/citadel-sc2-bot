@@ -1,12 +1,12 @@
-# Fix plan: findings from the MetaScoreCritic1212VII postmortem
+# M7 plan: fixes from the MetaScoreCritic1212VII postmortem
 
 Source: `docs/postmortems/2026-10-05-MetaScoreCritic1212VII.md` (finding numbers below match it). Code references are at `8036973`.
 
 ## Ground rules this plan follows
-- **The spec decides.** Items marked *spec change* need your approval of a DESIGN.md edit before any code is written. Items marked *bug* bring the code back to what DESIGN.md already says, so they need no spec change.
+- **The spec decides.** Items marked *spec change* need your approval of a DESIGN.md edit before any code is written. Items marked *bug* bring the code back to what DESIGN.md already says, so they need no spec change. The DESIGN.md edits are listed at the end.
 - **One phase at a time.** Each phase ends with evidence for its acceptance criteria, then stops.
 - **New API uses get checked first.** Every API this plan leans on is checked in the ares or python-sc2 source and recorded in `docs/VERIFY_NOTES.md` before use (marked **VERIFY** below).
-- **No hard-coded numbers.** Thresholds go in `bot/constants.py` as TUNE values, and unit stats (ranges, speeds) are read from game data.
+- **No hard-coded numbers.** Thresholds go in `bot/constants.py` as TUNE values, and unit stats (ranges, speeds, costs) are read from game data. The AIE maps carry newer balance data than the 4.10 engine.
 - **M6 is still open.** The 20-ladder-game check on the uploaded zip has 10 games left, and a new upload restarts the count. Develop on a branch now; upload only after M6 passes, unless you say otherwise.
 - **This container can't run games.** It has no `~/StarCraftII`, so every batch below needs SC2 installed per the README (~4 GB) or another machine.
 
@@ -14,12 +14,25 @@ Source: `docs/postmortems/2026-10-05-MetaScoreCritic1212VII.md` (finding numbers
 
 | # | Question | State |
 |---|---|---|
-| D1 | Drop the §4.3 PvP 4:30 Hallucinated Phoenix scout | **Decided: drop** (your answer). Done in Phase 1. |
-| D2 | The same contradiction exists for **PvZ**: the §4.3 ~6:30 Hallucinated Phoenix needs a Sentry, and the vs-Z mix has none. The stale-main hallucination rule also never fires vs P or Z. Drop both, keeping hallucination vs T only? | Open. Recommend: drop the PvZ row; the stale-main rule stays but in practice only fires vs T (vs P and Z the Observer rescout covers it). |
-| D3 | §4.5.1 researches Blink vs P, but Blink micro is on the v1 cut list, so the research is wasted (#6). Remove Blink from the vs-P upgrades, or add minimal blink micro? | Open. Recommend: remove it now and revisit with B. |
-| D4 | Which unit answers capital air (Tempest, Carrier, Battlecruiser, Brood Lord)? Options: (a) Blink Stalkers plus blink micro, (b) Void Rays / own Tempests (Skytoss is on the cut list), (c) Stalker-heavy with Cannons and Batteries at home, buying time only. | Open. Needed before B. Recommend (a) or (b). (c) only delays the loss. |
-| D5 | A 4th base when gas-starved with a big mineral bank (D). §1 says "macro to 3 bases". | Open. Recommend yes, conditional (see D). |
-| D6 | Milestone label for this work: "M7: ladder fixes" with the phases as sub-steps, or reopen M4? | Open. Recommend M7, so M4's acceptance evidence stays as recorded. |
+| D1 | Drop the §4.3 PvP 4:30 Hallucinated Phoenix scout | **Decided: drop.** Phase 1 (B5). |
+| D2 | Drop the §4.3 PvZ ~6:30 Hallucinated Phoenix scout (same problem: no Sentry in the vs-Z mix) | **Decided: drop.** Phase 1 (B5). |
+| D3 | Blink | **Decided: Blink Stalkers are used**, for basic combat and against capital ships. Blink micro comes off the v1 cut list; research and micro are Phase 3. |
+| D4 | The answer to capital air | **Decided: Blink Stalkers in every matchup, plus Void Rays and/or Tempests against capital air in PvP.** Phase 4 (E3). "Skytoss" on the cut list narrows to "Carriers / Skytoss as the main army". |
+| D5 | A 4th base when gas-starved with a mineral bank | **Decided: yes.** Phase 4 (E1). |
+| D6 | Milestone label | **Decided: M7.** M4's acceptance evidence stays as recorded. |
+| D7 | Twilight Council research order: Blink first everywhere, or Charge first vs Z? | Open. Recommend: Blink first vs P and T; Charge first vs Z (its mix leans on Zealots), then Blink. |
+| D8 | Void Rays or Tempests first against enemy Tempests | Open; settled by measurement (E0). My expectation is in the box below. |
+| D9 | Capital air from other races (Battlecruisers, Brood Lords) | Open. Recommend: make the CAPITAL_AIR flag race-agnostic now, but ship only the PvP response in M7. Extend after ladder data. |
+| D10 | §4.5.1's air switch says "add Archons", but High Templar are cut, so Archons can't be made | Open. Recommend: replace Archons with Blink Stalkers plus Void Rays in the air switch. |
+| D11 | M7's target against built-in Protoss Air (VeryHard × 10) | Open. To be proposed after the baseline batch (Phase 1). |
+
+**D8, my expectation (to be checked by measurement).** For enemy Tempests specifically, Void Rays should be the better first answer:
+- **Speed:** Void Rays are faster than Tempests, so they can catch a Tempest bot that kites. Our Stalkers never caught one in this game.
+- **Damage:** the Tempest's air bonus is against *massive* units. Void Rays aren't massive, so they don't take it. The Void Ray's bonus is against *armored*, and Tempests are armored.
+- **Tech:** Void Rays need only a Stargate. Tempests also need a Fleet Beacon (more gas, about a minute later).
+- **Tempest against Tempest** is an even trade at equal range, so the side that already has more wins. Against this opponent that's them.
+
+Tempests are the better answer to Carriers, Battlecruisers and Brood Lords, where their range and anti-massive bonus pay off. These are standard-patch values, and the AIE maps may differ; E0 measures it on the real map data before E3 sets the shares.
 
 ## Overview
 
@@ -32,23 +45,27 @@ Source: `docs/postmortems/2026-10-05-MetaScoreCritic1212VII.md` (finding numbers
 | 1 | B2 Plain move back to the hold point | 2 | bug | S |
 | 1 | B3 Home-defense micro fights only the evaluated enemy group | 2 | bug | S |
 | 1 | B4 Main rescout before expansion checks | 8 | bug | S |
-| 1 | B5 Drop the PvP hallucination scout (D1) | 8 | spec change (decided) | S |
+| 1 | B5 Drop the PvP and PvZ hallucination scouts (D1, D2) | 8 | spec change (decided) | S |
 | 2 | C1 Out-ranged rule and hold-point fallback | 2, B | spec change | M |
 | 2 | C2 Only units that can hit the threat answer it | 3, 10 | spec change | S |
 | 2 | C3 Retreat stops shooting | 1 | spec change | S |
 | 2 | C4 Launch gate: whole army, fresh intel, cooldown | A | spec change | M |
 | 2 | C5 Out-range penalty in the fight level (only if O1 confirms) | C | spec change | M |
-| 3 | M1 One research queue per building | E, 6, 7 | spec change | S |
-| 3 | M2 Mineral sink and conditional 4th base | D | spec change | M |
-| 3 | M3 Tech detector: AIR_HARASS and capital-air flags | 10, 8 | spec change | M |
-| 3 | M4 Air switch / capital-air composition (D4) | B, 7 | spec change | L |
-| later | Batteries in the fight model (#4), low-HP pursuit (#5), Blink micro (#6) | 4, 5, 6 | spec change | M each |
+| 3 | K1 One research queue per building (Blink, Lance in parallel) | E, 6, 7 | spec change | S |
+| 3 | K2 Blink micro | 6, 2, 5, B | spec change (decided) | M |
+| 4 | E0 Staged test: what beats Tempests on the AIE data | B, D8 | test only | M |
+| 4 | E1 Mineral sink and conditional 4th base | D | spec change (decided) | M |
+| 4 | E2 Tech detector: AIR_HARASS and CAPITAL_AIR | 10, 8 | spec change | M |
+| 4 | E3 Capital-air response: composition and air-unit micro | B, 7 | spec change (decided) | L |
+| later | Batteries in the fight model (#4); low-HP pursuit by ground units (#5) | 4, 5 | spec change | M each |
 
 Why this order:
 - Phase 0 is cheap and lets every later phase be measured. It also settles C, which decides whether C5 is needed.
 - Phase 1 needs no spec change and fixes the code that matches the spec worst.
 - Phase 2 stops the bleeding: about 26k of army value was thrown away this game.
-- Phase 3 gives the bot something to win with.
+- Phase 3 (Blink) helps in every matchup, and it's half of the capital-air answer.
+- Phase 4 needs the detector to trigger the switch, and the 4th base's gas to pay for Void Rays and Tempests.
+- E0 is a dev-only script and can run as early as you like.
 
 ---
 
@@ -68,7 +85,7 @@ Why this order:
 **O2. Log enemy tech and capital units, first sighting.**
 - **Where:** `bot/intel/detectors.py`, which already reads `enemy_structures` every intel tick.
 - **Fix:** One `INTEL first seen <TYPE> at <time> <pos>` line per new enemy structure type, plus one per capital unit type (Tempest, Carrier, Battlecruiser, Brood Lord, Mothership). Add a `tech_seen` list to the game record.
-- **Ramifications:** None for behavior. These lines become M3's trigger later.
+- **Ramifications:** None for behavior. These sightings become E2's trigger later.
 - **Verify:** a game vs built-in Protoss `--build Air` logs Stargate and Fleet Beacon lines.
 
 **O3. Log where and why army units die.**
@@ -119,24 +136,27 @@ Why this order:
   - Alternative: raise `OBSERVER_COUNT` 2 → 3 (25/75 and 21 s of Robotics Facility time).
 - **Verify:** Air batch logs show `rescout … enemy main unseen` at least every ~90 s from 6:00 whenever an Observer is free. M3's "no scout lost before 4:00" still holds.
 
-**B5. Drop the PvP hallucination scout** (D1, plus D2 if you approve).
+**B5. Drop the PvP and PvZ hallucination scouts** (D1, D2).
 - **Where:**
-  - DESIGN.md §4.3 PvP row "~4:30 Hallucinated Phoenix"
-  - `constants.py:HALLUCINATION_AT_S["Protoss"]`
+  - DESIGN.md §4.3, the PvP "~4:30" and PvZ "~6:30" Hallucinated Phoenix rows
+  - `constants.py:HALLUCINATION_AT_S` (`"Protoss"`, `"Zerg"`)
   - `scout_planner.py:_hallucinate` (l.514, the matchup branch)
-- **Fix:** Remove the Protoss entry (and Zerg with D2). The stale-main branch and the §4.7 hunt Phoenix stay.
-- **Ramifications:** No behavior change in practice: it never fired vs P, since there's no Sentry. The spec and code stop disagreeing. `test_scout_abilities.py` is unaffected; it tests the ability, not the schedule.
-- **Verify:** M3 checks (`test_m3_checks.py`) pass.
+- **Fix:** Remove both entries. Kept as they are:
+  - the PvT 5:30 row;
+  - the stale-main branch, which needs an existing Sentry, so in practice it only fires vs T;
+  - the §4.7 hunt Phoenix.
+- **Ramifications:** No behavior change in practice: neither row ever fired, because the vs-P and vs-Z mixes have no Sentry. The spec and code stop disagreeing. `test_scout_abilities.py` is unaffected; it tests the ability, not the schedule.
+- **Verify:** M3 checks (`test_m3_checks.py`) pass; M2/M3 cheese batches still show the correct flag 40/40.
 
 **Phase 1 acceptance:**
 - **Wins hold:** M1 Hard × 10, M2/M3 cheese bots × 10 each, and M4 VeryHard × 10 per race stay at their recorded levels.
-- **New baseline batch:** an A/B vs built-in Protoss Air shows no reinforcement-at-retreat lines and fewer HOLD deaths far from the hold point.
+- **Baseline batch for D11:** the A/B vs built-in Protoss Air shows no reinforcement-at-retreat lines and fewer HOLD deaths far from the hold point. Its numbers become the baseline for D11.
 
 ---
 
 ## Phase 2: combat (spec changes to §4.5.2 and §3 micro)
 
-**C1. Out-ranged rule and hold-point fallback** (finding 2, part c; the main lever against B).
+**C1. Out-ranged rule and hold-point fallback** (finding 2, part c).
 - **Where:**
   - `micro.py:fight`, which steps back only when *we* out-range the threat (l.~75)
   - `army.py` anchor selection (`hold_point` / `_rally_point`)
@@ -146,8 +166,8 @@ Why this order:
 - **Fix, squad level:** when out-rangers that home defense can't beat (level < engage threshold) cover the anchor, the anchor moves to a fallback point out of their reach, toward the main, by `HOLD_FALLBACK_STEP` (TUNE). The hold point already shifts like this for Cannons (`HOLD_SHIFT_*`).
 - **Ramifications:**
   - **It applies to everything that out-ranges us:** sieged tanks, Lurkers, Brood Lords, Liberators, Tempests, Carriers, Planetary Fortresses. Uncommitted units back off all of them, which is right unless the squad has decided to fight.
-  - **Committed squads are unchanged.** FIGHT (ATTACK squad, engaged home defense) keeps today's behavior.
-  - **A base under siege can be given up.** Tempests out-range Cannons, so the army keeps its units but may lose that base, which is why M4 (Phase 3) matters.
+  - **Committed squads are unchanged.** FIGHT (ATTACK squad, engaged home defense) keeps today's behavior until K2, when committed Blink Stalkers blink onto out-rangers instead of walking in under fire.
+  - **A base under siege can be given up.** Tempests out-range Cannons, so the army keeps its units but may lose that base. Phases 3-4 are what turn that saved army into a fight it can win.
   - **It is only as good as vision.** Only visible enemies add grid influence (VERIFY_NOTES §11.6), so the army's Observer must stay at the anchor while the army is home. It already does (`_set_intents` l.571).
   - **Blind spots:** Spine Crawlers and Shield Batteries add no influence (VERIFY_NOTES); ranges are still known for them.
   - **Step time:** one range comparison per nearby enemy, inside micro's existing `near` lists, plus one grid query per affected unit.
@@ -176,6 +196,7 @@ Why this order:
   - Less damage dealt while retreating from equal-speed or faster enemies (Stalker vs Stalker, anything vs Void Rays), and fewer units lost.
   - Retreats from slower units (Zealots without Charge, Immortals, Tempests) keep stutter-stepping.
   - Counterattack recalls (`send_home`) use the same function, so they change the same way.
+  - After K2, a retreating Blink Stalker blinks away first.
 - **Verify:** an offline test of the rule; the M5 staged counterattack 7 cases (recalls) still pass.
 
 **C4. Launch gate: whole army, fresh intel, cooldown** (finding A).
@@ -200,81 +221,139 @@ Why this order:
 - **Ramifications:**
   - It shifts **every** gate: launch, continue, home defense, counterattack.
   - Against Terran, sieged tanks trigger it (arguably correct, but a behavior change against VeryHard Terran: re-run all of M4).
+  - The sim doesn't model Blink either, so once K2 lands, Blink Stalkers read weaker than they are. That's conservative, not dangerous.
   - It needs tuning batches.
 - **Verify:** an offline penalty test; the `test_engagement.py` scenario; M4 and M5 regressions.
 
 **Phase 2 acceptance:**
-- **Air batch, same seeds:** the Phase 1 baseline (built-in Protoss Air, VeryHard × 10) shows a lower value-lost / value-killed ratio and fewer launch-then-retreat-within-60-s events.
+- **Air batch, same seeds:** against the Phase 1 baseline, a lower value-lost / value-killed ratio and fewer launch-then-retreat-within-60-s events.
 - **Regressions hold:** M1, M2/M3, M4 VeryHard × 10 per race (≥ 7 each), and the M5 staged 7/7.
 
 ---
 
-## Phase 3: macro and tech (spec changes to §1, §4.2, §4.5.1)
+## Phase 3: Blink (spec changes to §3 micro, §4.5.1, §7 cut list)
 
-**M1. One research queue per building** (findings E, 6, 7).
+**K1. One research queue per building** (findings E, 6, 7).
 - **Where:** `production.py:_next_upgrade` l.151-160 is one global queue, "wait for the one in progress". It was added because ares's `UpgradeController`, given the full list, started every tech building at 5:00.
 - **Fix:**
-  - Split `UPGRADES_VS_P` / `UPGRADES_VS_ZT` into per-building chains (Forge / Twilight / Robotics Bay).
-  - Each chain issues its next upgrade **only when its building already exists**. The Robotics Bay comes from Colossus production; the Twilight from a time or base gate (`TWILIGHT_FROM_S`, TUNE).
-  - Blink goes, per D3.
+  - Split `UPGRADES_VS_P` / `UPGRADES_VS_ZT` into per-building chains: Forge (weapons/armor), Twilight (Blink/Charge, order per D7), Robotics Bay (Extended Thermal Lance).
+  - Each chain issues its next upgrade **only when its building already exists**, so upgrades never create buildings.
+  - The Twilight Council gets its own schedule item (`TWILIGHT_AT_S`, TUNE; earlier vs P, since Blink is now core).
+  - The Robotics Bay keeps coming from Colossus production.
 - **Ramifications:**
-  - Lance would have started ~6:30 instead of 14:26.
-  - More gas on research from 6:00-10:00 means slightly fewer units in that window. The bot was gas-starved, so this is a real trade.
-  - The "all tech at 5:00" regression stays prevented, because buildings aren't created for upgrades.
+  - In this game, Blink would have started ~8:20 (or earlier with the new Twilight timing) instead of 12:57, and Lance ~6:30 instead of 14:26.
+  - More gas on research from 6:00-10:00 means fewer units in that window. The bot was gas-starved, so E1's 4th base matters here too.
+  - The "all tech at 5:00" regression stays prevented.
   - Make `_next_upgrade` a pure function so it can be tested offline.
 - **Verify:** an offline chain test; logs show parallel research; M1 Hard × 10.
 
-**M2. Mineral sink and a conditional 4th base** (finding D; needs D5).
+**K2. Blink micro** (findings 6, 2, 5, B; D3).
+- **Where:** a new `micro.blink(...)` used from `micro.fight` and `micro.retreat`, plus the army's commit state.
+- **Facts checked:**
+  - ares has no Blink behavior. Its ability tracker's Blink entry is commented out.
+  - Blink readiness is `AbilityId.EFFECT_BLINK_STALKER in unit.abilities`. `Unit.abilities` is filled each step and leaves out abilities on cooldown (VERIFY_NOTES, python-sc2 `unit.py:598`).
+  - The command goes through ares `UseAbility` or `unit(AbilityId.EFFECT_BLINK_STALKER, point)`.
+- **Fix, three uses:**
+  1. **Blink back** (basic combat; standard and high-value against bots): when shields fall below `BLINK_BACK_SHIELD_FRACTION` (TUNE) and an enemy is targeting or close to the unit, blink toward the squad's rear. The landing spot must be safe on the influence grid (ares safe-spot query, **VERIFY** the accessor) and in our vision.
+  2. **Blink in on out-rangers when committed** (vs Tempests, Siege Tanks, Colossi, Brood Lords): when the squad is in FIGHT and an out-ranger (C1's test) is within blink range plus weapon range, blink to a point inside weapon range of it, at most `BLINK_IN_MAX` Stalkers per out-ranger per second (TUNE), so the group arrives together rather than one by one.
+  3. **Blink to finish** a fleeing target that one volley would kill, only when the landing spot is safe and the local sim level is ≥ engage (the guarded form of #5).
+- **Never blink:**
+  - into fog (unseen cells),
+  - onto a cell with ground influence above `BLINK_DANGER_MAX` (TUNE),
+  - up a cliff without vision of the landing spot (terrain height tells which side is higher).
+- **Ramifications:**
+  - **The biggest change to Stalker behavior so far.** Every matchup's fights change, so the full M4 regression is needed.
+  - **More commands per step** (a few blink commands a second at most), with no new path queries. The safe-spot lookup is one grid read.
+  - **Interactions:**
+    - C1: uncommitted units still walk out of range; blink back covers the urgent cases.
+    - C3: blink back replaces stutter-step when available.
+    - Counterattack: HARASS Stalkers get blink back.
+  - **The sim doesn't model Blink**, so fight levels stay conservative.
+  - **Bait risk:** blink-to-finish into a bot's retreating army. That's why it needs the safe-landing and local-sim gates.
+- **Verify:**
+  - An offline test of the blink decision function (fake units, shield fractions, ranges, grid values).
+  - An in-game staged test: debug-spawned Stalkers with Blink vs Tempests and vs Stalkers, with blink counts and value traded in the log.
+  - Air batch and M4 VeryHard × 10 per race.
+
+**Phase 3 acceptance:** Blink is researched by its schedule time in every PvP game of the batches. The Air batch (same seeds) improves on Phase 2's value ratio, and all regressions hold.
+
+---
+
+## Phase 4: economy and capital-air response (spec changes to §1, §4.2, §4.4, §4.5.1, §5)
+
+**E0. Staged test: what beats Tempests on the AIE balance data** (D8).
+- **Where:** a new dev-only `scripts/test_air_counters.py` (not in the ladder zip), modeled on `test_counterattack.py` (scripted `StagedEnemy`) and `test_engagement.py` (debug spawn).
+- **Fix:** On one pool map, the enemy gets N Tempests that kite (hold range, back off from anything closing in). Our side gets the same resource value of each candidate group in turn:
+  - Void Rays
+  - Tempests
+  - Stalkers without Blink
+  - Blink Stalkers (once K2 exists)
+  - Void Rays + Blink Stalkers
+
+  Record value lost and killed, and time to kill. Unit costs come from game data. Run each case 5 times (fights vary).
+- **Ramifications:** Dev-only, no bot behavior change. It settles D8 with numbers from the real map data instead of the standard-patch values in the D8 box.
+- **Verify:** the table goes into VERIFY_NOTES "M7 findings".
+
+**E1. Mineral sink and a conditional 4th base** (finding D; D5 decided).
 - **Where:**
   - `constants.py:MAX_BASES = 3`
   - `economy.py:132` (`ExpansionController(to_count=min(to_count, MAX_BASES))`)
   - `production.py` l.209-212: the mineral-float spawner still respects the mix's proportions (Zealot 10%)
 - **Fix:**
   - **4th base:** allow one when minerals ≥ `FOURTH_BASE_BANK` and gas income is below what production needs for `FOURTH_BASE_GAS_STARVED_S` (TUNE), only after 3 bases are saturated, and only while `DefensePlan.allow_expand`. Raise `PROBE_TARGET` accordingly.
-  - **Sink:** when gas-starved with minerals ≥ `MINERAL_FLOAT_BANK`, Zealots may exceed their share, and with the AIR flag (M3) the bank first buys a Cannon and Battery per mineral line.
+  - **Sink:** when gas-starved with minerals ≥ `MINERAL_FLOAT_BANK`, Zealots may exceed their share. With AIR_HARASS (E2) active, the bank first buys a Cannon and Battery per mineral line.
 - **Ramifications:**
   - A 4th base spreads the army: more home threats and longer defense distances. The counterattack's "base under attack" checks see more bases.
   - Probes rise from 66 to ~75: slightly more step time and more supply in workers.
-  - More Zealots reach supply 150 sooner, so the launch gate (now C4) is evaluated earlier.
+  - More Zealots reach supply 150 sooner, so the launch gate (C4) is evaluated earlier.
   - Zealots are fodder against Tempests and good against ground armies.
+  - Void Rays, Tempests and Blink all need the gas, so E3 depends on this.
 - **Verify:** batches show unspent minerals at 10:00 well below this game's 2,670, with no M1 or M4 regression.
 
-**M3. Tech detector: AIR_HARASS and capital-air flags** (findings 10, 8).
+**E2. Tech detector: AIR_HARASS and CAPITAL_AIR** (findings 10, 8; D9).
 - **Where:** `detectors.py`. `Threat.AIR_HARASS` exists in `threat_flags.py:36`, but nothing raises it, and STATUS lists AIR_HARASS, DT, MACRO and TIMING as "not in any milestone".
 - **Fix:**
-  - Raise AIR_HARASS (STRUCTURE evidence) on a Stargate (P), Spire (Z) or Starport with a Tech Lab (T), per §4.2 and §4.4 rows 9 and 13.
-  - Add a new CAPITAL_AIR threat (*spec change*) on a Fleet Beacon, Fusion Core, Greater Spire, or any capital unit seen (O2's lines).
-  - Defense plan per §4.2: Forge now, then 1 Cannon + 1 Battery per mineral line.
-  - Implement §5's "satisfied" state (detection at every mineral line stops forcing builds).
+  - **AIR_HARASS** (STRUCTURE evidence): raised on a Stargate (P), Spire (Z) or Starport with a Tech Lab (T), per §4.2 and §4.4 rows 9 and 13.
+  - **CAPITAL_AIR** (new threat, race-agnostic per D9):
+    - STRUCTURE evidence from a Fleet Beacon, Fusion Core or Greater Spire;
+    - UNIT evidence while the army cache holds any Tempest, Carrier, Battlecruiser, Brood Lord or Mothership (expires `CAPITAL_AIR_UNIT_TTL` after none is cached).
+  - **Defense plan for AIR_HARASS** per §4.2: Forge now, then 1 Cannon + 1 Battery per mineral line, with §5's "satisfied" state (detection at every mineral line stops forcing builds).
 - **Ramifications:**
   - Every Stargate opener, common among bots, now costs ~900 minerals of static defense at 3 bases. That's standard play, and the floats show there's room.
   - The Forge comes earlier, which also helps upgrades.
-  - `FlagStore` gains a state, so `test_threat_flags.py` gets cases.
-  - `m3_checks.M3_EXPECTED_FLAGS` is unaffected (no cheese bot builds air), but built-in AI Air games will now raise it, which is the point.
-- **Verify:** offline flag tests; built-in Protoss Air games raise both flags by the Stargate or Fleet Beacon sighting; M2/M3 cheese batches still show the correct flag 40/40.
+  - `Threat` gains a member and `FlagStore` a state, so `test_threat_flags.py` gets cases. The opponent memory's `MEMORY_CHEESE` list is unaffected (CAPITAL_AIR isn't cheese).
+  - `m3_checks.M3_EXPECTED_FLAGS` is unaffected (no cheese bot builds air), but built-in AI Air games now raise both flags, which is the point.
+- **Verify:** offline flag tests; built-in Protoss Air games raise AIR_HARASS at the Stargate sighting and CAPITAL_AIR at the Fleet Beacon; M2/M3 cheese batches still show the correct flag 40/40.
 
-**M4. Air switch / capital-air composition** (findings B, 7; needs D4).
-- **Where:** `production.py:composition` is static per race; the docstring says "the air switch … come[s] later". `constants.py:ARMY_COMPOSITION_PCT`.
-- **Fix:**
-  - **Air switch:** while AIR_HARASS is active and enemy air is ≥ 30% of the cached enemy army value (§4.5.1), shift the share to anti-air.
-  - **Capital air:** while CAPITAL_AIR is active, cut Colossus to ~0-10% and add the D4 counter unit.
-  - **Switching back:** return when the cached enemy air falls below the threshold for `AIR_SWITCH_HOLD_S` (hysteresis).
+**E3. Capital-air response: composition and air-unit micro** (findings B, 7; D4, D8, D10).
+- **Where:**
+  - `production.py:composition` is static per race; the docstring says "the air switch … come[s] later".
+  - `constants.py:ARMY_COMPOSITION_PCT`, `ARMY_PRIORITY`, `MAX_PRODUCTION_STRUCTURES`.
+  - `micro.py:KITERS` and targeting.
+- **Fix, composition:**
+  - **CAPITAL_AIR active, enemy Protoss:** Stalker share up, Colossus down to `CAPITAL_AIR_COLOSSUS_PCT` (TUNE, ~0-10%), and Void Rays and/or Tempests at shares set from E0's result.
+  - **Air switch** (§4.5.1: enemy air ≥ 30% of the cached army value, with AIR_HARASS active): Stalker share up, plus Void Rays in place of Archons (D10).
+  - **Switching back:** return to the race's normal mix when the cached enemy air falls below the threshold for `AIR_SWITCH_HOLD_S` (hysteresis), so one Oracle doesn't swing the army.
+  - ares's ProductionController adds the Stargates and Fleet Beacon the mix needs. Check `MAX_PRODUCTION_STRUCTURES = 12`.
+- **Fix, air-unit micro:**
+  - **Void Rays:** target capital and armored units first. Use Prismatic Alignment when ≥ `VOIDRAY_ALIGN_MIN_ARMORED` (TUNE) armored enemies are in range (**VERIFY** the ability's id and availability under AIE data via `unit.abilities`; ares lists `EFFECT_VOIDRAYPRISMATICALIGNMENT`). They're out-ranged by Tempests, so under C1 they close in only when committed.
+  - **Tempests:** added to `KITERS` (they out-range almost everything), and they target massive units first.
+  - Flyers already retreat on the air grid (`micro.retreat`).
 - **Ramifications:**
-  - **Tech cost:** a Stargate or Fleet Beacon for option (b), Blink micro for option (a).
-  - **A weak window** while the switch completes.
-  - **False triggers:** one Oracle must not swing the army, which is why the share threshold and hysteresis exist.
-  - **ProductionController adds the new production buildings itself.** Check `MAX_PRODUCTION_STRUCTURES = 12`.
-  - **Option (b) takes Skytoss off the cut list:** a §7 change.
-- **Verify:** Air batch wins and value ratio against the Phase 2 numbers; M4 VeryHard Protoss (non-air builds) doesn't regress.
+  - **Tech cost and a weak window:** a Stargate (and a Fleet Beacon if Tempests) plus the first units take ~1.5-2 min of reduced ground production.
+  - **A mixed-speed army:** Void Rays and Blink Stalkers are faster than Immortals and Colossi. The ares spatial groups already split them, and the regroup rule (`REGROUP_FRACTION`) waits for stragglers, which slows the squad when it goes out.
+  - **The sim handles air units:** they pass through `engagement.level` with no change.
+  - **False triggers:** a single Tempest is real evidence, but the switch back needs the hysteresis.
+  - **The spec changes:** "Skytoss" on the §7 cut list narrows; §1's "Beyond v1" line changes.
+- **Verify:** E0 numbers guide the shares; Air batch wins and value ratio beat Phase 3; M4 VeryHard Protoss (non-air builds) doesn't regress.
 
-**Phase 3 acceptance:** the Air batch (same seeds) beats the Phase 2 numbers on wins and value ratio, and every regression holds.
+**Phase 4 acceptance:** the Air batch (same seeds) meets D11's target, and every regression holds.
 
 ---
 
 ## Later (not needed for this loss)
 - **Batteries in the fight model (#4).** Add each Battery's restorable shields (energy × restore rate from game data) as extra shield HP, for both sides. It touches every gate, like C5.
-- **Low-HP pursuit (#5).** `ShootTargetInRange(extra_range=…)` for targets one volley from death, plus shared focus across a group. Chase only when faster and the local sim is safe. First settle with a log whether hurt enemies actually escape (UNCLEAR today).
-- **Blink micro (#6).** Blink in on out-rangers when committed, blink back for shieldless Stalkers. Needs it off the cut list, and is likely part of D4 (a).
+- **Low-HP pursuit by ground units (#5).** `ShootTargetInRange(extra_range=…)` for targets one volley from death, plus shared focus across a group. Chase only when faster and the local sim is safe. First settle with a log whether hurt enemies actually escape (UNCLEAR today). K2's blink-to-finish covers the Stalker case.
 
 ## Verification and rollout
 
@@ -291,13 +370,39 @@ What each part does:
 - `--game-seed 7000` fixes the randomness, so the same 10 games can be replayed after a change.
 
 **Steps:**
-1. Run this on the current code first, as the baseline, then after each phase.
+1. Run this on the current code first (the baseline), then after each phase.
 2. **Full regression after each phase:** STATUS.md "Test commands" lists them: M1, M2/M3, M4, M5 staged, plus the offline scripts. That's about 5-7 hours of games on 4 cores.
 3. **Before each upload:** rebuild the zip on Python 3.12, run `ladder_env_test.py`, upload, then follow the games with `ladder_watch.py`.
 
 **Rollout:**
-1. Phases 0 + 1 ship together after M6 passes. They are low-risk and make the next ladder losses readable.
-2. Phase 2 follows in a second upload.
-3. Phase 3 needs D4 and D5 first.
+1. **M7 kickoff:** the DESIGN.md edits below, for your approval (the decided items can go in at once).
+2. **Phases 0 + 1** ship together after M6 passes. They are low-risk and make the next ladder losses readable.
+3. **Phase 2** goes in a second upload.
+4. **Phase 3** goes in a third.
+5. **Phase 4** goes in a fourth. E0 can run any time, and it settles D8 before E3 starts.
 
-**Docs:** each phase updates DESIGN.md (approved edits only), VERIFY_NOTES (the VERIFY items above and the evidence), and STATUS.md.
+**Docs:** each phase records its VERIFY items and evidence in VERIFY_NOTES ("M7 findings", "M7 acceptance evidence") and updates STATUS.md.
+
+## DESIGN.md edits for M7
+
+Decided items, ready to write:
+- **§4.3:** delete the PvP "~4:30 Hallucinated Phoenix" and PvZ "~6:30 Hallucinated Phoenix" rows (D1, D2).
+- **§1 Win condition:** "macro to 3 bases" becomes "3 bases, and a 4th when gas-starved with a mineral bank" (D5). "Beyond v1" keeps Carriers and Skytoss-as-main-army only.
+- **§7:**
+  - add the M7 row (deliverable: Phases 0-4; acceptance: each phase's criteria above, D11's target, and no crash or time-out in the first 20 ladder games after each upload);
+  - cut list: remove "Blink micro"; "Skytoss" becomes "Carriers and Skytoss as the main army (Void Rays/Tempests only as the capital-air answer)" (D3, D4, D6).
+
+Written with each phase, for approval then:
+- **§3 `micro.py`:** the out-ranged rule (C1), retreat shooting (C3), and Blink (K2).
+- **§4.5.2:**
+  - launch inputs: whole cached army, fresh intel, cooldown after a home fight (C4);
+  - which units answer a threat (C2);
+  - the hold-point fallback (C1);
+  - the out-range penalty, only if O1 confirms it (C5).
+- **§4.2 and §4.4:** detector rows 9 and 13 become real; add a capital-air row (E2).
+- **§4.5.1:**
+  - per-building research chains and the Twilight order (K1, D7);
+  - the air switch with Void Rays in place of Archons (D10);
+  - the capital-air mix (E3).
+- **§5:** `Threat.CAPITAL_AIR` and its expiry (E2).
+- **§8:** the new telemetry fields (O1-O3).
