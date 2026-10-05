@@ -177,6 +177,13 @@ is under way with `send_later` check-ins. The 3.12 venv workaround below worked 
 Still 0 matches at 21:29 UTC: competition 37's round 76 started at 14:48 UTC, before Citadel
 was created (15:11), and rounds 72-75 each took 18-20 h (`GET /api/rounds/?competition=37`), so
 Citadel's first ladder games are expected in round 77 (about 09:00-12:00 UTC on 2026-10-05).
+Round 77 started at 09:16 UTC; at 17:10 UTC 10/20 played games, 8 wins and 2 losses (both
+game_rules), 0 guarded errors or tracebacks, startup 440-1095 ms, max step 143 ms, guard never on.
+Match 5027201 (vs BlayzReinforcementBot) never ran: the arena client log shows the opponent's
+process exiting with status 1 after 1.6 s, while Citadel connected, waited, and exited 0 when the
+controller timed out; AI Arena scored `InitializationError` for both (result `none`, no Elo
+change). `ladder_watch.py` now lists such matches as `NOT PLAYED (not counted)` and counts 20
+played games; a Citadel initialization failure is still a `loss` and counts as a failure.
 
 **The Poetry environment must be Python 3.12** (the ladder image's version; README, Setup). In the
 cloud container `poetry env use python3.12` (even with `/usr/bin/python3.12`) builds a 3.11

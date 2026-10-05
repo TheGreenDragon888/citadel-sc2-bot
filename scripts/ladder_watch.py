@@ -139,7 +139,13 @@ def main() -> int:
         rows.append((part, match, opponent, steps, scan))
 
     failures = 0
-    for i, (part, match, opponent, steps, scan) in enumerate(rows, 1):
+    played = 0
+    for part, match, opponent, steps, scan in rows:
+        # result "none" (no winner, no Elo change): the game never ran, e.g. the opponent failed to
+        # start and AI Arena scored InitializationError for both bots; listed but not counted
+        not_played = part.get("result") in (None, "", "none")
+        played += not not_played
+        i = played
         failed = part.get("result") == "loss" and part.get("result_cause") in FAILURE_CAUSES
         failures += failed and i <= args.first
         race = (opponent.get("plays_race") or {}).get("label", "?")  # BotRaceSerializer: {id, label}
@@ -148,8 +154,9 @@ def main() -> int:
         length = f"{steps / LOOPS_PER_SECOND / 60:.1f}min" if steps else "-"
         avg = part.get("avg_step_time")
         avg_text = f"{avg * 1000:.1f}ms" if avg is not None else "-"
+        label = " --" if not_played else f"{i:>3}"
         print(
-            f"GAME {i:>2}  match {part['match']}  {str(match.get('created', ''))[:16]}  vs {opponent.get('name', '?')} ({race})  "
+            f"GAME{label}  match {part['match']}  {str(match.get('created', ''))[:16]}  vs {opponent.get('name', '?')} ({race})  "
             f"map {match.get('map')}  {part.get('result')}/{part.get('result_cause')}  {length}  avg_step={avg_text}",
             end="",
         )
@@ -160,8 +167,8 @@ def main() -> int:
                 f"errors={scan['guarded']} tracebacks={scan['tracebacks']} pre={','.join(record.get('preraised') or []) or '-'}",
                 end="",
             )
-        print("  CITADEL FAILURE" if failed else "")
-    counted = min(len(rows), args.first)
+        print("  CITADEL FAILURE" if failed else "  NOT PLAYED (not counted)" if not_played else "")
+    counted = min(played, args.first)
     done = counted >= args.first
     print(
         f"M6 acceptance: {counted}/{args.first} games so far, {failures} with a Citadel crash/timeout/initialization failure: "
