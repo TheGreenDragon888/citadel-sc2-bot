@@ -13,7 +13,7 @@ findings and Citadel's choices are in `docs/VERIFY_NOTES.md`.
 | M3 | Done (see `docs/VERIFY_NOTES.md`, "M3 acceptance evidence") | per-matchup scout planner, §4.4 rows 3 and 15 |
 | M4 | Done (see `docs/VERIFY_NOTES.md`, "M4 acceptance evidence") | squads, `EngagementResult` gates, retreat hysteresis, end-game rules (`bot/army/`) |
 | M5 | Done (see `docs/VERIFY_NOTES.md`, "M5 acceptance evidence") | counterattack (§4.6), opponent memory (§5), telemetry to `./data/logs` (§8), step guard (§6) |
-| M6 | In progress: pre-upload checks done (see `docs/VERIFY_NOTES.md`, "M6 acceptance evidence"); tested zip uploaded with bot data on and joined to the ladder; the first 20 ladder games pending | zip with the tested libraries, error guard, ladder-environment test, upload and watch scripts |
+| M6 | In progress: pre-upload checks done (see `docs/VERIFY_NOTES.md`, "M6 acceptance evidence"); tested zip uploaded with bot data on and joined to the ladder; the first 20 ladder games pending (10/20 played, all clean). M5 + M6 are on `main` | zip with the tested libraries, error guard, ladder-environment test, upload and watch scripts |
 
 ## Code map (M2-M6 additions)
 
@@ -158,7 +158,11 @@ The environment variables `UPLOAD_API_TOKEN` (the AI Arena API token) and `UPLOA
 bot's id on aiarena.net, created by the user as Citadel / Protoss / Python) are set in the cloud
 environment's settings; a new session picks them up. Check with
 `test -n "$UPLOAD_API_TOKEN" && test -n "$UPLOAD_BOT_ID" && echo set` (never print the token).
-The code is on branch `claude/eloquent-albattani-lhjcsi` (M5 and M6); `main` is still M4 (e345c04).
+**`main` has M5 and M6** (user decision on 2026-10-05, at 10/20 ladder games: bring `main` up to
+date now instead of after M6 passes). It was fast-forwarded from e345c04 (M4) to this branch,
+`claude/modest-einstein-9l4qe7`; its bot code is identical to the uploaded zip's (4d53ca5, no
+bot-code change since). Pushes to `main` run `.github/workflows/ladder_zip.yml`, which builds a
+zip but doesn't upload it (`AutoUploadToAiarena: False`).
 
 **Session of 2026-10-04 (branch `claude/lucid-gauss-cgaphp`, fast-forwarded to 8e59c89).** The
 user uploaded the zip by hand. `UPLOAD_API_TOKEN` and `UPLOAD_BOT_ID` were **not set** in that
@@ -223,7 +227,8 @@ What works: `poetry env remove --all`, then `/usr/bin/python3.12 -m venv
    2-hour limit; the images are about 11 GB), upload again, and count 20 games from the new upload
    (the plan's rule).
 6. **When M6 passes:** fill in the ladder table in VERIFY_NOTES "M6 acceptance evidence", update
-   this file, and ask the user to merge M5 + M6 into `main` (their decision: after M6 passes).
+   this file, and bring `main` up to date with those doc changes (M5 + M6 code is already on
+   `main`, see above).
 
 ## Open questions for the user
 
