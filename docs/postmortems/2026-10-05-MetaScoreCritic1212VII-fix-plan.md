@@ -22,8 +22,8 @@ Source: `docs/postmortems/2026-10-05-MetaScoreCritic1212VII.md` (finding numbers
 | D6 | Milestone label | **Decided: M7.** M4's acceptance evidence stays as recorded. |
 | D7 | Twilight Council research order: Blink first everywhere, or Charge first vs Z? | Open. Recommend: Blink first vs P and T; Charge first vs Z (its mix leans on Zealots), then Blink. |
 | D8 | Void Rays or Tempests first against enemy Tempests | Open; settled by measurement (E0). My expectation is in the box below. |
-| D9 | Capital air from other races (Battlecruisers, Brood Lords) | Open. Recommend: make the CAPITAL_AIR flag race-agnostic now, but ship only the PvP response in M7. Extend after ladder data. |
-| D10 | §4.5.1's air switch says "add Archons", but High Templar are cut, so Archons can't be made | Open. Recommend: replace Archons with Blink Stalkers plus Void Rays in the air switch. |
+| D9 | Capital air from other races (Battlecruisers, Brood Lords) | Open. Recommend: **detection and measurement for all races, the capital-air army response vs Protoss only** in M7. Exact rules in E2 ("What D9 means exactly"). |
+| D10 | §4.5.1's air switch says "add Archons", but High Templar are cut, so Archons can't be made | Open. Recommend: replace Archons with Blink Stalkers plus Void Rays vs P and T, and Phoenix vs Z (the spec already allows Phoenix vs Z). Mutalisks are light, and the Void Ray's bonus is against armored, so Void Rays are a poor answer to Zerg air. |
 | D11 | M7's target against built-in Protoss Air (VeryHard × 10) | Open. To be proposed after the baseline batch (Phase 1). |
 
 **D8, my expectation (to be checked by measurement).** For enemy Tempests specifically, Void Rays should be the better first answer:
@@ -314,9 +314,7 @@ Why this order:
 - **Where:** `detectors.py`. `Threat.AIR_HARASS` exists in `threat_flags.py:36`, but nothing raises it, and STATUS lists AIR_HARASS, DT, MACRO and TIMING as "not in any milestone".
 - **Fix:**
   - **AIR_HARASS** (STRUCTURE evidence): raised on a Stargate (P), Spire (Z) or Starport with a Tech Lab (T), per §4.2 and §4.4 rows 9 and 13.
-  - **CAPITAL_AIR** (new threat, race-agnostic per D9):
-    - STRUCTURE evidence from a Fleet Beacon, Fusion Core or Greater Spire;
-    - UNIT evidence while the army cache holds any Tempest, Carrier, Battlecruiser, Brood Lord or Mothership (expires `CAPITAL_AIR_UNIT_TTL` after none is cached).
+  - **CAPITAL_AIR** (new threat, race-agnostic per D9). See "What D9 means exactly" below.
   - **Defense plan for AIR_HARASS** per §4.2: Forge now, then 1 Cannon + 1 Battery per mineral line, with §5's "satisfied" state (detection at every mineral line stops forcing builds).
 - **Ramifications:**
   - Every Stargate opener, common among bots, now costs ~900 minerals of static defense at 3 bases. That's standard play, and the floats show there's room.
@@ -324,6 +322,42 @@ Why this order:
   - `Threat` gains a member and `FlagStore` a state, so `test_threat_flags.py` gets cases. The opponent memory's `MEMORY_CHEESE` list is unaffected (CAPITAL_AIR isn't cheese).
   - `m3_checks.M3_EXPECTED_FLAGS` is unaffected (no cheese bot builds air), but built-in AI Air games now raise both flags, which is the point.
 - **Verify:** offline flag tests; built-in Protoss Air games raise AIR_HARASS at the Stargate sighting and CAPITAL_AIR at the Fleet Beacon; M2/M3 cheese batches still show the correct flag 40/40.
+
+**What D9 means exactly** (CAPITAL_AIR, the same rules for every race):
+1. **What counts.** Capital air is an explicit list, `CAPITAL_AIR_TYPES` in `constants.py`:
+   - Protoss: Tempest, Carrier, Mothership.
+   - Terran: Battlecruiser.
+   - Zerg: Brood Lord, including the cocoon it morphs from.
+
+   Everything else that flies (Void Ray, Phoenix, Oracle, Viking, Liberator, Banshee, Mutalisk, Corruptor, Viper) is "air" for the §4.5.1 air switch, not capital air. The list is explicit because python-sc2 reports a Carrier as unable to attack: its interceptors do the damage, so it has no weapon in the game data (`unit.py:230-273` special-cases only Battlecruisers and Oracles). A test like "flying and can attack" would miss Carriers.
+2. **Two states:**
+   - **WARNING:** an unlocking building is seen: Fleet Beacon (P), Fusion Core (T) or Greater Spire (Z). It's STRUCTURE evidence, so per §5 it never expires on a timer, only when the building is seen destroyed. A building alone isn't proof of capital ships: a Fleet Beacon also unlocks Phoenix and Void Ray upgrades.
+   - **ACTIVE:** the capital air the bot has seen recently is worth at least `CAPITAL_AIR_MIN_VALUE` (TUNE; about one unit's worth). It ends `CAPITAL_AIR_UNIT_TTL` after the value drops below that.
+3. **How the enemy's air is measured.** Every intel tick, from ares's army cache (every enemy unit seen and not known dead):
+   - **capital air value:** the cost of cached units in the list;
+   - **air value:** the cost of cached flying fighters (flying, not support, and able to attack or in the capital list);
+   - **air share:** air value divided by the whole cached army value.
+
+   Costs come from game data (`calculate_unit_value`). A cached unit counts at full value only if it was seen within `CAPITAL_AIR_FRESH_S` (TUNE), using python-sc2's `Unit.age`, the seconds since the bot last saw it (`unit.py:471`). Older entries fade, because the cache keeps units that died out of our sight.
+4. **What gets logged.**
+   - **State changes:** an `INTEL capital air WARNING/ACTIVE <race> value=… air share=…` line.
+   - **Game record:** a `capital_air` entry with the race, first WARNING and ACTIVE times, and peak values.
+   - **Effect:** every ladder game shows what the enemy flew and when, even where M7 doesn't respond to it.
+5. **What the bot does in M7:**
+   - **Vs Protoss:**
+     - **WARNING:** prepare. One Stargate goes down and Blink research moves ahead in the Twilight chain.
+     - **ACTIVE:** the full E3 mix: Colossi cut, Void Rays/Tempests at E0's shares, more Stalkers.
+   - **Vs Terran and Zerg:** the flag and measurements only, with no capital-air mix. The general rules still apply:
+     - the §4.5.1 air switch at ≥ 30% air share (D10);
+     - C1 out-ranged handling (Brood Lords out-range Stalkers; Battlecruisers don't);
+     - C4's launch gate counts them in the cached army;
+     - K2's blink-in covers Brood Lords.
+6. **Why not respond vs T and Z in M7.**
+   - **No measurement:** E0 only tests answers to Tempests.
+   - **No ladder losses to them yet.**
+   - **A wrong counter is expensive:** Corruptors guard Brood Lords against air, and Battlecruisers can teleport away.
+
+   After M7, E0 gets Battlecruiser and Brood Lord cases, and the logged ladder data shows how often these opponents fly them.
 
 **E3. Capital-air response: composition and air-unit micro** (findings B, 7; D4, D8, D10).
 - **Where:**
