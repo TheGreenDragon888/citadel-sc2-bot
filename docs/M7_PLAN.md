@@ -19,8 +19,11 @@
 | D10 | **High Templar and Archons are allowed.** Psionic Storm and Archon splash are core vs Z. The §4.5.1 air switch keeps the spec's wording (more Stalkers plus Archons), now buildable. |
 | D11 | M7's targets against the built-in AI's air builds are proposed after the baseline batches. |
 
-**Defaults I'll use unless you say otherwise:**
-- **R1. High Templar and Storm vs Zerg only** in M7. Against Terran, Storm is strong against bio, but it's extra scope and Colossi already cover it. Archons still come in the air switch for every race.
+**Defaults (accepted by the user):**
+- **R1. High Templar and Storm vs Zerg only** in M7. Against Terran, Storm is strong against bio, but it's extra scope and Colossi already cover it. Archons follow §4.5.1's mixes:
+  - **Vs Z:** in the normal army (the spec's Archon 15%), plus more under the air switch.
+  - **Vs P and T:** only while the air switch is on. The spec's base mixes for those races have no Archons, and the switch "adds Archons" for every race. Those High Templar morph straight into Archons, with no Storm research.
+  - Archons in the P/T base mixes is an open question for the user (see the chat of 2026-10-05).
 - **R2. No Phoenix in M7.** Archons, Storm and Stalkers cover Mutalisks; Phoenix would be one more unit to control.
 - **R3. One ladder upload per finished phase, after M6 passes.** Each upload restarts the 20-game no-crash count, but development of the next phase continues meanwhile.
 
