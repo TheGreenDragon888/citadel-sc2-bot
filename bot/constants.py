@@ -651,7 +651,9 @@ RESCOUT_PROBE_RADIUS: float = 45.0
 # §4.3 hallucinated Phoenix, only with a Sentry that already exists (user decision): at these
 # times per enemy race, and whenever the enemy main has been unseen for HALLUCINATION_STALE_S
 # after HALLUCINATION_FROM_S (PvT row: 90 s)
-HALLUCINATION_AT_S: dict[str, float] = {"Protoss": 270.0, "Terran": 330.0, "Zerg": 390.0}
+# M7 (user decision): the PvP ~4:30 and PvZ ~6:30 rows are dropped (the vs-P and vs-Z mixes have no
+# Sentry, so they never fired; DESIGN.md §4.3)
+HALLUCINATION_AT_S: dict[str, float] = {"Terran": 330.0}
 HALLUCINATION_FROM_S: float = 240.0
 HALLUCINATION_STALE_S: dict[str, float] = {"Terran": 90.0}
 HALLUCINATION_STALE_DEFAULT_S: float = 60.0
