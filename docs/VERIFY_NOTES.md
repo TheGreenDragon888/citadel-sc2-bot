@@ -1570,3 +1570,27 @@ machine's SC2 4.10; Citadel's `./data` kept from match to match):
   InitializationError at once because the cheese bots' generated `run.py` didn't import `sc2.main`
   (M6 findings); fixed in ce5c35b. The second stopped in match 1 when the Docker daemon, run as a
   time-limited background task, was stopped.
+
+## M7 findings
+
+API checks and Citadel's choices for M7 (`docs/M7_PLAN.md`). Checked before the plan was written
+(python-sc2 at `7ec25cf`, ares at `8730865`):
+- `Unit.is_biological` reads the type's attributes from game data (`sc2/unit.py:180-182`).
+- `Unit.can_attack_ground` / `can_attack_air` special-case only Battlecruiser and Oracle
+  (`sc2/unit.py:230-273`); a Carrier has no weapon in game data (its interceptors attack), so
+  "flying and can attack" misses it. Capital air is an explicit list (`CAPITAL_AIR_TYPES`).
+- `Unit.age` is the seconds since the Unit object's data was taken (`sc2/unit.py:471-473`).
+- `Unit.movement_speed` is game data at "normal" speed and excludes upgrades and buffs
+  (`sc2/unit.py:322-327`); `calculate_speed` adds them from python-sc2's own tables.
+- `Unit.abilities` leaves out abilities on cooldown or without their tech (`sc2/unit.py:598`).
+- ares has no Blink behavior (its ability tracker's Blink entry is commented out,
+  `ares-sc2/src/ares/managers/ability_tracker_manager.py:163`).
+- ares `AutoUseAOEAbility` casts Psionic Storm avoiding our own ground and air units
+  (`ares-sc2/src/ares/behaviors/combat/individual/auto_use_aoe_ability.py`).
+- ares's SpawnController morphs Archons from any two idle, ready High Templar not already morphing
+  (`ares-sc2/src/ares/behaviors/macro/spawn_controller.py`, `_handle_archon_morph`), so Archons
+  stay out of its mix and Citadel morphs them itself (§4.5.3).
+
+## M7 baseline
+
+## M7 acceptance evidence
