@@ -8,6 +8,7 @@ Protoss StarCraft II bot for the AI Arena ladder, built on the ares-sc2 bot temp
 - Check the zip: `unzip -l publish/*.zip | head` (`run.py` must be at the top level, not inside a folder)
 
 # Environment
+- The repo lives on GitHub (`TheGreenDragon888/citadel-sc2-bot`). It is developed and run in Claude Code cloud sessions (headless Linux SC2 4.10) or on my Windows 11 desktop (Ryzen 5 7600X, RTX 4070 SUPER, 32 GB RAM; Battle.net SC2, the latest version, with graphics). It is not on my homelab server. Any human-playable game has to run on the Windows desktop.
 - SC2 is at `~/StarCraftII` (found via `SC2PATH`). Maps are in `~/StarCraftII/Maps`; the folder name is case-sensitive.
 - Local games always use `realtime=False`.
 
