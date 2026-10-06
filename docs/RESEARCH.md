@@ -56,7 +56,7 @@
 **Why ares over plain python-sc2 (Verified features, Likely conclusion):**
 - Citadel's hardest parts are defensive micro, worker pulls, safe pathing, "should I fight?" decisions and build switching. ares already solves them.
 - ares ships a GitHub Actions workflow that builds the Linux ladder zip and can auto-upload it to AI Arena with an API token and bot ID.
-- **Main risk:** the ares template README warns that, because ares depends on Cython, the zip script "is necessary to execute… on a Linux environment in order to generate Linux binaries". Your Ubuntu VM or the GitHub workflow handles this.
+- **Main risk:** the ares template README warns that, because ares depends on Cython, the zip script "is necessary to execute… on a Linux environment in order to generate Linux binaries". A Claude Code cloud session (Linux) or the GitHub workflow handles this.
 
 ### 1.3 Local development
 
@@ -181,9 +181,11 @@
   - Write only to `./data`, and keep that folder small (under 5 MB).
   - Network access is forbidden.
 
-### 2.1 Linux setup, explained step by step (Ubuntu 24.04 VM on Proxmox)
+### 2.1 Linux setup, explained step by step (Ubuntu, e.g. a Claude Code cloud session)
 
-**Proxmox VM:** create a VM with Ubuntu Server 24.04, 4 vCPU, 8 GB RAM and a 60 GB disk. No GPU is needed because the Linux SC2 build is headless (it has no graphics). The commands below are typed in the VM's terminal, over SSH or the Proxmox console.
+**Where Citadel runs:** the repo lives on GitHub (`TheGreenDragon888/citadel-sc2-bot`) and is developed and tested in Claude Code cloud sessions, whose containers run Ubuntu. It is not hosted on the homelab server. The Linux SC2 build is headless (it has no graphics), so no GPU is needed. A cloud container starts fresh, so these steps are repeated in a new session. The commands below are typed in a Linux terminal.
+
+**Windows 11 desktop:** for anything with a game window (watching games, playing against Citadel), use Battle.net SC2 on the Windows desktop instead; see the Windows vs Linux notes at the end of this section.
 
 ```bash
 sudo apt update
@@ -217,7 +219,7 @@ ls ~/StarCraftII/Maps
 - `mkdir -p` creates the folder; `-p` means "don't complain if it exists, and create parent folders if needed".
 - `-d <dir>` tells unzip where to put the files.
 - `ls` lists the folder so you can confirm the `.SC2Map` files are directly inside `Maps`. The name is **case-sensitive** on Linux: `Maps` ≠ `maps`.
-- Download the current map zip from the AI Arena wiki Maps page or the active competition page in a browser, then copy it to the VM with `scp file user@vm-ip:~` from your PC. `scp` is "secure copy" over SSH.
+- The pool maps are already in the repo's `maps/` folder: `cp maps/*.SC2Map ~/StarCraftII/Maps/` copies them in (`cp` copies files; `*.SC2Map` matches every file ending in `.SC2Map`). For a new map pool, download the map zip from the AI Arena wiki Maps page or the active competition page.
 
 ```bash
 echo 'export SC2PATH="$HOME/StarCraftII"' >> ~/.bashrc
@@ -236,12 +238,11 @@ poetry --version
 - If `poetry` is "not found", add `export PATH="$HOME/.local/bin:$PATH"` to `~/.bashrc`. `PATH` is the list of folders the shell searches for commands.
 
 ```bash
-git clone --recursive https://github.com/<you>/citadel.git
-cd citadel
+git clone --recursive https://github.com/TheGreenDragon888/citadel-sc2-bot.git
+cd citadel-sc2-bot
 poetry install
 poetry run python run.py
 ```
-- Create `citadel` on GitHub from the ares starter/template with "Use this template".
 - `git clone` downloads it. `--recursive` also downloads the `ares-sc2` **submodule**, a repo nested inside yours; without it you get "does not seem to be a Python package". To fix an existing clone, run `git submodule update --init --recursive`.
 - `poetry install` creates a virtual environment (an isolated Python with its own packages), installs the dependencies and compiles the Cython code.
 - `poetry run <cmd>` runs a command inside that environment.
@@ -273,7 +274,7 @@ unzip -l publish/*.zip | head
 - Check that `run.py` appears at the top level, not under a folder. If you ever zip manually, run `cd <bot_folder> && zip -r ../Citadel.zip .`. `&&` runs the second command only if the first succeeded, `-r` recurses into subfolders, and `.` means "the contents of this folder", which keeps files at the zip root.
 
 **Windows vs Linux notes:**
-- Windows is fine for watching replays and quick graphical runs, but Battle.net installs the latest SC2, not 4.10, so behaviour can differ slightly.
+- The Windows 11 desktop (Ryzen 5 7600X, RTX 4070 SUPER, 32 GB RAM) is the machine for anything graphical: watching replays, quick graphical runs, and human-vs-bot games. Battle.net installs the latest SC2, not 4.10, so behaviour can differ slightly.
 - Never upload a zip built on Windows: its Cython binaries are `.pyd` files, and the ladder needs Linux `.so` files.
 - Under WSL, python-sc2 launches Windows SC2 by default.
 - Paths: Windows uses `C:\Program Files (x86)\StarCraft II\Maps`; Linux uses `~/StarCraftII/Maps` (case-sensitive).
@@ -497,7 +498,7 @@ class DefensePlan:
 
 | M | Days | Deliverable | Acceptance criteria |
 |---|---|---|---|
-| M0 | 1–2 | Environment: Ubuntu VM, SC2 4.10, maps, template bot runs; GitHub Actions builds the ladder zip; local-play-bootstrap runs the test match | `poetry run python run.py` finishes a game; the zip passes the root-layout check |
+| M0 | 1–2 | Environment: Linux, SC2 4.10, maps, template bot runs; GitHub Actions builds the ladder zip; local-play-bootstrap runs the test match | `poetry run python run.py` finishes a game; the zip passes the root-layout check |
 | M1 | 3–4 | Economy: Standard opener via the build runner, chrono, saturation, supply, 3-base expansion, basic Gateway army with attack-move at 170 supply | Beats Easy and Medium AI 10/10 on 3 maps; no supply block > 10 s before 6:00; 44 probes by 6:00 |
 | M2 | 5–7 | Defense: worker-rush pull, cannon-rush response, 12-pool plan, ramp wall, Batteries | ≥ 8/10 vs a local worker-rush bot, a cannon-rush bot (sharpy SharpCannons) and a 12-pool bot (sharpy BluntCheese or equivalent); beats Hard AI with `AIBuild.Rush` 9/10 |
 | M3 | 8–10 | Intel: sightings, hypotheses, scouting schedule (probe/Adept/Observer/Oracle/Hallucination), opener branching per race, `Tag:` chat of the detected threat | Correct threat logged in ≥ 80% of scripted-cheese test games; no scouting unit lost before 4:00 in ≥ 70% of games |
