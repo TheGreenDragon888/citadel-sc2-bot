@@ -1570,3 +1570,54 @@ machine's SC2 4.10; Citadel's `./data` kept from match to match):
   InitializationError at once because the cheese bots' generated `run.py` didn't import `sc2.main`
   (M6 findings); fixed in ce5c35b. The second stopped in match 1 when the Docker daemon, run as a
   time-limited background task, was stopped.
+
+**Ladder games** (`poetry run python scripts/ladder_watch.py`, checked 2026-10-06 07:52 UTC):
+the tested zip (md5 `07db06fe540df9dec7e1105fbc8ab491`) was uploaded by the user on 2026-10-04
+15:11 UTC with `bot_data_enabled=True` (checked through the API) and joined to competition 37,
+"Sc2 AI Arena 2026 Pre-Season 2". Round 76 had already started, so the first games came in round
+77 (from 2026-10-05 09:16 UTC) and the last three in round 78 (from 2026-10-06 04:47 UTC).
+Step times are Citadel's own `METRIC game` line from its match log; "AI Arena avg step" is the
+match participation's `avg_step_time`. Rows are in match-id order, as the watcher counts them.
+
+| # | Match | Round | Opponent (race) | Map | Citadel | Length | Startup | Step mean/p99/max (ms) | AI Arena avg step | Guard on | Errors / tracebacks |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 5026567 | 77 | Dodo (Z) | UltraloveAIE_v2 | Win | 12.8 min | 914ms | 7.4/33.6/129.0 | 10.4ms | 0 | 0 / 0 |
+| 2 | 5026791 | 77 | Crawler (Z) | LeyLinesAIE_v3 | Win | 11.0 min | 667ms | 5.08/20.8/88.6 | 7.4ms | 0 | 0 / 0 |
+| 3 | 5026860 | 77 | Goose (Z) | MagannathaAIE_v2 | Win | 11.9 min | 705ms | 6.29/27.3/102.2 | 11.2ms | 0 | 0 / 0 |
+| 4 | 5026888 | 77 | 27turtles (T) | TorchesAIE_v4 | Win | 9.0 min | 798ms | 2.56/10.0/84.8 | 7.2ms | 0 | 0 / 0 |
+| 5 | 5027187 | 77 | Beans_Toon (Z) | TorchesAIE_v4 | Win | 11.6 min | 721ms | 5.16/19.6/76.6 | 8.5ms | 0 | 0 / 0 |
+| - | 5027201 | 77 | BlayzReinforcementBot (T) | TorchesAIE_v4 | not played: opponent's process exited at startup (`InitializationError` for both, no Elo change) | - | - | - | - | - | - |
+| - | 5027214 | 77 | BlayzTerranBot (T) | PylonAIE_v4 | not played: opponent's process exited at startup (`InitializationError` for both, no Elo change) | - | - | - | - | - | - |
+| 6 | 5027244 | 77 | PlatinumPrototype (P) | LeyLinesAIE_v3 | Win | 11.9 min | 873ms | 5.01/22.7/74.7 | 9.8ms | 0 | 0 / 0 |
+| 7 | 5027269 | 77 | MetaScoreCritic1212VII (P) | UltraloveAIE_v2 | Loss | 16.2 min | 777ms | 6.27/24.3/112.8 | 9.2ms | 0 | 0 / 0 |
+| 8 | 5027331 | 77 | MewZerg (Z) | IncorporealAIE_v4 | Win | 8.3 min | 399ms | 2.58/10.4/104.7 | 5.5ms | 0 | 0 / 0 |
+| 9 | 5027332 | 77 | SharpRusty (T) | PylonAIE_v4 | Win | 13.6 min | 1095ms | 5.69/21.1/85.5 | 10.3ms | 0 | 0 / 0 |
+| 10 | 5027333 | 77 | BioBotGod_Y (T) | UltraloveAIE_v2 | Win | 11.3 min | 1038ms | 6.68/34.4/107.6 | 9.4ms | 0 | 0 / 0 |
+| 11 | 5027334 | 77 | Stinker (T) | IncorporealAIE_v4 | Win | 9.7 min | 440ms | 3.58/12.4/61.6 | 6.7ms | 0 | 0 / 0 |
+| 12 | 5027335 | 77 | Kira (Z) | PylonAIE_v4 | Win | 10.4 min | 1015ms | 4.77/17.0/72.4 | 7.8ms | 0 | 0 / 0 |
+| 13 | 5027336 | 77 | StarK234_25RLO_li (T) | UltraloveAIE_v2 | Loss | 16.1 min | 786ms | 11.8/54.0/143.2 | 12.7ms | 0 | 0 / 0 |
+| 14 | 5027337 | 77 | BioBotGod (T) | PersephoneAIE_v4 | Win | 11.1 min | 740ms | 5.45/25.7/91.5 | 8.7ms | 0 | 0 / 0 |
+| 15 | 5027338 | 77 | PerilousProtossBot (P) | TorchesAIE_v4 | Win | 13.7 min | 713ms | 4.93/21.6/87.7 | 8.3ms | 0 | 0 / 0 |
+| 16 | 5027339 | 77 | BioBotGod_Z (T) | MagannathaAIE_v2 | Win | 11.5 min | 629ms | 4.63/24.2/137.8 | 7.5ms | 0 | 0 / 0 |
+| 17 | 5027340 | 77 | Creepy_macro (Z) | IncorporealAIE_v4 | Win | 11.6 min | 586ms | 6.22/23.4/94.6 | 7.8ms | 0 | 0 / 0 |
+| 18 | 5028172 | 78 | Slenderina (P) | MagannathaAIE_v2 | Loss | 10.5 min | 645ms | 6.82/28.5/121.8 | 9.7ms | 0 | 0 / 0 |
+| 19 | 5028267 | 78 | SharpRusty (T) | TorchesAIE_v4 | Win | 16.0 min | 774ms | 8.21/33.1/144.5 | 11.9ms | 0 | 0 / 0 |
+| 20 | 5028432 | 78 | ANI_dev (T) | PersephoneAIE_v4 | Win | 10.1 min | 678ms | 5.1/20.6/71.0 | 8.5ms | 0 | 0 / 0 |
+
+- **M6 acceptance: PASS.** 20 of 20 played games with no Crash, TimeOut or InitializationError
+  from Citadel; all ended by the game rules: 17 wins, 3 losses (MetaScoreCritic1212VII P,
+  StarK234_25RLO_li T, Slenderina P).
+- Every game has its STARTUP line (399-1095 ms, §6 limit 5 s) and `METRIC game` line; 0 guarded
+  errors and 0 tracebacks in all 20 logs; p99 step 10.0-54.0 ms, max step 61.6-144.5 ms, so the
+  §6 200 ms step guard never switched on; AI Arena's average step 5.5-12.7 ms.
+- No cheese was pre-raised from memory (`pre=-` in all 20); SharpRusty was the only opponent met
+  twice (games 9 and 19). Bot data persists on the ladder: game 9 logged `MEMORY new opponent
+  7c8c7f2a-...` and `MEMORY saved ...: game 1 (Victory)`; game 19 loaded `1 games (1 won, 0 lost),
+  first aggression 347.9, recurring cheese none` and saved game 2.
+- Two matches never ran and aren't counted. In both the arena client log shows the opponent's
+  process (seat 1) exiting with status 1 about 1.5 s after launch, while Citadel (seat 2)
+  connected (`ConnectHandler ... accepted`, `ReadyHandler ... ready`), waited, and exited with
+  status 0 when the controller logged `Timeout while waiting for game to become ready`; AI Arena
+  scored `InitializationError` for both bots, result `none`, no Elo change. `ladder_watch.py`
+  lists such matches as `NOT PLAYED (not counted)`; a Citadel initialization failure would be a
+  `loss` and count as a failure.

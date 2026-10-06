@@ -13,7 +13,7 @@ findings and Citadel's choices are in `docs/VERIFY_NOTES.md`.
 | M3 | Done (see `docs/VERIFY_NOTES.md`, "M3 acceptance evidence") | per-matchup scout planner, §4.4 rows 3 and 15 |
 | M4 | Done (see `docs/VERIFY_NOTES.md`, "M4 acceptance evidence") | squads, `EngagementResult` gates, retreat hysteresis, end-game rules (`bot/army/`) |
 | M5 | Done (see `docs/VERIFY_NOTES.md`, "M5 acceptance evidence") | counterattack (§4.6), opponent memory (§5), telemetry to `./data/logs` (§8), step guard (§6) |
-| M6 | In progress: pre-upload checks done (see `docs/VERIFY_NOTES.md`, "M6 acceptance evidence"); tested zip uploaded with bot data on and joined to the ladder; the first 20 ladder games pending (10/20 played, all clean). M5 + M6 are on `main` | zip with the tested libraries, error guard, ladder-environment test, upload and watch scripts |
+| M6 | Done (see `docs/VERIFY_NOTES.md`, "M6 acceptance evidence"): 20/20 ladder games with no Citadel crash, timeout or initialization failure (17 wins, 3 losses), bot data on and persisting. M5 + M6 are on `main` | zip with the tested libraries, error guard, ladder-environment test, upload and watch scripts |
 
 ## Code map (M2-M6 additions)
 
@@ -152,7 +152,25 @@ Details and the per-game tables: `docs/VERIFY_NOTES.md`, "M5 acceptance evidence
 
 Details and the per-match table: `docs/VERIFY_NOTES.md`, "M6 acceptance evidence".
 
-## Finishing M6 (next session: upload, then the first 20 ladder games)
+## M6 done (2026-10-06)
+
+Every milestone in DESIGN.md §7 (M0-M6) is done; what comes next is the user's call. The M6 ladder
+check: `poetry run python scripts/ladder_watch.py` printed `M6 acceptance: 20/20 games so far, 0
+with a Citadel crash/timeout/initialization failure: PASS` at 07:52 UTC on 2026-10-06.
+
+| Check | Result |
+|---|---|
+| Upload | tested zip (md5 `07db06fe540df9dec7e1105fbc8ab491`, bot code 4d53ca5), uploaded by the user 2026-10-04 15:11 UTC, `bot_data_enabled=True` |
+| First 20 ladder games (competition 37, rounds 77-78) | 20/20 ended by the game rules, 0 Citadel crash/timeout/initialization failure; 17 wins, 3 losses |
+| Logs | STARTUP 399-1095 ms; `METRIC game` in 20/20; 0 guarded errors, 0 tracebacks; max step 61.6-144.5 ms, step guard never on |
+| Bot data | opponent memory persists between ladder games (SharpRusty: game 1 saved, loaded in its second game) |
+| Not counted | 2 matches that never ran (BlayzReinforcementBot, BlayzTerranBot): the opponent's process exited at startup, Citadel exited 0; `InitializationError` for both, no Elo change |
+
+The ladder keeps playing the uploaded zip; `ladder_watch.py` lists every game since the upload
+whenever someone wants to look. Before any later upload: rerun the M6 checks above (including
+`ladder_env_test.py`), rebuild on Python 3.12, and count 20 games from the new upload.
+
+## How M6 was finished (record)
 
 The environment variables `UPLOAD_API_TOKEN` (the AI Arena API token) and `UPLOAD_BOT_ID` (the
 bot's id on aiarena.net, created by the user as Citadel / Protoss / Python) are set in the cloud
@@ -226,7 +244,7 @@ What works: `poetry env remove --all`, then `/usr/bin/python3.12 -m venv
    checks above (including `ladder_env_test.py`: start `dockerd` as a background task with the
    2-hour limit; the images are about 11 GB), upload again, and count 20 games from the new upload
    (the plan's rule).
-6. **When M6 passes:** fill in the ladder table in VERIFY_NOTES "M6 acceptance evidence", update
+6. **When M6 passes** (done 2026-10-06, see "M6 done" above): fill in the ladder table in VERIFY_NOTES "M6 acceptance evidence", update
    this file, and bring `main` up to date with those doc changes (M5 + M6 code is already on
    `main`, see above).
 
