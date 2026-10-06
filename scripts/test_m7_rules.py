@@ -18,6 +18,19 @@ sys.path.insert(0, str(ROOT))
 import run  # noqa: E402,F401  (puts ares-sc2 on sys.path)
 
 from bot.army.engagement import FightInputs, composition_text  # noqa: E402
+from bot.constants import (  # noqa: E402
+    MAIN_STALE_FROM_S,
+    MAIN_STALE_S,
+    PROXY_NATURAL_WAIT_UNTIL_S,
+)
+from bot.intel.detectors import (  # noqa: E402
+    PROXY_EXPANSION,
+    PROXY_MISSING,
+    PROXY_PRODUCTION,
+    PROXY_WAIT,
+    proxy_production_check,
+)
+from bot.intel.scout_planner import main_rescout_due  # noqa: E402
 
 # (name, function, args, kwargs, expected)
 CASES: list[tuple[str, Callable, tuple, dict, Any]] = []
@@ -53,6 +66,29 @@ case(
     lambda: FightInputs("22 STALKER", 3850.0, "8 TEMPEST", 3400.0).text(),
     expected="vs 8 TEMPEST (3400) | ours 22 STALKER (3850)",
 )
+
+# -- B6: expansion-first proxy check (§4.4 rows 7/10) ----------------------------------------------
+case("proxy: production in the main", proxy_production_check, True, False, False, 90.0, expected=PROXY_PRODUCTION)
+case("proxy: production in the main, natural irrelevant", proxy_production_check, True, True, True, 90.0, expected=PROXY_PRODUCTION)
+case("proxy: none, townhall at their natural (Nexus first)", proxy_production_check, False, True, True, 90.0, expected=PROXY_EXPANSION)
+case("proxy: none, townhall seen before the natural was looked at", proxy_production_check, False, True, False, 90.0, expected=PROXY_EXPANSION)
+case("proxy: none, natural not looked at yet: wait", proxy_production_check, False, False, False, 95.0, expected=PROXY_WAIT)
+case(
+    "proxy: none, natural looked at and empty: missing",
+    proxy_production_check, False, False, True, 95.0, expected=PROXY_MISSING,
+)
+case(
+    "proxy: none, natural never looked at by the deadline: missing",
+    proxy_production_check, False, False, False, PROXY_NATURAL_WAIT_UNTIL_S, expected=PROXY_MISSING,
+)
+
+# -- B4: the main re-scout gate (§5) ---------------------------------------------------------------
+T = MAIN_STALE_FROM_S + 300.0
+case("rescout: before MAIN_STALE_FROM_S never", main_rescout_due, MAIN_STALE_FROM_S - 1, None, -MAIN_STALE_S, expected=False)
+case("rescout: main never seen, none sent", main_rescout_due, T, None, -MAIN_STALE_S, expected=True)
+case("rescout: main seen recently", main_rescout_due, T, T - MAIN_STALE_S + 1, -MAIN_STALE_S, expected=False)
+case("rescout: main stale, one sent recently", main_rescout_due, T, T - MAIN_STALE_S - 1, T - 10, expected=False)
+case("rescout: main stale, last one long ago", main_rescout_due, T, T - MAIN_STALE_S - 1, T - MAIN_STALE_S, expected=True)
 
 
 def main() -> int:

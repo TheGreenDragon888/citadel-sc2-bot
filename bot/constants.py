@@ -826,3 +826,8 @@ CAPITAL_AIR_TYPES: frozenset[UnitTypeId] = frozenset(
         UnitTypeId.BROODLORD, UnitTypeId.BROODLORDCOCOON,
     }
 )
+# M7 B6 (§4.4 rows 7/10, user decision): the missing-Barracks/Gateway test counts their natural as
+# looked at once it was in vision at or after PROXY_NATURAL_SEEN_FROM_S (an expansion-first townhall
+# is down by ~1:05-1:20 in the baseline replays), and waits for that until PROXY_NATURAL_WAIT_UNTIL_S
+PROXY_NATURAL_SEEN_FROM_S: float = 90.0
+PROXY_NATURAL_WAIT_UNTIL_S: float = 150.0
