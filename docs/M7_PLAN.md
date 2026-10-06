@@ -17,7 +17,9 @@
 | D7 | Twilight order: Blink first vs P and T; Charge first vs Z, then Blink. |
 | D9 | CAPITAL_AIR is detected for every race, **and M7 responds to it for every race** (vs P: Tempest/Carrier/Mothership; vs T: Battlecruiser; vs Z: Brood Lord). |
 | D10 | **High Templar and Archons are allowed.** Psionic Storm and Archon splash are core vs Z. **Archons are not an anti-air tool**: the §4.5.1 air switch only raises the Stalker share (this replaces the spec's "add Archons"). **Small Archon shares:** vs T while the enemy army is mostly bio; vs P while it's Zealot-heavy. |
-| D11 | M7's targets against the built-in AI's air builds are proposed after the baseline batches. |
+| D11 | **Targets (user accepted, 2026-10-06), on the baseline seeds:** Protoss Air VeryHard ≥ 7/10 (baseline 2/10, seed 7000); Terran Air VeryHard ≥ 9/10 with no loss to Battlecruisers (baseline 9/10, seed 7100); Zerg Air VeryHard ≥ 9/10 (baseline 10/10, seed 7200). CheatInsane Air vs Terran and Zerg (seeds 7300/7400) exercise Battlecruisers and Brood Lords; their targets are set after their baseline. |
+| D12 | **B6 (user accepted):** the §4.4 rows 7/10 missing-production test waits for the enemy natural to be seen and doesn't count an expansion-first opening (it raised a false PROXY in 7 of the 8 baseline losses vs Protoss Air). |
+| D13 | **E0 gets a mass-Void-Ray case (user accepted).** Whether Void Ray masses also trigger the Void Ray/Tempest response is decided with those numbers. Void Rays were our top killer in 7 of 10 baseline games vs Protoss Air. |
 
 **Defaults (accepted by the user):**
 - **R1. High Templar and Storm vs Zerg only** in M7. Against Terran, Storm is strong against bio, but it's extra scope and Colossi already cover it. Archons follow §4.5.1's mixes:
@@ -128,14 +130,16 @@ Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your rev
 | B4 | `scout_planner.py:step` (l.396-397) | Call `_rescouts()` before `_expansion_checks()`. New helper `_main_rescout_due()` (the condition at l.457-461). While it's true, `_expansion_checks` doesn't take an Observer (it uses a probe, or waits). |
 | B4 | `logger.py` | Count main rescouts in the game record. |
 | B5 | `constants.py:HALLUCINATION_AT_S` | `{"Terran": 330.0}`; update the `scout_planner.py` docstring (l.18-25). |
+| B6 | `detectors.py:_proxy` (l.433-486) | For P and T, when the main has no Barracks/Gateway: if a townhall has been seen at their natural (`natural_townhall_seen_at`), drop that reason and log `SCOUT proxy check: expansion first`. If the natural hasn't been in vision since `PROXY_NATURAL_FROM_S` (`natural_seen_at`), leave `proxy_checked` False and decide on a later tick, at the latest at `PROXY_NATURAL_WAIT_UNTIL_S` (TUNE). This mirrors the Forge-first rule (`FORGE_FIRST_UNTIL_S`). The worker-count reasons and the far-production detector are unchanged. |
 
 - **Tests:**
-  - `test_m7_rules.py` gains `_main_rescout_due` cases (pure version).
+  - `test_m7_rules.py` gains `_main_rescout_due` cases (pure version) and the B6 decision as a pure function (main production, natural townhall seen, natural in vision, time → raise / skip / wait).
   - `test_m3_checks.py`, `test_attack_decision.py` and `test_threat_flags.py` unchanged and passing.
   - `scripts/test_outranged.py` (new, staged, case `idle_hold`): Citadel vs a scripted Protoss `StagedEnemy` (as in `test_counterattack.py`); a debug-spawned Tempest attacks our hold point.
 - **Acceptance:**
   - Air batches on the same seeds: `reinforce_after_retreat` = 0, `lost_far` for HOLD lower than baseline.
   - Main rescouts at least every ~90 s from 6:00 while an Observer is free.
+  - B6: no PROXY flag in Protoss Air games where the enemy opened Nexus first (the baseline's `PROXY@01:30` games), and the cheese batches still raise PROXY vs `proxy_rax` (correct flag 40/40).
   - Regressions at their recorded levels: M1 Hard × 10; M2/M3 cheese × 10 each (≥ 8/10, flags 40/40, no scout lost before 4:00); M4 VeryHard × 10 per race (≥ 7 each).
 - **Ladder:** after M6 passes, Phases 0 + 1 are the first M7 upload: zip on Python 3.12, `ladder_env_test.py`, upload, `ladder_watch.py`.
 
@@ -209,7 +213,7 @@ Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your rev
 
 | Item | Files and functions | Change |
 |---|---|---|
-| E0 | `scripts/test_air_counters.py` (new, staged, dev-only) | Scripted enemy (as `test_counterattack.py:StagedEnemy`) with kiting Tempests (P), Battlecruisers (T), or Brood Lords + Corruptors (Z). Our side gets the same resource value (game-data costs) of each candidate: Void Rays, Tempests, Stalkers, Blink Stalkers, and mixes (no Archons: they aren't an anti-air tool, D10). 5 runs per case. Result table → VERIFY_NOTES; it sets the E3 shares. Can run as early as Phase 3 (it needs K2 for the Blink case). |
+| E0 | `scripts/test_air_counters.py` (new, staged, dev-only) | Scripted enemy (as `test_counterattack.py:StagedEnemy`) with kiting Tempests (P), Battlecruisers (T), Brood Lords + Corruptors (Z), or a mass of Void Rays (P, D13). Our side gets the same resource value (game-data costs) of each candidate: Void Rays, Tempests, Stalkers, Blink Stalkers, and mixes (no Archons: they aren't an anti-air tool, D10). 5 runs per case. Result table → VERIFY_NOTES; it sets the E3 shares. Can run as early as Phase 3 (it needs K2 for the Blink case). |
 | E1 | `constants.py:MAX_BASES` → `bases_cap()` in `build_executor.py:bases_target` | 3, or 4 when minerals ≥ `FOURTH_BASE_BANK` and gas-starved for `FOURTH_BASE_GAS_STARVED_S`, 3 bases saturated, and `DefensePlan.allow_expand`. `economy.py:132` uses it. `PROBE_TARGET` follows the cap. |
 | E1 | `production.py` (l.209-212) | Gas-starved with minerals ≥ `MINERAL_FLOAT_BANK`: Zealots may exceed their share (`freeflow`, capped by supply). |
 | E2 | `bot/intel/enemy_mix.py` (from K3) | `EnemyMix` gains `air_share` (by supply, §4.5.1) and `capital_value` (by value, for `CAPITAL_AIR_MIN_VALUE`). Fading by `CAPITAL_AIR_FRESH_S`; explicit capital list (Carriers have no weapons in game data). |
@@ -229,7 +233,7 @@ Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your rev
   - Offline: `enemy_mix.measure` air cases (Carrier counted, fading, air share); `test_threat_flags.py` CAPITAL_AIR expiry and AIR_HARASS satisfied; `bases_cap` cases; mix-selection hysteresis.
   - Staged: E0.
 - **Acceptance (M7's):**
-  - The three Air batches (same seeds) meet D11's targets.
+  - The three VeryHard Air batches (same seeds) meet D11's targets: Protoss ≥ 7/10, Terran ≥ 9/10 with no loss to Battlecruisers, Zerg ≥ 9/10. The CheatInsane Terran/Zerg Air batches meet the targets set from their baseline.
   - Unspent minerals at 10:00 well below the postmortem's 2,670.
   - All regressions hold: M1; M2/M3; M4 (≥ 7 each); M5 7/7.
   - No crash or time-out in the first 20 ladder games after the final upload.

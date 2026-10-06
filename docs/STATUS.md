@@ -14,7 +14,7 @@ findings and Citadel's choices are in `docs/VERIFY_NOTES.md`.
 | M4 | Done (see `docs/VERIFY_NOTES.md`, "M4 acceptance evidence") | squads, `EngagementResult` gates, retreat hysteresis, end-game rules (`bot/army/`) |
 | M5 | Done (see `docs/VERIFY_NOTES.md`, "M5 acceptance evidence") | counterattack (§4.6), opponent memory (§5), telemetry to `./data/logs` (§8), step guard (§6) |
 | M6 | In progress: pre-upload checks done (see `docs/VERIFY_NOTES.md`, "M6 acceptance evidence"); tested zip uploaded with bot data on and joined to the ladder; the first 20 ladder games pending (10/20 played, all clean). M5 + M6 are on `main` | zip with the tested libraries, error guard, ladder-environment test, upload and watch scripts |
-| M7 | Started 2026-10-06 (user decision, after the ladder loss in `docs/postmortems/2026-10-05-MetaScoreCritic1212VII.md`): kickoff DESIGN.md edits written, **waiting for the user's review**; no bot code changed yet. Nothing is uploaded until M6 passes | `docs/M7_PLAN.md` (steps, files, tests, acceptance); `docs/postmortems/` (evidence and decisions) |
+| M7 | Started 2026-10-06 (user decision, after the ladder loss in `docs/postmortems/2026-10-05-MetaScoreCritic1212VII.md`): kickoff DESIGN.md edits written (plus B6, the expansion-first proxy exception), **waiting for the user's review**; no bot code changed yet. Baseline done (VERIFY_NOTES "M7 baseline": VeryHard Air Protoss 2/10, Terran 9/10, Zerg 10/10); targets accepted (M7_PLAN D11); CheatInsane Air baselines vs Terran and Zerg running. Nothing is uploaded until M6 passes | `docs/M7_PLAN.md` (steps, files, tests, acceptance); `docs/postmortems/` (evidence and decisions) |
 
 ## Code map (M2-M6 additions)
 
