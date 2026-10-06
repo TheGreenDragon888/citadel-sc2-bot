@@ -1593,4 +1593,81 @@ API checks and Citadel's choices for M7 (`docs/M7_PLAN.md`). Checked before the 
 
 ## M7 baseline
 
+Bot code `8036973` (M6, unchanged by the M7 kickoff), run on 2026-10-06 in the cloud container:
+- SC2 Linux 4.10 (Base75689) from Blizzard's package (`docs/RESEARCH.md` commands).
+- The 7 pool maps.
+- Poetry on Python 3.12 (STATUS workaround). The `ares-sc2` submodule had to be checked out first: `git submodule update --init ares-sc2`.
+- Offline tests before the games: `test_attack_decision` 16/16, `test_threat_flags` 20/20, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38.
+
+Commands (the three ran in parallel; replays in `replays/m7-baseline-<race>/`, not in git):
+
+```bash
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race Protoss --build Air --map all --total 10 --game-seed 7000 --replays replays/m7-baseline-protoss
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race Terran  --build Air --map all --total 10 --game-seed 7100 --replays replays/m7-baseline-terran
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race Zerg    --build Air --map all --total 10 --game-seed 7200 --replays replays/m7-baseline-zerg
+```
+
+| Batch | Wins | Crashes / errors | probes@6 (min / median / max) |
+|---|---|---|---|
+| Protoss Air | **2/10** | 0 / 0 | 40 / 42 / 59 |
+| Terran Air | 9/10 | 0 / 0 | 54 / 57 / 60 |
+| Zerg Air | 10/10 | 0 / 0 | 56 / 64 / 66 |
+
+The "enemy capital ships" and "top killers" columns come from the saved replays' tracker events. They were read with Blizzard's s2protocol in a scratch environment; it is not a project dependency.
+
+**Protoss Air, VeryHard × 10, `--game-seed 7000`**
+
+| # | map | result | length | probes@6 | bases@6 | value lost/killed | flags (first raise) | enemy capital ships made (died) | top killers of our army |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Magannatha_v2 | Defeat | 15:37 | 45 | 2 | 9.7k/4.4k | PROXY@01:30 | Tempest 1 (0), Carrier 1 (0) | VoidRay 34, Stalker 14, Sentry 3 (of 55) |
+| 2 | Ultralove_v2 | Defeat | 12:56 | 40 | 1 | 9.4k/2.1k | PROXY@01:30,CANNON_RUSH@01:58 | Tempest 4 (0) | VoidRay 31, Stalker 15, Phoenix 3 (of 51) |
+| 3 | LeyLines_v3 | Defeat | 13:54 | 41 | 1 | 11.3k/3.2k | PROXY@01:30,CANNON_RUSH@01:56 | Tempest 6 (0), Carrier 5 (0) | Stalker 25, VoidRay 14, Tempest 10 (of 57) |
+| 4 | Torches_v4 | Victory | 11:40 | 56 | 2 | 4.5k/5.9k | - | - | VoidRay 14, Stalker 5, Probe 1 (of 20) |
+| 5 | Pylon_v4 | Victory | 10:53 | 59 | 3 | 1.6k/7.7k | - | Tempest 1 (1), Carrier 1 (1) | Stalker 4, VoidRay 2, Interceptor 1 (of 7) |
+| 6 | Persephone_v4 | Defeat | 15:24 | 40 | 1 | 8.8k/3.0k | PROXY@01:30 | Tempest 6 (0), Carrier 6 (0) | VoidRay 19, Tempest 14, Interceptor 8 (of 47) |
+| 7 | Incorporeal_v4 | Defeat | 14:49 | 43 | 1 | 19.3k/6.9k | PROXY@01:30 | Tempest 4 (0), Carrier 4 (0) | VoidRay 30, Interceptor 24, Tempest 24 (of 99) |
+| 8 | Magannatha_v2 | Defeat | 15:01 | 41 | 1 | 11.0k/3.4k | PROXY@01:30 | Tempest 4 (0) | VoidRay 39, Stalker 5, Tempest 5 (of 56) |
+| 9 | Ultralove_v2 | Defeat | 18:41 | 46 | 2 | 29.6k/12.7k | ONE_BASE_ALLIN@02:45 | Tempest 3 (0) | VoidRay 97, Immortal 23, Tempest 12 (of 144) |
+| 10 | LeyLines_v3 | Defeat | 14:51 | 40 | 1 | 16.6k/5.4k | PROXY@01:30 | Tempest 4 (0), Carrier 3 (0) | Interceptor 31, VoidRay 22, Tempest 15 (of 86) |
+
+**Terran Air, VeryHard × 10, `--game-seed 7100`**
+
+| # | map | result | length | probes@6 | bases@6 | value lost/killed | flags (first raise) | enemy capital ships made (died) | top killers of our army |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Magannatha_v2 | Victory | 10:31 | 59 | 2 | 1.9k/5.8k | - | Battlecruiser 2 (2) | VikingFighter 4, Battlecruiser 3, Sentry 3 (of 14) |
+| 2 | Ultralove_v2 | Defeat | 22:11 | 56 | 2 | 21.8k/10.5k | PROXY@01:30 | Battlecruiser 11 (1) | Battlecruiser 69, Marauder 18, VikingAssault 16 (of 125) |
+| 3 | LeyLines_v3 | Victory | 11:18 | 56 | 2 | 2.9k/7.0k | PROXY@01:30 | Battlecruiser 1 (1) | Marauder 7, VikingAssault 6, AutoTurret 3 (of 22) |
+| 4 | Torches_v4 | Victory | 11:35 | 54 | 2 | 3.3k/8.2k | PROXY@01:30 | Battlecruiser 3 (3) | Battlecruiser 14, Marauder 6, VikingAssault 4 (of 27) |
+| 5 | Pylon_v4 | Victory | 10:05 | 59 | 2 | 2.2k/6.2k | - | Battlecruiser 1 (1) | Battlecruiser 4, VikingFighter 2, Sentry 2 (of 14) |
+| 6 | Persephone_v4 | Victory | 12:57 | 55 | 2 | 5.5k/9.1k | PROXY@01:30 | Battlecruiser 4 (4) | Marauder 10, Battlecruiser 9, Marine 3 (of 32) |
+| 7 | Incorporeal_v4 | Victory | 10:53 | 59 | 2 | 2.8k/4.3k | ONE_BASE_ALLIN@02:45 | Battlecruiser 2 (2) | Battlecruiser 6, VikingAssault 4, VikingFighter 4 (of 16) |
+| 8 | Magannatha_v2 | Victory | 12:10 | 60 | 2 | 3.3k/6.0k | ONE_BASE_ALLIN@02:45 | Battlecruiser 2 (2) | Banshee 7, Battlecruiser 4, Marine 3 (of 20) |
+| 9 | Ultralove_v2 | Victory | 10:29 | 58 | 2 | 2.4k/5.0k | ONE_BASE_ALLIN@02:45 | - | VikingAssault 6, Marauder 5, VikingFighter 1 (of 13) |
+| 10 | LeyLines_v3 | Victory | 14:18 | 55 | 2 | 10.0k/11.7k | PROXY@01:30 | Battlecruiser 6 (6) | Battlecruiser 31, Marauder 14, VikingFighter 6 (of 59) |
+
+**Zerg Air, VeryHard × 10, `--game-seed 7200`**
+
+| # | map | result | length | probes@6 | bases@6 | value lost/killed | flags (first raise) | enemy capital ships made (died) | top killers of our army |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Magannatha_v2 | Victory | 09:55 | 63 | 3 | 1.7k/5.6k | - | - | Roach 5, Hydralisk 4, Mutalisk 4 (of 14) |
+| 2 | Ultralove_v2 | Victory | 10:20 | 65 | 3 | 1.5k/4.5k | - | - | Hydralisk 6, SpineCrawler 2, Roach 2 (of 13) |
+| 3 | LeyLines_v3 | Victory | 10:01 | 65 | 3 | 1.0k/5.0k | - | - | Roach 4, Hydralisk 4 (of 8) |
+| 4 | Torches_v4 | Victory | 10:40 | 58 | 3 | 1.3k/4.1k | POOL_12@01:31 | - | Roach 6, Hydralisk 3, Zergling 1 (of 10) |
+| 5 | Pylon_v4 | Victory | 10:25 | 57 | 3 | 1.0k/4.0k | POOL_12@01:25 | - | Roach 4, ? 1, Zergling 1 (of 8) |
+| 6 | Persephone_v4 | Victory | 10:25 | 56 | 3 | 1.4k/4.9k | POOL_12@01:30 | - | Mutalisk 3, Hydralisk 3, Roach 1 (of 8) |
+| 7 | Incorporeal_v4 | Victory | 09:59 | 65 | 3 | 0.7k/2.9k | - | - | Roach 2, Queen 1, SpineCrawler 1 (of 4) |
+| 8 | Magannatha_v2 | Victory | 10:07 | 57 | 3 | 1.2k/4.8k | POOL_12@01:30 | - | Roach 5, Hydralisk 3, Mutalisk 2 (of 10) |
+| 9 | Ultralove_v2 | Victory | 09:49 | 65 | 3 | 1.2k/5.3k | - | - | Hydralisk 4, Roach 3, Corruptor 1 (of 10) |
+| 10 | LeyLines_v3 | Victory | 09:55 | 66 | 3 | 1.0k/4.9k | - | - | Hydralisk 6, Zergling 1, Broodling 1 (of 8) |
+
+**Findings:**
+- **The Air build exposes what the M4/M5 VeryHard batches missed.** Those ran with `--build RandomBuild` and won 10/10 vs Protoss; the Protoss Air build wins 8/10 against the same code. The losses follow the ladder loss: our army value lost was 2.6-4.5× what it killed.
+- **Void Rays were our top killer in 8 of the 10 Protoss games.** Tempests and Carriers were built in 8 of the 10, and only one of them ever died (game 5, a win), the ladder pattern again.
+- **The PROXY flag (§4.4 row 10, "no Gateway by 1:30") was false in 7 of the 8 Protoss losses** and absent from both wins. This build opens Nexus first (~1:04) and puts down its first Gateway at 1:18-1:34 (Magannatha 1:33, LeyLines 1:34, Ultralove 1:18, Pylon 1:19; Torches 0:41, no flag), so at the 1:30 check its main often has none yet.
+  - The flag ends our opener and holds our natural, so the PROXY games had 40-45 probes at 6:00 and 1-2 bases, against 56-59 probes in the two wins.
+  - The flag expired by its phase rule at 5:30 every time ("no proxy structure known").
+  - It also fired in 5 of 10 Terran games, which were won.
+- **Terran's one loss was to Battlecruisers:** 11 made, 1 killed, and they killed 69 of our 125 units. In the 8 other games with Battlecruisers, every one died (1-6 per game).
+- **The VeryHard Zerg Air build never reached capital ships:** no Brood Lords, and every game was over by 10:40. So this batch doesn't test the Zerg capital-air response.
+
 ## M7 acceptance evidence
