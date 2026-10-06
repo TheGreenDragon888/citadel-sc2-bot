@@ -1661,8 +1661,8 @@ The "enemy capital ships" and "top killers" columns come from the saved replays'
 | 10 | LeyLines_v3 | Victory | 09:55 | 66 | 3 | 1.0k/4.9k | - | - | Hydralisk 6, Zergling 1, Broodling 1 (of 8) |
 
 **Findings:**
-- **The Air build exposes what the M4/M5 VeryHard batches missed.** Those ran with `--build RandomBuild` and won 10/10 vs Protoss; the Protoss Air build wins 8/10 against the same code. The losses follow the ladder loss: our army value lost was 2.6-4.5× what it killed.
-- **Void Rays were our top killer in 8 of the 10 Protoss games.** Tempests and Carriers were built in 8 of the 10, and only one of them ever died (game 5, a win), the ladder pattern again.
+- **The Air build exposes what the M4/M5 VeryHard batches missed.** Those ran with `--build RandomBuild` and won 10/10 vs Protoss; the Protoss Air build wins 8/10 against the same code. The losses follow the ladder loss: our army value lost was 2.2-4.5× what it killed.
+- **Void Rays were our top killer in 7 of the 10 Protoss games** (Stalkers in 2, Carrier interceptors in 1). Tempests and/or Carriers were built in 9 of the 10, and they died only in game 5 (one Tempest, one Carrier; a win), the ladder pattern again.
 - **The PROXY flag (§4.4 row 10, "no Gateway by 1:30") was false in 7 of the 8 Protoss losses** and absent from both wins. This build opens Nexus first (~1:04) and puts down its first Gateway at 1:18-1:34 (Magannatha 1:33, LeyLines 1:34, Ultralove 1:18, Pylon 1:19; Torches 0:41, no flag), so at the 1:30 check its main often has none yet.
   - The flag ends our opener and holds our natural, so the PROXY games had 40-45 probes at 6:00 and 1-2 bases, against 56-59 probes in the two wins.
   - The flag expired by its phase rule at 5:30 every time ("no proxy structure known").
