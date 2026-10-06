@@ -568,6 +568,13 @@ empty and 0) sets `supply_cap` from `food_cap` (`sc2/bot_ai_internal.py:709`). E
   (~0.71 s).
 - In realtime ares only refreshes units every 4 loops but `on_step` still runs every loop
   (`ares-sc2/src/ares/main.py:187`); local games use `realtime=False`.
+- Human vs Citadel (`realtime=True`, 2026-10-06): the bot's first observation came at loop 2, and
+  ares's skip (`last_game_loop + 4 > loop and loop != 0`, `last_game_loop` starts at -1,
+  `ares-sc2/src/ares/main.py:127`, `:187`) dropped it, so python-sc2 never filled the unit lists:
+  `RULESET probe ... game_loop=2 workers=0`, then `start_location` None and a crash in
+  `main_base_ramp` (`bot/defense/wall_fallback.py:74`). Reproduced headless with python-sc2's
+  `Human` player. A subclass that sets `last_game_loop = -5` in `__init__` lets the first
+  observation in (`workers=12`, a 4-minute headless game with `errors: {}`).
 
 **Contradicts the spec**
 - None: §3 step 1 is confirmed (managers, including unit memory, update before Citadel's code).
