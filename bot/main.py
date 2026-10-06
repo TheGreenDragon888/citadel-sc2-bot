@@ -387,7 +387,7 @@ class CitadelBot(AresBot):
                 result = game_result.name if isinstance(game_result, Result) else str(game_result)
                 record = self.telemetry.game_record(
                     result, self.flags, self.army, self.opener, self.ruleset, self.wall_ok, self.memory, self.preraised,
-                    self.errors,
+                    self.errors, self.detectors,
                 )
                 self.telemetry.write_game_record(record)  # §8: ./data/logs
             except Exception:  # noqa: BLE001 - never crash at the end of a game

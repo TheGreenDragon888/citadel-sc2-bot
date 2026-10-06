@@ -18,6 +18,9 @@ including the §5 phase rules.
 | scout_killed | UNKNOWN_AGGRO | STRUCTURE | §4.4 row 15: our main scouting probe killed before reaching the enemy main (scout_planner.py calls `scout_killed`), unless an active rush flag already explains it. Expires once the enemy main is scouted, or by UNKNOWN_AGGRO_PHASE_END_S (M3) |
 
 "Missing structure" flags have no tags or positions, so they expire only by their phase rule.
+
+M7 (§8): `first_seen` records the first sighting of each enemy structure type and each capital
+ship type (CAPITAL_AIR_TYPES), logged as `INTEL first seen ...` and kept for the game record.
 """
 
 import math
@@ -32,6 +35,7 @@ from sc2.unit import Unit
 
 from bot.constants import (
     BRIDGE_HOME_RADIUS,
+    CAPITAL_AIR_TYPES,
     CANNON_PROBE_FROM_S,
     CANNON_PROBE_LINGER_S,
     CANNON_PROBE_UNTIL_S,
@@ -143,6 +147,8 @@ class Detectors:
         # enemy workers seen near our bases during a worker rush: never cannon-rush probes (M3)
         self._rush_worker_tags: set[int] = set()
         self.unknown_aggro_at: Optional[float] = None
+        # M7 §8: enemy structure / capital ship type name -> game second it was first seen
+        self.first_seen: dict[str, float] = {}
 
     # -- helpers -------------------------------------------------------------------------------
 
@@ -192,12 +198,29 @@ class Detectors:
 
     def update(self) -> None:
         self._track_scouting()
+        self._track_first_seen()
         self._worker_rush()
         self._cannon_rush()
         self._forge_first()
         self._early_pool()
         self._proxy()
         self._no_natural()
+
+    def _track_first_seen(self) -> None:
+        """M7 §8: the first sighting of each enemy structure type and each capital ship type
+        (snapshots and ares's ghosts count: they were seen to be there)."""
+        bot = self.bot
+        for unit in bot.enemy_structures:
+            self._first_sight(unit)
+        for unit in bot.enemy_units:
+            if unit.type_id in CAPITAL_AIR_TYPES:
+                self._first_sight(unit)
+
+    def _first_sight(self, unit: Unit) -> None:
+        name = unit.type_id.name
+        if name not in self.first_seen:
+            self.first_seen[name] = self.bot.time
+            logger.info(f"INTEL first seen {name} at {self.bot.time_formatted} {unit.position.rounded}")
 
     def _track_scouting(self) -> None:
         bot = self.bot

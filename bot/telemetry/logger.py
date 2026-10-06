@@ -293,6 +293,7 @@ class Telemetry:
     def game_record(
         self, result: str, flags=None, army=None, opener: str = "", ruleset: Optional[str] = None,
         wall_ok: Optional[bool] = None, memory=None, preraised: Optional[list[str]] = None, errors=None,
+        detectors=None,
     ) -> dict[str, Any]:
         """Every §8 metric for this game as one JSON-ready dict."""
         bot = self.bot
@@ -359,6 +360,11 @@ class Telemetry:
             # M6 error guard: errors caught per part, and each part's first one ("m:ss Type: message")
             "errors": dict(errors.counts) if errors is not None else {},
             "errors_first": dict(errors.first) if errors is not None else {},
+            # M7 §8: enemy structure and capital ship types, first seen (game seconds)
+            "tech_seen": capped([
+                {"type": name, "t": round(t, 1)}
+                for name, t in sorted((detectors.first_seen if detectors is not None else {}).items(), key=lambda kv: kv[1])
+            ]),
         }
 
     def write_game_record(self, record: dict[str, Any]) -> bool:

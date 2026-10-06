@@ -36,7 +36,10 @@ TOP: dict[str, tuple] = {
     "startup_ms": (int, float, type(None)), "step_ms": (dict,), "preraised": (list,),
 }
 # added in a later record version: key -> (first version with it, type(s))
-SINCE: dict[str, tuple[int, tuple]] = {"errors": (2, (dict,)), "errors_first": (2, (dict,))}
+SINCE: dict[str, tuple[int, tuple]] = {
+    "errors": (2, (dict,)), "errors_first": (2, (dict,)),
+    "tech_seen": (3, (list,)),  # M7
+}
 # entries' keys added in a later record version: list name -> (first version, keys) (M7: version 3)
 ENTRY_SINCE: dict[str, tuple[int, tuple[str, ...]]] = {"engage": (3, ("own_value", "enemy_value"))}
 NESTED: dict[str, tuple[str, ...]] = {
