@@ -3,7 +3,7 @@
 > **Where M7 is executed from:** `docs/M7_PLAN.md`, which has the file-level steps and the final decisions:
 > - D7 and D11 accepted;
 > - D9: respond to capital air for every race in M7;
-> - D10: High Templar and Archons allowed (Storm and Archon splash for PvZ; the air switch keeps the spec's Stalkers + Archons).
+> - D10: High Templar and Archons allowed (Storm and Archon splash for PvZ; small Archon shares vs Terran bio and vs Zealot-heavy Protoss; Archons are not used as anti-air, so the air switch only raises Stalkers).
 >
 > Where this file differs (the D9 "respond vs Protoss only" recommendation, D10's Void Ray/Phoenix suggestion), `docs/M7_PLAN.md` wins.
 

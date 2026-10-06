@@ -16,15 +16,17 @@
 | D6 | The milestone is M7. |
 | D7 | Twilight order: Blink first vs P and T; Charge first vs Z, then Blink. |
 | D9 | CAPITAL_AIR is detected for every race, **and M7 responds to it for every race** (vs P: Tempest/Carrier/Mothership; vs T: Battlecruiser; vs Z: Brood Lord). |
-| D10 | **High Templar and Archons are allowed.** Psionic Storm and Archon splash are core vs Z. The §4.5.1 air switch keeps the spec's wording (more Stalkers plus Archons), now buildable. |
+| D10 | **High Templar and Archons are allowed.** Psionic Storm and Archon splash are core vs Z. **Archons are not an anti-air tool**: the §4.5.1 air switch only raises the Stalker share (this replaces the spec's "add Archons"). **Small Archon shares:** vs T while the enemy army is mostly bio; vs P while it's Zealot-heavy. |
 | D11 | M7's targets against the built-in AI's air builds are proposed after the baseline batches. |
 
 **Defaults (accepted by the user):**
 - **R1. High Templar and Storm vs Zerg only** in M7. Against Terran, Storm is strong against bio, but it's extra scope and Colossi already cover it. Archons follow §4.5.1's mixes:
-  - **Vs Z:** in the normal army (the spec's Archon 15%), plus more under the air switch.
-  - **Vs P and T:** only while the air switch is on. The spec's base mixes for those races have no Archons, and the switch "adds Archons" for every race. Those High Templar morph straight into Archons, with no Storm research.
-  - Archons in the P/T base mixes is an open question for the user (see the chat of 2026-10-05).
-- **R2. No Phoenix in M7.** Archons, Storm and Stalkers cover Mutalisks; Phoenix would be one more unit to control.
+  - **Vs Z:** in the normal army (the spec's Archon 15%), next to the Storm Templar.
+  - **Vs T:** a small share while the cached Terran army is mostly biological (`ARCHON_VS_BIO_PCT`, on at `BIO_SHARE_FOR_ARCHONS`).
+  - **Vs P:** a small share while it's Zealot-heavy (`ARCHON_VS_ZEALOT_PCT`, on at `ZEALOT_SHARE_FOR_ARCHONS`).
+  - **Never through the air switch** (user decision).
+  - Vs P and T the High Templar morph straight into Archons, with no Storm research.
+- **R2. No Phoenix in M7.** Blink Stalkers, Storm and the vs-Z Archon share cover Mutalisks; Phoenix would be one more unit to control.
 - **R3. One ladder upload per finished phase, after M6 passes.** Each upload restarts the 20-game no-crash count, but development of the next phase continues meanwhile.
 
 ## How the work runs
@@ -78,10 +80,10 @@ poetry run python scripts/run_matches.py --difficulty VeryHard --race Zerg    --
 | File | Change |
 |---|---|
 | `docs/DESIGN.md` §1 | Win condition: "3 bases, and a 4th when gas-starved with a mineral bank". Army: Stalker/Immortal/Colossus/Zealot, with High Templar/Archons vs Z. "Beyond v1" keeps only Carriers and Skytoss as the main army. |
-| §3 | Architecture: add `army/blink.py`, `army/templar.py`, `intel/air_intel.py`. `micro.py`'s line gains "out-ranged rule, blink". |
+| §3 | Architecture: add `army/blink.py`, `army/templar.py`, `intel/enemy_mix.py`. `micro.py`'s line gains "out-ranged rule, blink". |
 | §4.2, §4.4 | Air/cloak detector rows (9, 13) are M7. New "Capital air" row: Fleet Beacon / Fusion Core / Greater Spire → WARNING; capital units seen → ACTIVE; response per race. |
 | §4.3 | Delete the PvP ~4:30 and PvZ ~6:30 Hallucinated Phoenix rows. The hallucination rule notes it needs an existing Sentry (the vs-T mix). |
-| §4.5.1 | Vs Z mix gets High Templar next to the Archon share. Air switch: more Stalkers + Archons (every race), with hysteresis. Capital-air mixes per race (shares from E0). Upgrades: per-building chains, Twilight order (D7), Psionic Storm vs Z. |
+| §4.5.1 | Vs Z mix gets High Templar next to the Archon share. Vs T: a small Archon share while the enemy army is mostly bio. Vs P: a small Archon share while it's Zealot-heavy. Air switch: more Stalkers only, no Archons (replaces "add Archons"), with hysteresis. Capital-air mixes per race (shares from E0). Upgrades: per-building chains, Twilight order (D7), Psionic Storm vs Z. |
 | §4.5.2 | Launch inputs (cached whole army, fresh intel, cooldown after a home fight); which units answer a threat; the out-ranged rule and hold-point fallback; retreat shooting; the out-range penalty marked "only if O1's evidence shows the simulator misjudges". |
 | §5 | `Threat.CAPITAL_AIR` with its expiry (WARNING: STRUCTURE rules; ACTIVE: unit TTL). AIR_HARASS's "satisfied" state, which §5 already describes, is implemented. |
 | §7 | M7 row (deliverable: Phases 0-4; acceptance below). Cut list: remove "High Templar" and "Blink micro"; "Skytoss" becomes "Carriers and Skytoss as the main army". |
@@ -180,7 +182,8 @@ Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your rev
 | K3 | `constants.py:ARMY_COMPOSITION_PCT["Zerg"]` | Add `HIGHTEMPLAR` (TUNE) next to an Archon share (the spec's 15%). Archons are **not** given to ares's SpawnController: its Archon morph merges any two idle Templar (`spawn_controller.py:_handle_archon_morph`), which would eat the storm casters. |
 | K3 | `bot/army/templar.py` (new) | `TemplarController`, run every step after army micro. **Storm:** an HT with Storm available uses ares `AutoUseAOEAbility` (avoids our own ground and air units; won't stack storms). **Positioning:** otherwise it stays `TEMPLAR_BEHIND` behind its squad's centre with `KeepUnitSafe`, never in front. **Morph:** pairs of HTs below the storm energy for `TEMPLAR_MORPH_AFTER_S`, or HTs beyond `TEMPLAR_MAX_CASTERS`, morph into Archons (two-tag command, VERIFY which path below). |
 | K3 | `army.py` | HTs belong to squads like other fighters, but their micro goes to `TemplarController` (skipped in `micro()` like `SUPPORT`). Archons are ordinary fighters (not kiters; splash isn't simulated). |
-| K3 | `production.py:composition` | Air switch (every race): Stalker share up, Archon share via HTs. Vs P and T those HTs morph straight into Archons, with no Storm research there (R1). Vs P and T this also needs a Templar Archives (ProductionController's tech_up adds it). |
+| K3 | `bot/intel/enemy_mix.py` (new) | Pure core: `measure(cached: list[(type_name, value, biological, flying, can_attack, age)], now) -> EnemyMix(army_value, bio_share, zealot_share)`. Biological comes from game data (python-sc2 `Unit.is_biological` reads the type's attributes, `unit.py:180`). Entries older than `MIX_FRESH_S` fade. An adapter reads `get_cached_enemy_army` each intel tick. E2 adds the air and capital-air fields. |
+| K3 | `production.py:composition` | Vs T: add `ARCHON_VS_BIO_PCT` while `bio_share ≥ BIO_SHARE_FOR_ARCHONS`. Vs P: add `ARCHON_VS_ZEALOT_PCT` while `zealot_share ≥ ZEALOT_SHARE_FOR_ARCHONS`. Both with hysteresis (`MIX_SWITCH_HOLD_S`). Vs P and T the HTs morph straight into Archons, with no Storm research there (R1). That needs a Templar Archives, which ProductionController's tech_up adds once HTs are in the mix. |
 | K3 | `logger.py` | Count storms cast and Archons morphed. |
 
 - **VERIFY:**
@@ -189,12 +192,14 @@ Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your rev
   - the Archon morph command: ares `_do_archon_morph` (`custom_bot_ai.py:365`) vs python-sc2 combining two identical `MORPH_ARCHON` commands;
   - `client.debug_upgrade` (python-sc2 `client.py:881`) for the staged tests.
 - **Tests:**
-  - Offline in `test_m7_rules.py`: `next_upgrades` chain cases (every race, buildings missing or ready), Blink rules, morph-pair selection (pure).
+  - Offline in `test_m7_rules.py`: `next_upgrades` chain cases (every race, buildings missing or ready), Blink rules, morph-pair selection (pure); `enemy_mix.measure` bio and Zealot shares, fading, and the Archon-share hysteresis.
   - New staged `scripts/test_blink.py` (debug-spawned, all upgrades on): Blink Stalkers vs Tempests and vs Stalkers; blink counts and value traded.
   - New staged `scripts/test_templar.py`: storm on a ling/hydra clump; no storm on our own units; low-energy pair morphs.
 - **Acceptance:**
   - Blink researched by its schedule time in every P/T game; Charge then Blink vs Z.
   - Storms cast in VeryHard Zerg games.
+  - Archons appear vs bio-heavy built-in Terran and Zealot-heavy built-in Protoss (`archon=` column), and none come from the air switch.
+  - VeryHard Terran and Protoss × 10 stay at their recorded 10/10 (M4/M5).
   - Air batches (same seeds) better than Phase 2.
   - VeryHard Zerg × 10 at least M4's 9/10.
   - All regressions hold.
@@ -204,14 +209,14 @@ Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your rev
 
 | Item | Files and functions | Change |
 |---|---|---|
-| E0 | `scripts/test_air_counters.py` (new, staged, dev-only) | Scripted enemy (as `test_counterattack.py:StagedEnemy`) with kiting Tempests (P), Battlecruisers (T), or Brood Lords + Corruptors (Z). Our side gets the same resource value (game-data costs) of each candidate: Void Rays, Tempests, Stalkers, Blink Stalkers, Archons + Stalkers, and mixes. 5 runs per case. Result table → VERIFY_NOTES; it sets the E3 shares. Can run as early as Phase 3 (it needs K2 for the Blink case). |
+| E0 | `scripts/test_air_counters.py` (new, staged, dev-only) | Scripted enemy (as `test_counterattack.py:StagedEnemy`) with kiting Tempests (P), Battlecruisers (T), or Brood Lords + Corruptors (Z). Our side gets the same resource value (game-data costs) of each candidate: Void Rays, Tempests, Stalkers, Blink Stalkers, and mixes (no Archons: they aren't an anti-air tool, D10). 5 runs per case. Result table → VERIFY_NOTES; it sets the E3 shares. Can run as early as Phase 3 (it needs K2 for the Blink case). |
 | E1 | `constants.py:MAX_BASES` → `bases_cap()` in `build_executor.py:bases_target` | 3, or 4 when minerals ≥ `FOURTH_BASE_BANK` and gas-starved for `FOURTH_BASE_GAS_STARVED_S`, 3 bases saturated, and `DefensePlan.allow_expand`. `economy.py:132` uses it. `PROBE_TARGET` follows the cap. |
 | E1 | `production.py` (l.209-212) | Gas-starved with minerals ≥ `MINERAL_FLOAT_BANK`: Zealots may exceed their share (`freeflow`, capped by supply). |
-| E2 | `bot/intel/air_intel.py` (new) | Pure core: `measure(cached: list[(type_name, value, flying, can_attack, age)], now) -> AirReading(capital_value, air_value, army_value, air_share)`. Fading by `CAPITAL_AIR_FRESH_S`; explicit capital list (Carriers have no weapons in game data). Plus an adapter reading `get_cached_enemy_army` each intel tick. |
+| E2 | `bot/intel/enemy_mix.py` (from K3) | `EnemyMix` gains `capital_value`, `air_value`, `air_share`. Fading by `CAPITAL_AIR_FRESH_S`; explicit capital list (Carriers have no weapons in game data). |
 | E2 | `threat_flags.py` | `Threat.CAPITAL_AIR`. Expiry: WARNING (STRUCTURE, never on a timer); ACTIVE (UNIT, `CAPITAL_AIR_UNIT_TTL`). AIR_HARASS "satisfied" state. |
 | E2 | `detectors.py` | `air_harass` source (Stargate / Spire / Starport with Tech Lab) and `capital_air` source (Fleet Beacon / Fusion Core / Greater Spire → WARNING; `AirReading.capital_value ≥ CAPITAL_AIR_MIN_VALUE` → ACTIVE). Logs `INTEL capital air …`. |
 | E2 | `defense_planner.py`, `static_defense.py` | `_plan_air_harass`: Forge now, then 1 Cannon + 1 Battery per mineral line (new placement helper next to `_main_batteries`, l.197); satisfied once every mineral line has detection. With E1's mineral sink, the bank pays for it first. |
-| E3 | `production.py:composition` | Mix selection: normal → air switch (AIR_HARASS active and air share ≥ `AIR_SWITCH_SHARE`, 0.30) → capital air (CAPITAL_AIR ACTIVE). Hysteresis `AIR_SWITCH_HOLD_S`. Capital-air tables per race in `ARMY_COMPOSITION_PCT` (vs P: Void Rays (+ Tempests vs Carriers); vs T and Z: Tempests; Blink Stalkers up and Colossi cut in all three), shares from E0. WARNING (any race): one Stargate goes down early and Blink moves up the Twilight chain. ACTIVE adds the Fleet Beacon when the mix needs Tempests. |
+| E3 | `production.py:composition` | Mix selection: normal (with K3's Archon shares) → air switch (AIR_HARASS active and air share ≥ `AIR_SWITCH_SHARE`, 0.30: Stalker share up, nothing else) → capital air (CAPITAL_AIR ACTIVE). Hysteresis `AIR_SWITCH_HOLD_S`. Capital-air tables per race in `ARMY_COMPOSITION_PCT` (vs P: Void Rays (+ Tempests vs Carriers); vs T and Z: Tempests; Blink Stalkers up and Colossi cut in all three), shares from E0. WARNING (any race): one Stargate goes down early and Blink moves up the Twilight chain. ACTIVE adds the Fleet Beacon when the mix needs Tempests. |
 | E3 | `micro.py` | `TEMPEST` and `VOIDRAY` targeting: capital or massive first (Tempest), armored or capital first (Void Ray). Prismatic Alignment via `UseAbility` when ≥ `VOIDRAY_ALIGN_MIN_ARMORED` armored enemies are in range. `TEMPEST` added to `KITERS`. |
 | E3 | `logger.py` | `capital_air` entries (race, first WARNING and ACTIVE, peak values) and the mix changes. |
 
@@ -221,7 +226,7 @@ Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your rev
   - `BROODLORDCOCOON` in the cache;
   - whether ares's ProductionController adds Stargate, Fleet Beacon and Templar Archives for the mix (`MAX_PRODUCTION_STRUCTURES` = 12).
 - **Tests:**
-  - Offline: `air_intel.measure` cases (Carrier counted, fading, air share); `test_threat_flags.py` CAPITAL_AIR expiry and AIR_HARASS satisfied; `bases_cap` cases; mix-selection hysteresis.
+  - Offline: `enemy_mix.measure` air cases (Carrier counted, fading, air share); `test_threat_flags.py` CAPITAL_AIR expiry and AIR_HARASS satisfied; `bases_cap` cases; mix-selection hysteresis.
   - Staged: E0.
 - **Acceptance (M7's):**
   - The three Air batches (same seeds) meet D11's targets.
@@ -235,7 +240,7 @@ Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your rev
 - **New, in the bot:**
   - `bot/army/blink.py`
   - `bot/army/templar.py`
-  - `bot/intel/air_intel.py`
+  - `bot/intel/enemy_mix.py`
 - **New dev-only scripts** (not in the ladder zip):
   - `scripts/test_m7_rules.py` (offline)
   - `scripts/test_outranged.py`, `scripts/test_blink.py`, `scripts/test_templar.py`, `scripts/test_air_counters.py` (staged)
@@ -253,6 +258,7 @@ Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your rev
 - **The out-ranged rule and the stricter launch gate make the army passive.** Measured as launches per game and 60:00 ties in the batches. The §4.7 end-game gates still apply.
 - **Gas.** Blink, Storm, Lance, Templar Archives, Void Rays and Tempests all compete for it. E1 adds the 4th base and mineral sink; until Phase 4 lands, the gas pressure shows up as later units in the batches.
 - **Ares's Archon morph would merge storm casters.** The plan keeps Archons out of ares's SpawnController and morphs them itself (K3).
+- **Ghosts' EMP strips Archon shields** (an Archon is almost all shields). Vs Terran the Archon share is small and only on while the enemy is mostly bio. Batches vs VeryHard Terran show whether it costs games.
 - **Simulator blind spots** (no Blink, Storm, splash or range gap). Levels err conservative after C5 (if needed), and the logged inputs (O1) show where they're wrong.
 - **Step time.** The new per-unit checks run inside micro's existing nearby-enemy lists. The §6 step guard and the `step=` column in batches catch spikes.
 
