@@ -467,7 +467,7 @@ class DefensePlan:
   - out-ranged units at a hold point (Tempests);
   - Blink;
   - High Templar (Storm placement, no Storm on our own units, Archon morphs);
-  - which equal-cost groups beat Tempests, Battlecruisers and Brood Lords on the AIE data (sets the §4.5.1 capital-air shares).
+  - which equal-cost groups beat Tempests, Battlecruisers, Brood Lords and a mass of Void Rays on the AIE data (sets the §4.5.1 capital-air shares, and decides whether Void Ray masses join that response; user decision).
 - **Metrics per game** (JSON line in `./data/logs/`, capped at the last 200 games; also stdout):
   - result, opponent id/race, map, game length, opener, ruleset, tie flag;
   - flags with their raise and expire reasons (and times);
