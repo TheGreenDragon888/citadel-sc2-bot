@@ -38,6 +38,7 @@ from bot.constants import (
     GAME_LOG_MAX_EVENTS,
     LADDER_TIE_GAME_SECONDS,
     LOGS_SUBDIR,
+    LOST_FAR_DISTANCE,
     METRIC_TIMES_S,
     SCOUT_LOSS_CHECK_S,
     TELEMETRY_SNAPSHOT_EVERY_S,
@@ -102,6 +103,10 @@ class Telemetry:
         self.guarded_steps: int = 0
         self._last_snapshot: float = 0.0
         self.log_written: bool = False
+        # M7 §8: army units lost by their intent at death, and those lost farther than
+        # LOST_FAR_DISTANCE from the intent's point ("scout" for scouting units, "none" without one)
+        self.lost_by_intent: dict[str, int] = {}
+        self.lost_far: dict[str, int] = {}
 
     # -- scouts (M3) -----------------------------------------------------------------------------
 
@@ -127,12 +132,15 @@ class Telemetry:
     def scouts_lost_before(self, seconds: float = SCOUT_LOSS_CHECK_S) -> list[ScoutRecord]:
         return [r for r in self.scouts if r.outcome == "lost" and r.ended_at is not None and r.ended_at < seconds]
 
-    def on_own_unit_destroyed(self, unit, role: str = "?") -> None:
-        """`unit` is last step's snapshot of our destroyed unit; `role` its ares role."""
-        if unit.tag in self._active_scouts:
+    def on_own_unit_destroyed(self, unit, role: str = "?", intent=None) -> None:
+        """`unit` is last step's snapshot of our destroyed unit; `role` its ares role; `intent`
+        the army's (mode, point) for it, if it had one (M7)."""
+        scouting = unit.tag in self._active_scouts
+        if scouting:
             self.scout_ended(unit.tag, "expired" if unit.is_hallucination else "lost")
         if is_fighter(unit):
             self.army_value_lost += self._value(unit.type_id)
+            self._army_unit_lost(unit, "scout" if scouting else intent)
         if unit.type_id != UnitTypeId.PROBE:
             return
         self.probes_lost += 1
@@ -146,6 +154,23 @@ class Telemetry:
         logger.info(
             f"PROBE lost at {pos.rounded} ({bot.time_formatted}, {role}); nearest enemy "
             + (f"{near.type_id.name} at {near.position.distance_to(pos):.1f}" if near is not None else "none seen")
+        )
+
+    def _army_unit_lost(self, unit, intent) -> None:
+        """M7 §8: where an army unit died, what it was doing, and how far from its point."""
+        pos = unit.position  # a plain point: `unit` is last step's object (see PROBE lost below)
+        if intent == "scout" or intent is None:
+            mode, distance = intent or "none", None
+        else:
+            mode, point = intent
+            distance = pos.distance_to(point)
+        self.lost_by_intent[mode] = self.lost_by_intent.get(mode, 0) + 1
+        if distance is not None and distance > LOST_FAR_DISTANCE:
+            self.lost_far[mode] = self.lost_far.get(mode, 0) + 1
+        logger.info(
+            f"UNIT lost {unit.type_id.name} at {pos.rounded} ({self.bot.time_formatted}, {mode}"
+            + (f" {distance:.0f} from its point" if distance is not None else "")
+            + ")"
         )
 
     def record_step_time(self, started: float) -> float:
@@ -360,6 +385,9 @@ class Telemetry:
             # M6 error guard: errors caught per part, and each part's first one ("m:ss Type: message")
             "errors": dict(errors.counts) if errors is not None else {},
             "errors_first": dict(errors.first) if errors is not None else {},
+            # M7 §8: army units lost by intent, and those lost far from their point
+            "lost_by_intent": dict(self.lost_by_intent),
+            "lost_far": dict(self.lost_far),
             # M7 §8: enemy structure and capital ship types, first seen (game seconds)
             "tech_seen": capped([
                 {"type": name, "t": round(t, 1)}

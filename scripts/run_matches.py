@@ -272,6 +272,15 @@ def logged(game_id: Optional[str]) -> bool:
     return False
 
 
+def m7_cell(telemetry) -> Optional[str]:
+    """M7 telemetry (docs/M7_PLAN.md): army units lost far from their point, by intent, of all lost."""
+    if telemetry is None or not hasattr(telemetry, "lost_far"):
+        return None
+    far = telemetry.lost_far
+    by_intent = ",".join(f"{mode}:{n}" for mode, n in sorted(far.items()))
+    return f"far={sum(far.values())}" + (f"({by_intent})" if by_intent else "") + f"/{sum(telemetry.lost_by_intent.values())}"
+
+
 def format_row(r: dict) -> str:
     """One game's summary row (also printed as `ROW ...` right after the game)."""
     line = (
@@ -289,6 +298,8 @@ def format_row(r: dict) -> str:
         line += f"  scouts={r['scouts_lost']}/{r['scout_tasks']}"
     if r["flag_ok"] is not None:
         line += f"  flag={'ok' if r['flag_ok'] else 'MISS'} ({r['flag_why']})"
+    if r.get("m7") is not None:
+        line += f"  m7: {r['m7']}"
     line += f"  flags={r['flags'] or '-'}"
     return line + (f"  {r['error']}" if r["error"] else "")
 
@@ -427,6 +438,7 @@ def main() -> int:
                 "game_s": game_seconds,
                 "real_s": time.perf_counter() - started,
                 "error": error,
+                "m7": m7_cell(telemetry),
             }
         )
         print(f"ROW {format_row(rows[-1])}", flush=True)

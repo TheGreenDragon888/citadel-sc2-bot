@@ -341,6 +341,8 @@ class CitadelBot(AresBot):
         with guard("ares unit destroyed"):
             await super(CitadelBot, self).on_unit_destroyed(unit_tag)
         # one guard per call, so an error in one doesn't skip the others (e.g. §5 expiry rule (a))
+        # the unit's intent, read before `forget` drops it (M7 §8 losses by intent)
+        intent = self.army.intents.get(unit_tag) if self.army is not None else None
         if self.army is not None:
             with guard("unit destroyed"):
                 self.army.forget(unit_tag)
@@ -352,7 +354,7 @@ class CitadelBot(AresBot):
                 self.flags.on_unit_destroyed(unit_tag, self.time)  # §5 expiry rule (a)
         if own is not None and self.telemetry is not None:
             with guard("unit destroyed"):
-                self.telemetry.on_own_unit_destroyed(own, role)
+                self.telemetry.on_own_unit_destroyed(own, role, intent)
         if enemy is not None and self.telemetry is not None:
             with guard("unit destroyed"):
                 self.telemetry.on_enemy_unit_destroyed(enemy)
