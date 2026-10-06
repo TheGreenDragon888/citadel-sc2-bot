@@ -332,7 +332,7 @@ class Telemetry:
 
         counter = army.counter if army is not None else None
         return {
-            "version": 3,
+            "version": 4,  # 3: M7 Phase 0 fields; 4: M7 Phase 1 fields
             "game_id": self.game_id,
             "date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "result": result,
