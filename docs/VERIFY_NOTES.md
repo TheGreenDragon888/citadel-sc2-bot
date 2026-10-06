@@ -1748,3 +1748,182 @@ SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty 
 - So these two batches test what the Phase 3 capital-air responses (K1-K3) are for. The VeryHard batches above don't, because VeryHard Terran makes few Battlecruisers and VeryHard Zerg makes no Brood Lords.
 
 ## M7 acceptance evidence
+
+### Phase 0 + Phase 1 (M7_PLAN.md), run 2026-10-06
+
+Code under test: `07d4ddd`. It holds O1-O3, B1-B6 and `scripts/test_outranged.py`; the commits after it change only docs. All games ran in the cloud container, with the same set-up as the baseline. Up to four batches ran in parallel on 4 cores. Logs were kept outside the repo; replays are in `replays/m7-p1-<race>/`, not in git.
+
+**Summary**
+
+| Criterion (M7_PLAN.md) | Result |
+|---|---|
+| P0: one local game shows the three new line types | PASS |
+| P0: `check_game_log.py` passes | PASS: `RESULT PASS`, 181 records, 0 malformed, ./data 383 KB |
+| P0: M1 regression (Hard × 10, T/Z/P/Random) unchanged | PASS: 10/10, as on M6 |
+| P1: Air batches on the same seeds: `reinforce_after_retreat` = 0 | PASS: 0 in all 30 Air games (and 0 in every other game below) |
+| P1: Air batches on the same seeds: `lost_far` for HOLD lower than baseline | **FAIL as written**: 8 against 2. HOLD deaths overall fell from 45 to 17; see below |
+| P1: main re-scouts at least every ~90 s from 6:00 while an Observer is free | PASS as written; gaps remain while the only free Observer is on an expansion trip (see below) |
+| P1 (B6): no PROXY in the Nexus-first Protoss Air games | PASS: 0 of 7 (baseline 7 of 7) |
+| P1 (B6): `proxy_rax` still raises PROXY; correct flag 40/40 | PASS: correct flag 40/40; vs `proxy_rax`, PROXY was raised in game at 1:30 (games 1-2) and from memory from game 3 |
+| P1: M2/M3 cheese × 10 each (≥ 8/10, flags, no scout lost before 4:00) | **Not met for cannon rush**: worker rush, 12 pool and proxy rax 10/10 each; cannon rush **5/10**, then 8/10 on a rerun (Phase-0 code 9/10; A/B below). M3 parts pass: correct flag 40/40, and no scout lost before 4:00 in 9/10 (worker rush), 10/10 (cannon rush), 10/10 (12 pool) and 9/10 (proxy rax) games |
+| P1: M4 VeryHard × 10 per race (≥ 7 each) | PASS: Terran 10/10, Zerg 9/10, Protoss 10/10 |
+
+**Offline tests** (`poetry run python scripts/<name>.py`):
+
+| Script | Result |
+|---|---|
+| `test_m7_rules` (new) | 17/17 |
+| `test_attack_decision` | 16/16 |
+| `test_threat_flags` | 20/20 |
+| `test_m3_checks` | 14/14 |
+| `test_counterattack_rules` | 36/36 |
+| `test_opponent_memory` | 38/38 |
+
+The staged `test_outranged.py --case idle_hold` passed; it is B2's VERIFY, recorded under "M7 findings".
+
+**Phase 0: the new log lines.** One local game on `4a36da2` (O1-O3; "M7 findings"):
+
+```
+poetry run python scripts/run_matches.py --difficulty VeryHard --race Protoss --build Air --map PersephoneAIE_v4 --total 1 --game-seed 7500
+```
+
+- It logged 4 `ENGAGE`/`DEFEND` lines with the simulator's inputs, for example:
+  - `DEFEND 10:11: engage (level 10 >= 5) vs ZEALOT at (49, 73), 25 defenders (62 supply); vs 1 ZEALOT (100) | ours 8 STALKER 11 ADEPT 2 COLOSSUS 2 IMMORTAL 2 ZEALOT (4675)`
+- It logged 11 `INTEL first seen` lines, for example `INTEL first seen NEXUS at 01:06 (65, 149)`.
+- It logged 76 `UNIT lost` lines, for example `UNIT lost ADEPT at (54, 109) (09:44, fight 15 from its point)`.
+- Across the Phase 1 batches below, `INTEL first seen` caught capital ships as well: Tempest 9, Carrier 6, Battlecruiser 8, Brood Lord 1, Brood Lord cocoon 1.
+
+**Air batches, same seeds as the baseline**
+
+```
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race <Protoss|Terran|Zerg> --build Air --map all --total 10 --game-seed <7000|7100|7200> --replays replays/m7-p1-<race>
+```
+
+| Batch | Baseline (M6) | Phase 1 | D11 target (end of M7) | `reinforce_after_retreat` | probes@6 median (baseline → P1) |
+|---|---|---|---|---|---|
+| Protoss Air | 2/10 | **8/10** | ≥ 7/10 | 0 | 42 → 49 |
+| Terran Air | 9/10 | **10/10** (no Battlecruiser loss) | ≥ 9/10, no Battlecruiser loss | 0 | 57 → 59 |
+| Zerg Air | 10/10 | **10/10** | ≥ 9/10 | 0 | 64 → 62 |
+
+**The baseline's openers differ from Phase 1's, so the Protoss comparison was re-run with them matched.**
+- Citadel picks its opener from `./data/None-protoss.json`, which every no-id batch shares and updates. So the baseline played `C2_1GateExpand` in 7 games and Phase 1 played `C_2GateRobo` in 7.
+- To compare like with like, the Phase-0-only code (`4a36da2`: O1-O3 logging, otherwise M6) was run again on seed 7000. Each game was forced to the opener Phase 1 picked in it (a `git worktree` of `4a36da2` with the `ares-sc2` folder linked in, and the same Poetry environment). Forced openers don't write `./data`.
+
+```
+SC2PATH=$HOME/StarCraftII python scripts/run_matches.py --difficulty VeryHard --race Protoss --build Air --map all --game-seed 7000 --replays replays/m7-p0-protoss-paired --total 6 --opener C_2GateRobo
+... --start 7 --total 7 --opener C2_1GateExpand
+... --start 8 --total 8 --opener C_2GateRobo
+... --start 9 --total 10 --opener C2_1GateExpand
+```
+
+Each cell reads: result and length; probes/bases at 6:00; false PROXY; army value lost/killed; army units lost, with the HOLD deaths (deaths more than 12 from the point in brackets) and the RETREAT deaths.
+
+| # | map | opener (both) | Phase 0 code (`4a36da2`) | Phase 1 code (`07d4ddd`) |
+|---|---|---|---|---|
+| 1 | Magannatha_v2 | C_2GateRobo | Defeat 15:10; 45/2; PROXY@01:30; 12.1k/5.2k; 69 lost, hold 21 (1), retreat 9 | Victory 18:56; 47/2; -; 12.1k/18.0k; 60 lost, hold 0 (0), retreat 3 |
+| 2 | Ultralove_v2 | C_2GateRobo | Defeat 20:12; 39/1; PROXY@01:30; 22.4k/15.8k; 114 lost, hold 3 (1), retreat 40 | Victory 14:03; 48/2; -; 9.2k/12.8k; 49 lost, hold 0 (0), retreat 0 |
+| 3 | LeyLines_v3 | C_2GateRobo | Defeat 13:47; 41/1; PROXY@01:30; 11.2k/3.3k; 57 lost, hold 18 (0), retreat 12 | Victory 14:46; 49/2; -; 9.3k/14.0k; 42 lost, hold 0 (0), retreat 0 |
+| 4 | Torches_v4 | C_2GateRobo | Victory 11:52; 50/2; -; 4.5k/6.8k; 19 lost, hold 0 (0), retreat 0 | Victory 11:46; 50/2; -; 5.5k/6.3k; 29 lost, hold 0 (0), retreat 2 |
+| 5 | Pylon_v4 | C_2GateRobo | Victory 13:45; 51/2; -; 7.0k/11.4k; 33 lost, hold 0 (0), retreat 3 | Victory 14:55; 48/2; -; 6.5k/13.6k; 31 lost, hold 0 (0), retreat 0 |
+| 6 | Persephone_v4 | C_2GateRobo | Defeat 16:53; 40/1; PROXY@01:30; 21.4k/9.6k; 109 lost, hold 0 (0), retreat 32 | Defeat 15:24; 48/2; -; 18.1k/7.6k; 86 lost, hold 8 (6), retreat 12 |
+| 7 | Incorporeal_v4 | C2_1GateExpand | Victory 17:18; 43/1; PROXY@01:30; 17.6k/11.5k; 94 lost, hold 0 (0), retreat 23 | Victory 13:02; 58/3; -; 10.3k/11.2k; 50 lost, hold 0 (0), retreat 0 |
+| 8 | Magannatha_v2 | C_2GateRobo | Defeat 13:14; 40/1; PROXY@01:30; 8.9k/3.0k; 47 lost, hold 1 (0), retreat 4 | Defeat 20:28; 49/2; -; 17.7k/6.0k; 85 lost, hold 9 (2), retreat 12 |
+| 9 | Ultralove_v2 | C2_1GateExpand | Victory 10:42; 54/2; -; 3.2k/6.1k; 17 lost, hold 0 (0), retreat 0 | Victory 11:07; 57/2; -; 5.2k/6.5k; 27 lost, hold 0 (0), retreat 0 |
+| 10 | LeyLines_v3 | C2_1GateExpand | Defeat 17:19; 40/1; PROXY@01:30; 21.2k/9.6k; 106 lost, hold 2 (0), retreat 24 | Victory 12:04; 58/3; -; 3.8k/7.8k; 16 lost, hold 0 (0), retreat 0 |
+
+| Totals | Phase 0 | Phase 1 |
+|---|---|---|
+| Wins | 4/10 | 8/10 |
+| False PROXY@01:30 | 7 | 0 |
+| Army units lost | 664 | 473 |
+| HOLD deaths, all / farther than 12 from the point | 45 / 2 | 17 / 8 |
+| RETREAT deaths | 147 | 29 |
+| Main re-scouts sent from 6:00 | 30 (none in games 1 and 8) | 62 (4-11 in every game) |
+
+**B1 (retreats).** `reinforce_after_retreat` was 0 in all 120 Phase 1 games: 30 Air, 30 VeryHard, 10 Hard and 50 cheese (the 40 plus the cannon rush rerun). With the same openers, RETREAT deaths fell from 147 to 29.
+
+**B2/B3 and the HOLD criterion: missed as written.**
+- The plan asked for fewer HOLD deaths farther than `LOST_FAR_DISTANCE` (12) from the point. Phase 1 has 8, the Phase-0 code 2.
+- That metric was meant to catch units at the hold point being drawn out after an attacker. B2's in-game check showed that doesn't happen.
+- The HOLD losses the postmortem found are units dying at the hold point in an out-ranging army's reach. Those fell from 45 to 17, and none were in Phase 1's eight wins.
+- The 8 far HOLD deaths all came in Phase 1's two losses (games 6 and 8), during home fights against a mass air army.
+  - In game 6, the decision switched between engage, hold and last stand every 1-3 s from 10:31 to 12:47 (Void Rays, Carriers and Tempests).
+  - Stalkers that the switch left 14-23 from their point died walking back to it with a plain move, which is B2's behaviour.
+  - Phase 2's C1 (out-ranged units step to safety before shooting, and the hold point moves back) and C2 (defenders that can't hit the threat hold) target exactly this.
+  - Its staged case `hold_vs_tempest` checks that no unit dies beyond the leash.
+
+**B4 (main re-scouts) as measured** (Protoss Air, from 6:00):
+- 62 re-scouts went out (4-11 per game), against 30 on the Phase-0 code and 56 on the baseline (which had none after 6:00 in game 3).
+- Of the 62 intervals (6:00 to the first re-scout, then between re-scouts), 57 were at most 90 s; most were 60 s, the re-scout period.
+- The 5 longer gaps were 95-180 s:
+  - in 3 of them, the only free Observer was on an expansion trip;
+  - in the other 2, an Observer died and the next was free 20 s or 2:17 later.
+- Game 8 then had no free Observer from 14:32 to the end (20:28): one was on the home post and one was with the army.
+- **What remains:** right after each re-scout, the main was just seen, so the next expansion check takes the same Observer for 90-110 s. The main then goes unseen for up to ~2.5 minutes (the first ladder loss had 5:43-11:01). B4 as specified only stops an expansion check from starting while the re-scout is already due. This is put to the user; no change was made.
+
+**B5.** Hallucinations ran only against Terran: 25 in Terran Air, 32 in VeryHard Terran and 13 in the M1 batch's Terran games (one of them a Random opponent that was Terran). None ran against Protoss or Zerg.
+
+**B6 (expansion-first proxy check).**
+- In the 7 Protoss Air games where the enemy opened Nexus first (1, 2, 3, 6, 7, 8, 10; natural townhall seen at 1:04-1:07, no Gateway in the main at 1:30):
+  - the baseline and the Phase-0 code raised `PROXY@01:30` in all 7;
+  - Phase 1 logged `SCOUT proxy check at 01:30: 0 Gateways in the main, 20 workers seen, a townhall at their natural (expansion first)` and raised nothing.
+- In the other 3 games the main had a Gateway, so there was no flag on any code.
+- Against `proxy_rax`, the missing-production path still fires when the natural is empty: `FLAG raise PROXY (STRUCTURE, proxy_missing) at 1:30: no Barracks in the scouted main [ends opener]` (games 1-2, before memory pre-raises it).
+- The VeryHard Protoss batch's 10 proxy checks all found a Gateway.
+
+**Regressions**
+
+```
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty Hard --map all --total 10 --race Terran Zerg Protoss Random --game-seed 4000
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race <Terran|Zerg|Protoss> --map all --total 10 --game-seed 3000 --opponent-id m7p1-vh-<race>
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --opponent <bot> --map all --total 10 --seed 100 --game-seed 5000 --opponent-id m7p1-<bot>
+```
+
+| Batch | Wins | Correct flag | Games with no scout lost before 4:00 | `raa` | Notes |
+|---|---|---|---|---|---|
+| M1: Hard × 10 (T/Z/P/Random) | **10/10** (3/3, 3/3, 2/2, 2/2) | — | 10/10 | 0 | M6: 10/10 |
+| M4: VeryHard Terran | **10/10** | — | 10/10 | 0 | |
+| M4: VeryHard Zerg | **9/10** | — | 10/10 | 0 | The loss is Ley Lines game 3 (12 pool, then a 10-Roach push at 4:05; 8:46), lost on every M5 commit too; M5 was also 9/10 with this loss |
+| M4: VeryHard Protoss | **10/10** | — | 10/10 | 0 | |
+| M2/M3: worker rush | **10/10** | 10/10 | 9/10 | 0 | Game 6: the fallback main probe (sent at 2:30) was killed by a leftover worker-rush Drone at 3:28 |
+| M2/M3: cannon rush | **5/10** (2 losses, 3 ties at 60:00) | 10/10 | 10/10 | 0 | **Under the M2 bar.** Rerun 8/10; Phase-0 code 9/10 (A/B below) |
+| M2/M3: 12 pool | **10/10** | 10/10 | 10/10 | 0 | |
+| M2/M3: proxy rax | **10/10** | 10/10 | 9/10 | 0 | Game 3 (PROXY pre-raised from memory): the main probe checked the proxy spots and came home unscouted; the retry probe met the proxy Marines at 2:38 |
+
+**Cannon rush A/B.** After the 5/10, the same batch was run again on both codes in parallel, each with fresh opponent memory and no other batch running:
+
+```
+# Phase 0 (4a36da2, the worktree above)
+SC2PATH=$HOME/StarCraftII python scripts/run_matches.py --opponent cannon_rush --map all --total 10 --seed 100 --game-seed 5000 --opponent-id m7p0-cannon_rush
+# Phase 1 (07d4ddd), rerun
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --opponent cannon_rush --map all --total 10 --seed 100 --game-seed 5000 --opponent-id m7p1b-cannon_rush
+```
+
+| # | map | variant | Phase 0 | Phase 1, first run | Phase 1, rerun |
+|---|---|---|---|---|---|
+| 1 | Magannatha | natural | Victory 15:28 | Victory 12:09 | Victory 13:22 |
+| 2 | Ultralove | natural | Victory 15:25 | **Tie** (60:00; 11 HOLD deaths far from the point) | **Defeat** 12:43 |
+| 3 | Ley Lines | main | Victory 9:59 | Victory 9:43 | Victory 10:19 |
+| 4 | Torches | natural | Victory 9:31 | Victory 9:30 | Victory 10:38 |
+| 5 | Pylon | main | Victory 9:49 | **Tie** (60:00) | Victory 9:58 |
+| 6 | Persephone | main | Victory 9:42 | Victory 9:50 | Victory 9:27 |
+| 7 | Incorporeal | natural | Victory 10:48 | Victory 10:50 | Victory 10:41 |
+| 8 | Magannatha | natural | **Defeat** 11:47 (6 HOLD far) | **Tie** (60:00; 8 HOLD far) | **Defeat** 9:22 (9 HOLD far) |
+| 9 | Ultralove | main | Victory 9:42 | **Defeat** 31:13 | Victory 9:40 |
+| 10 | Ley Lines | main | Victory 10:20 | **Defeat** 9:49 | Victory 10:11 |
+| | | | **9/10** | **5/10** | **8/10** |
+
+- **The main-variant games are noise.** Games 5, 9 and 10 were lost or tied in the first run, with 24-25 probes and no townhall at 6:00, and won in the rerun with 53 probes. Same code, same seeds.
+- **The natural-variant losses share one mechanism**, the same in all three runs of game 8 and in the first run of game 2:
+  - The army's anchor is `_rally_point()`: our front base, moved toward the enemy. The CANNON_RUSH plan sets no hold point.
+  - When the natural Nexus completes (game 8: its cancel order at 3:14-3:17 came too late), the anchor moves from the main's front (135, 44) to the natural's front (114, 65).
+  - Every new unit then walks from the main past the rush Cannons at about (119, 35) and dies on the way: 6-9 per game between 3:47 and 5:28.
+  - The Phase-0 code loses game 8 the same way: its units attack-move and still die there. With B2's plain move they don't stop to shoot on the way. Among the natural-variant games, game 2 is the one the Phase-0 code won and Phase 1 didn't, in both runs.
+- **This anchor behaviour predates M7.** B2 makes the walk costlier. A fix is put to the user; no change was made.
+
+- The two scout losses happen in probe-scheduling code that M7 didn't change; M5 had none in 40 cheese games. The M3 bar (≥ 7/10 games per batch) holds.
+- No crashes and no caught errors in any of the 120 games, and every `ROW` has `log=ok`.
+
+**Notes**
+- **Load.** The cheese batches run two bots and two SC2 clients per game. With three of them in parallel (load ~12 on 4 cores), the M6 step guard fired 1-14 times per cheese game, and the worst step was 7.0 s (proxy rax game 6). In the Air batches it fired in 3 of 30 games (once or twice each).
+- **One non-proxy flag.** Protoss Air game 6 raised CANNON_RUSH at 2:05 from an enemy probe that stayed in our main for 10 s (UNIT evidence). It expired at 2:30 with the natural still taken ("expand=yes"); it is §4.4's existing rule, not a proxy.
