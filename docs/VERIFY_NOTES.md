@@ -1590,6 +1590,24 @@ API checks and Citadel's choices for M7 (`docs/M7_PLAN.md`). Checked before the 
 - ares's SpawnController morphs Archons from any two idle, ready High Templar not already morphing
   (`ares-sc2/src/ares/behaviors/macro/spawn_controller.py`, `_handle_archon_morph`), so Archons
   stay out of its mix and Citadel morphs them itself (§4.5.3).
+- **B2's in-game check (`poetry run python scripts/test_outranged.py --case idle_hold`, PylonAIE_v4,
+  code `f62475a`):** do units at their hold point get drawn out after an attacker beyond the
+  leash? No.
+  - Setup: 10 Tempests on hold position 12.5 from the anchor (the hold leash is 12) shot 6
+    Stalkers standing at it.
+  - Result: home defense held ("hold (level 1 < 5)", then level 0). The farthest any Stalker got
+    from the anchor was 4.7 (limit 16). They had ATTACK orders with an engaged target (the
+    Tempests that had spread inside 12 were in their micro's reach), and all 6 died within 13 s
+    while the Tempests took damage.
+  - So the plan's fallback (re-issuing a move when `engaged_target_tag` is set past the leash) is
+    not needed.
+  - What the test shows instead is the Phase 2 problem: a squad standing in an out-ranging
+    enemy's reach dies in place.
+- **Phase 0 in a real game** (`run_matches.py --difficulty VeryHard --race Protoss --build Air --map
+  PersephoneAIE_v4 --total 1 --game-seed 7500`, code `4a36da2`): the new lines show finding A
+  directly.
+  - `ENGAGE 09:28 launch level=10 ...; vs nothing (0) | ours 17 ADEPT 8 STALKER 2 IMMORTAL 1 COLOSSUS 3 ZEALOT (5025)`
+  - 24 s later: `ENGAGE 09:52 retreat level=3 ...; vs 8 VOIDRAY 10 STALKER 2 PHOENIX 3 ADEPT 1 ORACLE 2 SENTRY +4 more (6875)`.
 
 ## M7 baseline
 
