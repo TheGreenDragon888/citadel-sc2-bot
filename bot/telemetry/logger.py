@@ -388,6 +388,9 @@ class Telemetry:
             # M7 §8: army units lost by intent, and those lost far from their point
             "lost_by_intent": dict(self.lost_by_intent),
             "lost_far": dict(self.lost_far),
+            # M7 B1 regression metric (must stay 0) and B4 main re-scout starts (game seconds)
+            "reinforce_after_retreat": army.reinforce_after_retreat if army is not None else 0,
+            "rescouts": capped([round(r.started_at) for r in self.scouts if r.task == "rescout"]),
             # M7 §8: enemy structure and capital ship types, first seen (game seconds)
             "tech_seen": capped([
                 {"type": name, "t": round(t, 1)}

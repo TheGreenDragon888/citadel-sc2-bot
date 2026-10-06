@@ -68,6 +68,7 @@ from bot.constants import (
     CLEAR_STATIC_LEVEL,
     DECISION_EVERY_STEPS,
     DEFEND_ENGAGE,
+    ENGAGE_ENEMY_RADIUS,
     ENGAGE_STATIC_RADIUS,
     HOLD_ENGAGE_RADIUS,
     HOLD_RADIUS,
@@ -157,6 +158,8 @@ class Army:
         # the fight inputs behind the last main-attack and home-defense levels (M7 §8)
         self._attack_inputs: Optional[FightInputs] = None
         self._home_inputs: Optional[FightInputs] = None
+        # M7 B1 regression metric: reinforcements sent out in the tick of a retreat or recall (must stay 0)
+        self.reinforce_after_retreat: int = 0
         self._hunt_points: list[Point2] = []
         self._visited: set[Point2] = set()
         self._last_status: float = 0.0
@@ -247,7 +250,10 @@ class Army:
                 return
         if self.decision.state == ATTACK:
             self._evaluate_attack(attackers)
-            self._reinforce(defenders)
+            # a retreat decided just now sends no one out (M7 B1: at 9:32 of the first ladder loss,
+            # a group left for the old fight in the retreat's own tick and died there)
+            if self.decision.state == ATTACK:
+                self._reinforce(defenders)
         elif self.threat is None and bot.supply_used >= ATTACK_START_SUPPLY and defenders:
             self._evaluate_launch(defenders)
 
@@ -298,6 +304,7 @@ class Army:
     def _retreat_attack_squad(self) -> None:
         self.send_home(self.squads.tags(Role.ATTACK) | self.squads.tags(Role.REINFORCE))
         self._target_tag = None
+        self.attack_center = None  # M7 B1: nothing may rally to the old fight
 
     def _reinforce(self, defenders: list[Unit]) -> None:
         """§4.5.2: new units go out in groups of >= REINFORCE_MIN_SUPPLY, never one by one."""
@@ -327,6 +334,9 @@ class Army:
             self.squads.assign([u.tag for u in ready], Role.REINFORCE)
             for u in ready:
                 self.intents.pop(u.tag, None)
+            last = self.decisions[-1] if self.decisions else None
+            if last is not None and last.t == self.bot.time and last.action in ("retreat", "recall"):
+                self.reinforce_after_retreat += 1
             logger.info(f"ARMY reinforcements out at {self.bot.time_formatted}: {len(ready)} units, {self._supply(ready):g} supply")
 
     # -- home defense ----------------------------------------------------------------------------
@@ -555,6 +565,9 @@ class Army:
 
     def _set_intents(self) -> None:
         anchor = self.anchor
+        if self.decision.state != ATTACK and (stray := self.squads.tags(Role.REINFORCE)):
+            # reinforcements exist only while the attack is on (§4.5.2, M7 B1)
+            self.send_home(stray)
         for u in self.squads.units(Role.DEFEND):
             intent = self.intents.get(u.tag)
             if intent is not None and intent[0] == RETREAT and u.distance_to(anchor) > RETREAT_DONE_RADIUS:
@@ -655,10 +668,16 @@ class Army:
             elif mode == HOLD:
                 radius = self.leash if (self.leash is not None and point == self.hold_point) else HOLD_ENGAGE_RADIUS
                 visible = [e for e in visible if e.distance_to(point) <= radius or self._inside_main(e.position)]
+            elif self.squads.roles.get(unit.tag) == Role.DEFEND:
+                # a home fight is against the group it evaluated, not whatever each unit sees (M7 B3,
+                # §4.5.2: a Stalker ran at Tempests while the squad fought a Zealot elsewhere)
+                visible = [e for e in visible if e.distance_to(point) <= ENGAGE_ENEMY_RADIUS]
             if visible:
                 micro.fight(bot, unit, visible, point)
             elif own_tick and (mode != HOLD or unit.distance_to(point) > HOLD_RADIUS):
-                micro.move(unit, point, attack=mode != MOVE)
+                # only a fight is walked to with an attack-move: units going back to their hold
+                # point move, so the engine doesn't send them after whatever shoots them (M7 B2)
+                micro.move(unit, point, attack=mode == FIGHT)
 
     # -- logging ---------------------------------------------------------------------------------
 

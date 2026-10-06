@@ -272,13 +272,17 @@ def logged(game_id: Optional[str]) -> bool:
     return False
 
 
-def m7_cell(telemetry) -> Optional[str]:
-    """M7 telemetry (docs/M7_PLAN.md): army units lost far from their point, by intent, of all lost."""
+def m7_cell(telemetry, army=None) -> Optional[str]:
+    """M7 telemetry (docs/M7_PLAN.md): army units lost far from their point (by intent) of all lost;
+    reinforcements sent out in a retreat's tick (B1, must be 0); main re-scouts (B4)."""
     if telemetry is None or not hasattr(telemetry, "lost_far"):
         return None
     far = telemetry.lost_far
     by_intent = ",".join(f"{mode}:{n}" for mode, n in sorted(far.items()))
-    return f"far={sum(far.values())}" + (f"({by_intent})" if by_intent else "") + f"/{sum(telemetry.lost_by_intent.values())}"
+    cell = f"far={sum(far.values())}" + (f"({by_intent})" if by_intent else "") + f"/{sum(telemetry.lost_by_intent.values())}"
+    if army is not None and hasattr(army, "reinforce_after_retreat"):
+        cell += f" raa={army.reinforce_after_retreat}"
+    return cell + f" rescouts={sum(1 for r in telemetry.scouts if r.task == 'rescout')}"
 
 
 def format_row(r: dict) -> str:
@@ -438,7 +442,7 @@ def main() -> int:
                 "game_s": game_seconds,
                 "real_s": time.perf_counter() - started,
                 "error": error,
-                "m7": m7_cell(telemetry),
+                "m7": m7_cell(telemetry, army),
             }
         )
         print(f"ROW {format_row(rows[-1])}", flush=True)
