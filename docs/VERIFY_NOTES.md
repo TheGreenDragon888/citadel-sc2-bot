@@ -1688,4 +1688,63 @@ The "enemy capital ships" and "top killers" columns come from the saved replays'
 - **Terran's one loss was to Battlecruisers:** 11 made, 1 killed, and they killed 69 of our 125 units. In the 8 other games with Battlecruisers, every one died (1-6 per game).
 - **The VeryHard Zerg Air build never reached capital ships:** no Brood Lords, and every game was over by 10:40. So this batch doesn't test the Zerg capital-air response.
 
+### CheatInsane Air baselines (for the D11 targets vs Terran and Zerg)
+
+Same bot code as above (M6). The batches started before the Phase 0 commits, and their game records are version 2, which only the M6 code writes. The two batches ran in parallel; replays are in `replays/m7-baseline-<race>-insane/`, not in git.
+
+```bash
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty CheatInsane --race Terran --build Air --map all --total 10 --game-seed 7300 --replays replays/m7-baseline-terran-insane
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty CheatInsane --race Zerg   --build Air --map all --total 10 --game-seed 7400 --replays replays/m7-baseline-zerg-insane
+```
+
+| Batch | Wins | Crashes / errors | probes@6 (min / median / max) |
+|---|---|---|---|
+| Terran Air, CheatInsane | **2/10** | 0 / 0 | 55 / 58.5 / 61 |
+| Zerg Air, CheatInsane | 8/10 | 0 / 0 | 40 / 56 / 62 |
+
+**Terran Air, CheatInsane × 10, `--game-seed 7300`**
+
+| # | map | result | length | probes@6 | bases@6 | value lost/killed | flags (first raise, count) | enemy capital ships made (died) | top killers of our army |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Magannatha_v2 | Victory | 14:32 | 61 | 2 | 7.8k/16.3k | - | Battlecruiser 3 (3) | Marauder 13, VikingFighter 10, VikingAssault 6 (of 51) |
+| 2 | Ultralove_v2 | Defeat | 12:37 | 57 | 2 | 13.1k/3.3k | PROXY@01:30,ARMY_OUT_OF_POSITION@10:10 | Battlecruiser 4 (0) | Battlecruiser 25, Marauder 20, VikingAssault 20 (of 76) |
+| 3 | LeyLines_v3 | Defeat | 19:25 | 58 | 2 | 30.6k/21.4k | ARMY_OUT_OF_POSITION@05:13 (×6) | Battlecruiser 7 (3) | Marauder 43, Battlecruiser 26, VikingAssault 26 (of 157) |
+| 4 | Torches_v4 | Defeat | 17:20 | 57 | 2 | 23.1k/12.2k | ONE_BASE_ALLIN@02:45,ARMY_OUT_OF_POSITION@05:07 (×5) | Battlecruiser 9 (3) | Battlecruiser 44, VikingAssault 19, Marauder 16 (of 119) |
+| 5 | Pylon_v4 | Defeat | 21:03 | 59 | 2 | 30.8k/20.3k | ARMY_OUT_OF_POSITION@12:37 (×3) | Battlecruiser 9 (4) | Battlecruiser 61, Marauder 36, VikingAssault 18 (of 156) |
+| 6 | Persephone_v4 | Victory | 11:43 | 61 | 2 | 3.1k/9.0k | - | Battlecruiser 2 (2) | Marine 12, Marauder 5, Sentry 3 (of 26) |
+| 7 | Incorporeal_v4 | Defeat | 16:35 | 59 | 2 | 20.7k/5.8k | ONE_BASE_ALLIN@02:45,ARMY_OUT_OF_POSITION@10:55 (×3) | Battlecruiser 10 (3) | Battlecruiser 46, Marauder 25, VikingAssault 23 (of 108) |
+| 8 | Magannatha_v2 | Defeat | 19:55 | 59 | 2 | 32.0k/22.1k | ONE_BASE_ALLIN@02:45,ARMY_OUT_OF_POSITION@05:35 (×2) | Battlecruiser 9 (6) | Marauder 42, Battlecruiser 36, SiegeTank 27 (of 169) |
+| 9 | Ultralove_v2 | Defeat | 14:26 | 55 | 2 | 13.5k/5.3k | PROXY@01:30,ARMY_OUT_OF_POSITION@10:20 | Battlecruiser 7 (2) | Battlecruiser 38, Marauder 29, VikingAssault 4 (of 77) |
+| 10 | LeyLines_v3 | Defeat | 19:47 | 58 | 2 | 32.5k/17.6k | ARMY_OUT_OF_POSITION@12:17 (×2) | Battlecruiser 8 (4) | Marauder 68, Battlecruiser 32, VikingAssault 27 (of 175) |
+
+**Zerg Air, CheatInsane × 10, `--game-seed 7400`**
+
+| # | map | result | length | probes@6 | bases@6 | value lost/killed | flags (first raise, count) | enemy capital ships made (died) | top killers of our army |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Magannatha_v2 | Victory | 13:05 | 62 | 3 | 5.7k/13.6k | POOL_12@01:30 | - | SpineCrawler 14, Roach 12, Hydralisk 10 (of 43) |
+| 2 | Ultralove_v2 | Victory | 16:40 | 57 | 3 | 6.9k/24.4k | POOL_12@01:27 | BroodLord 3 (3) | Roach 10, Hydralisk 6, SpineCrawler 5 (of 40) |
+| 3 | LeyLines_v3 | Victory | 14:41 | 56 | 3 | 5.7k/16.7k | POOL_12@01:30 | BroodLord 1 (1) | Roach 14, Hydralisk 11, SpineCrawler 5 (of 37) |
+| 4 | Torches_v4 | Victory | 13:37 | 56 | 3 | 5.0k/12.7k | POOL_12@01:30 | BroodLord 2 (2) | Hydralisk 8, SpineCrawler 8, Roach 6 (of 32) |
+| 5 | Pylon_v4 | Defeat | 17:54 | 40 | 1 | 20.6k/25.4k | POOL_12@01:07,ARMY_OUT_OF_POSITION@08:15 (×5) | BroodLord 14 (6) | Roach 30, Hydralisk 24, BroodlingEscort 21 (of 106) |
+| 6 | Persephone_v4 | Victory | 20:25 | 57 | 3 | 19.1k/35.8k | POOL_12@01:35,ARMY_OUT_OF_POSITION@09:00 (×2) | BroodLord 9 (9) | Roach 30, Mutalisk 17, SpineCrawler 16 (of 122) |
+| 7 | Incorporeal_v4 | Victory | 15:31 | 55 | 3 | 6.3k/18.1k | POOL_12@01:27,ARMY_OUT_OF_POSITION@09:00 | BroodLord 2 (2), BroodLordCocoon 1 (1) | Roach 17, Hydralisk 11, SpineCrawler 10 (of 53) |
+| 8 | Magannatha_v2 | Victory | 17:10 | 53 | 3 | 11.2k/30.4k | POOL_12@01:29,ARMY_OUT_OF_POSITION@09:36 | BroodLord 5 (5) | Roach 30, SpineCrawler 11, Hydralisk 10 (of 83) |
+| 9 | Ultralove_v2 | Defeat | 33:12 | 56 | 3 | 34.1k/44.0k | POOL_12@01:25,ARMY_OUT_OF_POSITION@18:53 (×9) | BroodLord 9 (5) | Roach 42, LurkerMPBurrowed 28, BroodlingEscort 26 (of 181) |
+| 10 | LeyLines_v3 | Victory | 14:32 | 57 | 3 | 6.8k/20.0k | POOL_12@01:30,ARMY_OUT_OF_POSITION@07:49 | BroodLord 3 (3) | Roach 14, Hydralisk 10, SpineCrawler 10 (of 44) |
+
+(`BroodlingEscort` is a Brood Lord's attack: the broodlings it launches.)
+
+**Findings:**
+- **Terran: Battlecruisers decide the games.** They were made in all 10 games (2-10 each).
+  - In all 8 losses they were one of our army's two top killers (the top one in 5), and we killed 0-6 of the 4-10 made.
+  - In both wins every Battlecruiser died (3 and 2).
+  - ARMY_OUT_OF_POSITION fired in all 8 losses and in neither win.
+  - Our value lost was 1.4-4.0× what we killed in the losses.
+- **Zerg: Brood Lords are where the losses come from.** They were made in 9 of 10 games (1-14 each).
+  - In the 7 wins with Brood Lords, every one died.
+  - The 2 losses had 14 (6 died) and 9 (5 died); their broodlings were our third top killer in both.
+  - Game 5 also faced a real 12 pool (POOL_12@01:07) and was on 1 base with 40 probes at 6:00.
+  - Game 9 lasted 33 minutes, and burrowed Lurkers were our second top killer.
+- So these two batches test what the Phase 3 capital-air responses (K1-K3) are for. The VeryHard batches above don't, because VeryHard Terran makes few Battlecruisers and VeryHard Zerg makes no Brood Lords.
+
 ## M7 acceptance evidence
