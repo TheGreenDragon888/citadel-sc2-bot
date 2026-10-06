@@ -32,7 +32,7 @@ DECISION_EVERY_STEPS, half a period after the main attack decision; a main attac
 HARASS squad in.
 """
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, NamedTuple, Optional
 
 from ares.consts import TOWNHALL_TYPES, EngagementResult, UnitRole, UnitTreeQueryType
 from loguru import logger
@@ -48,6 +48,7 @@ from bot.army.engagement import (
     WE_DEFEND,
     WORKERS,
     Engagement,
+    FightInputs,
     is_fighter,
 )
 from bot.army.squads import Role, Squads
@@ -113,6 +114,17 @@ NOT_TARGETS: frozenset[UnitTypeId] = frozenset(
 FIGHT, HOLD, RETREAT, MOVE, HARASS = "fight", "hold", "retreat", "move", "harass"
 
 
+class DecisionRecord(NamedTuple):
+    """One main-attack decision for §8: its level, and the fight values the level came from (M7)."""
+
+    t: float
+    action: str
+    level: int
+    reason: str
+    own_value: Optional[float] = None
+    enemy_value: Optional[float] = None
+
+
 class Army:
     def __init__(self, bot: "AresBot", endgame: Optional["EndGame"] = None, flags: Optional["FlagStore"] = None):
         self.bot = bot
@@ -141,7 +153,10 @@ class Army:
         self._target_tag: Optional[int] = None
         self.attack_center: Optional[Point2] = None
         self.last_level: Optional[int] = None
-        self.decisions: list[tuple[float, str, int, str]] = []  # (time, action, level, reason) for §8
+        self.decisions: list[DecisionRecord] = []  # §8
+        # the fight inputs behind the last main-attack and home-defense levels (M7 §8)
+        self._attack_inputs: Optional[FightInputs] = None
+        self._home_inputs: Optional[FightInputs] = None
         self._hunt_points: list[Point2] = []
         self._visited: set[Point2] = set()
         self._last_status: float = 0.0
@@ -226,6 +241,7 @@ class Army:
                 self._log(
                     Decision(self.decision.state, "recall", f"home threat at {self.threat.rounded} the DEFEND squad can't hold"),
                     self.home_level,
+                    inputs=self._home_inputs,
                 )
                 self._retreat_attack_squad()
                 return
@@ -241,6 +257,7 @@ class Army:
         target = self._attack_target(center, candidates)
         enemy = self.engagement.attack_inputs(center, target)
         level = self.engagement.level(candidates, enemy, ENEMY_DEFENDS)
+        self._attack_inputs = self.engagement.last_inputs
         self.last_level = level
         decision = self.decision.evaluate(bot.time, level, bot.supply_used, self.engagement.value(candidates), self._value_ratio())
         if decision.action == "launch":
@@ -248,7 +265,10 @@ class Army:
             self.target = target
             for u in candidates:
                 self.intents.pop(u.tag, None)
-            self._log(decision, level, f"{len(candidates)} units, {self._supply(candidates):g} supply -> {target.rounded}")
+            self._log(
+                decision, level, f"{len(candidates)} units, {self._supply(candidates):g} supply -> {target.rounded}",
+                inputs=self._attack_inputs,
+            )
             self.counter.merge()  # §4.6: the main attack absorbs a counterattack
 
     def _evaluate_attack(self, attackers: list[Unit]) -> None:
@@ -259,10 +279,12 @@ class Army:
             level = 0
             enemy_value = 0.0
             target = self.target
+            self._attack_inputs = None
         else:
             target = self._attack_target(center, attackers)
             enemy = self.engagement.attack_inputs(center, target)
             level = self.engagement.level(attackers, enemy, ENEMY_DEFENDS)
+            self._attack_inputs = self.engagement.last_inputs
             enemy_value = self.engagement.value(enemy)
         self.target = target
         self.last_level = level
@@ -270,7 +292,7 @@ class Army:
             bot.time, level, bot.supply_used, self.engagement.value(attackers), self._value_ratio()
         )
         if decision.action == "retreat":
-            self._log(decision, level, f"{len(attackers)} units left, enemy value near {enemy_value:.0f}")
+            self._log(decision, level, f"{len(attackers)} units left, enemy value near {enemy_value:.0f}", inputs=self._attack_inputs)
             self._retreat_attack_squad()
 
     def _retreat_attack_squad(self) -> None:
@@ -340,6 +362,7 @@ class Army:
         self.threat = found.position if found is not None else None
         self.defend_target = None
         self.home_level = -1
+        self._home_inputs = None
         state = "none"
         if found is not None:
             if found.is_structure or found.type_id in WORKERS:
@@ -349,6 +372,7 @@ class Army:
                 # (a Cannon target is part of its own guard)
                 guard = self.engagement.static_defense_near(found.position) + self.engagement.enemies_near([found.position])
                 level = self.engagement.level(defenders, guard, ENEMY_DEFENDS) if guard else int(EngagementResult.VICTORY_EMPHATIC)
+                self._home_inputs = self.engagement.last_inputs if guard else None
                 self.home_level = level
                 if level >= CLEAR_STATIC_LEVEL:
                     self.defend_target, state = found.position, f"clearing {found.type_id.name} (level {level})"
@@ -359,6 +383,7 @@ class Army:
             else:
                 enemy = self.engagement.enemies_near([found.position]) + self.engagement.static_defense_near(found.position)
                 level = self.engagement.level(defenders + self.own_cannons_near(found.position), enemy, WE_DEFEND)
+                self._home_inputs = self.engagement.last_inputs
                 self.home_level = level
                 covered = self._covered_by_battery(found.position)
                 needed = DEFEND_ENGAGE if covered else ATTACK_CONTINUE
@@ -374,6 +399,7 @@ class Army:
                     f"DEFEND {self.bot.time_formatted}: {state}"
                     + (f" vs {found.type_id.name} at {found.position.rounded}" if found is not None else "")
                     + f", {len(defenders)} defenders ({self._supply(defenders):g} supply)"
+                    + (f"; {self._home_inputs.text()}" if self._home_inputs is not None else "")
                 )
 
     def _home_threat(self, defenders: list[Unit]) -> Optional[Unit]:
@@ -636,12 +662,20 @@ class Army:
 
     # -- logging ---------------------------------------------------------------------------------
 
-    def _log(self, decision: Decision, level: int, detail: str = "") -> None:
+    def _log(self, decision: Decision, level: int, detail: str = "", inputs: Optional[FightInputs] = None) -> None:
+        """`inputs`: the fight the level came from, logged and kept for §8 (M7)."""
         now = self.bot.time
-        self.decisions.append((now, decision.action, level, decision.reason))
+        self.decisions.append(
+            DecisionRecord(
+                now, decision.action, level, decision.reason,
+                inputs.own_value if inputs is not None else None,
+                inputs.enemy_value if inputs is not None else None,
+            )
+        )
         logger.info(
             f"ENGAGE {self.bot.time_formatted} {decision.action} level={level} ({decision.reason})"
             + (f": {detail}" if detail else "")
+            + (f"; {inputs.text()}" if inputs is not None else "")
         )
 
     def _status(self) -> None:

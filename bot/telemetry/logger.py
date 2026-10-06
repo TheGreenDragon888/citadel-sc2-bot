@@ -266,8 +266,9 @@ class Telemetry:
         logger.info(
             f"METRIC army value_lost={self.army_value_lost:.0f} value_killed={self.army_value_killed:.0f}"
         )
-        for t, action, level, reason in army.decisions if army is not None else []:
-            logger.info(f"METRIC engage {_mmss(t)} {action} level={level} ({reason})")
+        for d in army.decisions if army is not None else []:
+            values = f" values {d.own_value:.0f} vs {d.enemy_value:.0f}" if d.own_value is not None else ""
+            logger.info(f"METRIC engage {_mmss(d.t)} {d.action} level={d.level} ({d.reason}){values}")
         lost = self.scouts_lost_before()
         logger.info(
             f"METRIC scouts tasks={len(self.scouts)} lost_before_{_mmss(SCOUT_LOSS_CHECK_S)}={len(lost)}"
@@ -305,7 +306,7 @@ class Telemetry:
 
         counter = army.counter if army is not None else None
         return {
-            "version": 2,
+            "version": 3,
             "game_id": self.game_id,
             "date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "result": result,
@@ -339,8 +340,13 @@ class Telemetry:
             ),
             "army_value": {"lost": round(self.army_value_lost), "killed": round(self.army_value_killed)},
             "engage": capped([
-                {"t": round(t, 1), "action": action, "level": level, "reason": reason}
-                for t, action, level, reason in (army.decisions if army is not None else [])
+                {
+                    "t": round(d.t, 1), "action": d.action, "level": d.level, "reason": d.reason,
+                    # M7 §8: the fight values the level came from (None when nothing was simulated)
+                    "own_value": round(d.own_value) if d.own_value is not None else None,
+                    "enemy_value": round(d.enemy_value) if d.enemy_value is not None else None,
+                }
+                for d in (army.decisions if army is not None else [])
             ]),
             "counterattacks": capped(list(counter.outcomes) if counter is not None else []),
             "scouts": {"tasks": len(self.scouts), f"lost_before_{SCOUT_LOSS_CHECK_S:.0f}s": len(self.scouts_lost_before())},

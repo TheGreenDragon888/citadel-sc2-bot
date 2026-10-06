@@ -807,3 +807,20 @@ STEP_SECTION_LOG_MS: float = 2.0  # a slow step's warning lists the parts that t
 # (on the ladder an unhandled error ends the game as a Crash, VERIFY_NOTES "M6 findings")
 ERROR_TRACEBACKS_PER_PART: int = 3  # full tracebacks logged per part; later errors there ...
 ERROR_LOG_EVERY_S: float = 60.0  # ... get one line per part this often (game seconds) with the count
+
+
+# ---------------------------------------------------------------------------------------------
+# M7: ladder fixes (docs/M7_PLAN.md; DESIGN.md §4.2-§4.5.3, §8)
+# ---------------------------------------------------------------------------------------------
+
+# Phase 0 telemetry (§8 M7 metrics)
+FIGHT_LOG_TYPES: int = 6  # ENGAGE/DEFEND lines list at most this many unit types per side (highest value first)
+LOST_FAR_DISTANCE: float = 12.0  # an army unit that dies farther than this from its intent's point counts as "far"
+# §4.2 capital air (M7): the ships, by name in game data. An explicit list: python-sc2 reports a
+# Carrier as unable to attack (its interceptors do; VERIFY_NOTES "M7 findings")
+CAPITAL_AIR_TYPES: frozenset[UnitTypeId] = frozenset(
+    {
+        UnitTypeId.TEMPEST, UnitTypeId.CARRIER, UnitTypeId.MOTHERSHIP, UnitTypeId.BATTLECRUISER,
+        UnitTypeId.BROODLORD, UnitTypeId.BROODLORDCOCOON,
+    }
+)

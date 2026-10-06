@@ -18,7 +18,7 @@ hallucinations and units that can't fight; and enemy static defense within
 support.
 """
 
-from typing import TYPE_CHECKING, Iterable, Optional, Sequence
+from typing import TYPE_CHECKING, Iterable, NamedTuple, Optional, Sequence
 
 from ares.consts import EngagementResult, UnitTreeQueryType
 from sc2.ids.unit_typeid import UnitTypeId
@@ -26,7 +26,7 @@ from sc2.position import Point2
 from sc2.unit import Unit
 from sc2_helper.combat_simulator import CombatSimulator
 
-from bot.constants import ENGAGE_ENEMY_RADIUS, ENGAGE_STATIC_RADIUS
+from bot.constants import ENGAGE_ENEMY_RADIUS, ENGAGE_STATIC_RADIUS, FIGHT_LOG_TYPES
 
 if TYPE_CHECKING:
     from ares import AresBot
@@ -82,6 +82,33 @@ def is_static_defense(structure: Unit) -> bool:
     return True
 
 
+class FightInputs(NamedTuple):
+    """What one `Engagement.level` call simulated (M7 §8 fight inputs)."""
+
+    own_text: str
+    own_value: float
+    enemy_text: str
+    enemy_value: float
+
+    def text(self) -> str:
+        return f"vs {self.enemy_text} ({self.enemy_value:.0f}) | ours {self.own_text} ({self.own_value:.0f})"
+
+
+def composition_text(pairs: Iterable[tuple[str, float]], max_types: int = FIGHT_LOG_TYPES) -> tuple[str, float]:
+    """(type name, resource value) per unit -> ("8 TEMPEST 4 ZEALOT", total value): counts by type,
+    the highest total value first, at most `max_types` types (the rest summed as "+N more")."""
+    counts: dict[str, int] = {}
+    values: dict[str, float] = {}
+    for name, value in pairs:
+        counts[name] = counts.get(name, 0) + 1
+        values[name] = values.get(name, 0.0) + value
+    order = sorted(counts, key=lambda n: (-values[n], n))
+    text = " ".join(f"{counts[n]} {n}" for n in order[:max_types])
+    if len(order) > max_types:
+        text += f" +{sum(counts[n] for n in order[max_types:])} more"
+    return text or "nothing", sum(values.values())
+
+
 def level_from_sim(won: bool, health_left: float, own_health: float, enemy_health: float) -> int:
     """ares's mapping (`combat_sim_manager.py:147-173`) with `own_health` = our HP + shields."""
     if won:
@@ -118,6 +145,7 @@ class Engagement:
         self.sim = CombatSimulator()
         self.sim.enable_timing_adjustment(True)
         self.calls: int = 0  # simulator calls this game (§3: at most 2 per evaluation)
+        self.last_inputs: Optional[FightInputs] = None  # the last `level` call's inputs (M7 §8)
 
     # -- values ----------------------------------------------------------------------------------
 
@@ -169,8 +197,10 @@ class Engagement:
     # -- the level -------------------------------------------------------------------------------
 
     def level(self, own: Sequence[Unit], enemy: Sequence[Unit], defender: int) -> int:
-        """EngagementResult value (0-10) of `own` fighting `enemy`."""
+        """EngagementResult value (0-10) of `own` fighting `enemy`. The inputs are kept in
+        `last_inputs` for the log lines (M7 §8)."""
         own = [u for u in own if is_fighter(u) or (u.is_structure and u.can_attack)]
+        self.last_inputs = self._inputs(own, enemy)
         if not own:
             return int(EngagementResult.LOSS_EMPHATIC if enemy else EngagementResult.TIE)
         if not enemy:
@@ -183,3 +213,15 @@ class Engagement:
         own_health = sum(u.health + u.shield for u in own)
         enemy_health = sum(u.health + u.shield for u in enemy)
         return int(level_from_sim(won, health_left, own_health, enemy_health))
+
+    def _inputs(self, own: Sequence[Unit], enemy: Sequence[Unit]) -> FightInputs:
+        def pairs(units: Sequence[Unit]) -> list[tuple[str, float]]:
+            out = []
+            for u in units:
+                cost = self.bot.calculate_unit_value(u.type_id)
+                out.append((u.type_id.name, cost.minerals + cost.vespene))
+            return out
+
+        own_text, own_value = composition_text(pairs(own))
+        enemy_text, enemy_value = composition_text(pairs(enemy))
+        return FightInputs(own_text, own_value, enemy_text, enemy_value)

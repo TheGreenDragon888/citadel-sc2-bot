@@ -375,7 +375,7 @@ def main() -> int:
         army = getattr(bot, "army", None)
         engage = None
         if army is not None:
-            actions = Counter(action for _, action, _, _ in army.decisions)
+            actions = Counter(d.action for d in army.decisions)
             engage = f"{actions['launch']}/{actions['retreat']}/{actions['recall']}"
         value = step = None
         if telemetry is not None:
