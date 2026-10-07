@@ -28,7 +28,7 @@ Plans (§4.2):
 """
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 from ares.consts import BUILDING_SIZE_ENUM_TO_RADIUS
 from ares.dicts.structure_to_building_size import STRUCTURE_TO_BUILDING_SIZE
@@ -44,6 +44,7 @@ from bot.constants import (
     DEFENSE_TECH_AFTER_SUPPLY,
     EXPANSION_RETRY_S,
     FORGE_FIRST_BANK,
+    HOLD_RADIUS,
     HOLD_SHIFT_STEP,
     HOLD_SHIFT_STEPS,
     MEMORY_KEEPS_OPENER,
@@ -94,6 +95,25 @@ def rush_cannon_near(cannons: list[Point2], homes: list[Point2], radius: float) 
     """M7 B7 (D14): an enemy Photon Cannon (finished or not) stands within `radius` of one of
     `homes`, our main and natural spots (pure)."""
     return any(c.distance_to(h) < radius for c in cannons for h in homes)
+
+
+def safe_hold_point(
+    point: Point2, toward: Point2, cover_count: Callable[[Point2], int], step: float, steps: int
+) -> Point2:
+    """`point`, moved `step` toward `toward` at most `steps` times, to the first spot that no
+    finished enemy Cannon covers; if every spot is covered, the one the fewest cover, nearest
+    `point` on ties (pure). Fewest rather than farthest since M7 B7: with Cannons inside our main,
+    stepping toward it walks into them."""
+    best, best_count = point, None
+    here = point
+    for _ in range(steps + 1):
+        count = cover_count(here)
+        if count == 0:
+            return here
+        if best_count is None or count < best_count:
+            best, best_count = here, count
+        here = here.towards(toward, step)
+    return best
 
 
 @dataclass
@@ -263,13 +283,14 @@ class DefensePlanner:
     # -- helpers ---------------------------------------------------------------------------------
 
     def _safe(self, point: Point2) -> Point2:
-        """`point`, moved toward our main until no finished enemy Cannon can hit a unit there."""
-        bot = self.bot
-        for _ in range(HOLD_SHIFT_STEPS):
-            if not self.cannon_covers(point, 1.0):
-                break
-            point = point.towards(bot.start_location, HOLD_SHIFT_STEP)
-        return point
+        """`point`, moved toward our main until no finished enemy Cannon can hit a unit within
+        HOLD_RADIUS of it: holding units stand anywhere in that radius without moving (army.py
+        micro), and in an M7 B7 test game 32 holding units died within 8 of the ramp hold point,
+        in a Cannon's reach, over 9 minutes."""
+        return safe_hold_point(
+            point, self.bot.start_location,
+            lambda p: self.cannons_covering(p, HOLD_RADIUS + 1.0), HOLD_SHIFT_STEP, HOLD_SHIFT_STEPS,
+        )
 
     def _ramp_hold(self, offset: float = RAMP_HOLD_OFFSET) -> Point2:
         bot = self.bot
@@ -294,9 +315,13 @@ class DefensePlanner:
 
     def cannon_covers(self, point: Point2, radius: float) -> bool:
         """A finished, powered enemy Cannon can hit a structure of `radius` at `point`."""
-        return any(
-            c.distance_to(point) <= c.ground_range + c.radius + radius + CANNON_COVER_EXTRA
-            for c in self.completed_enemy_cannons()
+        return self.cannons_covering(point, radius) > 0
+
+    def cannons_covering(self, point: Point2, radius: float) -> int:
+        """How many finished, powered enemy Cannons can hit something of `radius` at `point`."""
+        return sum(
+            1 for c in self.completed_enemy_cannons()
+            if c.distance_to(point) <= c.ground_range + c.radius + radius + CANNON_COVER_EXTRA
         )
 
     # -- per-threat plans (§4.2) -------------------------------------------------------------------

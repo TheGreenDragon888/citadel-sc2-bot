@@ -25,7 +25,7 @@ from bot.constants import (  # noqa: E402
     MAIN_STALE_S,
     PROXY_NATURAL_WAIT_UNTIL_S,
 )
-from bot.defense.defense_planner import rush_cannon_near  # noqa: E402
+from bot.defense.defense_planner import rush_cannon_near, safe_hold_point  # noqa: E402
 from bot.intel.detectors import (  # noqa: E402
     PROXY_EXPANSION,
     PROXY_MISSING,
@@ -102,6 +102,18 @@ case(
     "cannon hold: a Cannon far from both",
     rush_cannon_near, [Point2((40 + CANNON_RUSH_RADIUS + 1, 30))], [MAIN, NAT], CANNON_RUSH_RADIUS, expected=False,
 )
+
+# the hold point steps toward our main out of finished Cannons' reach (`_safe`, B7)
+RAMP, HOME = Point2((30, 20)), Point2((20, 20))
+def _cover_x_above(limit: float, count: int = 1):  # noqa: E302
+    return lambda p: count if p.x > limit else 0
+case("hold point: not covered, unchanged", safe_hold_point, RAMP, HOME, _cover_x_above(40), 2.0, 6, expected=RAMP)
+case("hold point: covered, first clear step", safe_hold_point, RAMP, HOME, _cover_x_above(25.5), 2.0, 6, expected=Point2((24, 20)))
+case(
+    "hold point: covered everywhere, the spot fewest cover",
+    safe_hold_point, RAMP, HOME, lambda p: 2 if p.x > 25 else 1, 2.0, 6, expected=Point2((24, 20)),
+)
+case("hold point: equal cover everywhere, the original", safe_hold_point, RAMP, HOME, lambda p: 1, 2.0, 6, expected=RAMP)
 
 # -- B8: the Observer expansion trip gate (§4.3, D15) ---------------------------------------------
 case("trip: straight-line legs at speed 2", trip_seconds, Point2((0, 0)), [Point2((3, 4)), Point2((3, 10))], 2.0, expected=5.5)
