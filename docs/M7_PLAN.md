@@ -17,8 +17,11 @@
 | D7 | Twilight order: Blink first vs P and T; Charge first vs Z, then Blink. |
 | D9 | CAPITAL_AIR is detected for every race, **and M7 responds to it for every race** (vs P: Tempest/Carrier/Mothership; vs T: Battlecruiser; vs Z: Brood Lord). |
 | D10 | **High Templar and Archons are allowed.** Psionic Storm and Archon splash are core vs Z. **Archons are not an anti-air tool**: the §4.5.1 air switch only raises the Stalker share (this replaces the spec's "add Archons"). **Small Archon shares:** vs T while the enemy army is mostly bio; vs P while it's Zealot-heavy. |
-| D11 | **Targets (user accepted, 2026-10-06), on the baseline seeds:** Protoss Air VeryHard ≥ 7/10 (baseline 2/10, seed 7000); Terran Air VeryHard ≥ 9/10 with no loss to Battlecruisers (baseline 9/10, seed 7100); Zerg Air VeryHard ≥ 9/10 (baseline 10/10, seed 7200). CheatInsane Air vs Terran and Zerg (seeds 7300/7400) exercise Battlecruisers and Brood Lords; their targets are set after their baseline. |
+| D11 | **Targets (user accepted, 2026-10-06), on the baseline seeds:** Protoss Air VeryHard ≥ 7/10 (baseline 2/10, seed 7000); Terran Air VeryHard ≥ 9/10 with no loss to Battlecruisers (baseline 9/10, seed 7100); Zerg Air VeryHard ≥ 9/10 (baseline 10/10, seed 7200). CheatInsane Air vs Terran and Zerg (seeds 7300/7400) exercise Battlecruisers and Brood Lords. **Their targets (user accepted, 2026-10-07):** Terran Air CheatInsane ≥ 7/10, the M4 bar (baseline 2/10); Zerg Air CheatInsane ≥ 9/10 (baseline 8/10). |
 | D12 | **B6 (user accepted):** the §4.4 rows 7/10 missing-production test waits for the enemy natural to be seen and doesn't count an expansion-first opening (it raised a false PROXY in 7 of the 8 baseline losses vs Protoss Air). |
+| D14 | **B7 (user decision, 2026-10-07):** while an enemy Cannon stands within 25 of our main or natural, the army holds at the top of the main ramp, as the proxy plan does. In the Phase 1 cannon-rush batches, every unit sent to the natural's hold point walked past the rush Cannons and died; the Phase-0 code lost the same game that way. |
+| D15 | **B8 (user decision, 2026-10-07):** an Observer starts an expansion check only if the enemy main won't fall due for its re-scout before the trip ends, or another Observer stays free; otherwise a probe goes. After B4, the enemy main still went unseen for up to ~2.5 minutes while the only free Observer was on a 90-110 s expansion trip. |
+| D16 | **The HOLD `lost_far` criterion moves to Phase 2 (user decision, 2026-10-07).** Phase 1 had 8 against the Phase-0 code's 2, all in two losses to mass air, while HOLD deaths overall fell from 45 to 17. C1/C2 target those deaths. |
 | D13 | **E0 gets a mass-Void-Ray case (user accepted).** Whether Void Ray masses also trigger the Void Ray/Tempest response is decided with those numbers. Void Rays were our top killer in 7 of 10 baseline games vs Protoss Air. |
 
 **Defaults (accepted by the user):**
@@ -115,7 +118,7 @@ Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your rev
 - **Acceptance:** one local game shows the three new line types; `check_game_log.py` passes; M1 regression (Hard × 10, T/Z/P/Random) unchanged.
 - **Commits:** O1, O2, O3 each.
 
-## Phase 1: bugs (no spec change beyond K0's §4.3 rows)
+## Phase 1: bugs (spec changes: K0's §4.3 rows; B7 and B8 in §4.2 and §4.3, user decisions D14 and D15)
 
 | Item | Files and functions | Change |
 |---|---|---|
@@ -131,14 +134,19 @@ Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your rev
 | B4 | `logger.py` | Count main rescouts in the game record. |
 | B5 | `constants.py:HALLUCINATION_AT_S` | `{"Terran": 330.0}`; update the `scout_planner.py` docstring (l.18-25). |
 | B6 | `detectors.py:_proxy` (l.433-486) | For P and T, when the main has no Barracks/Gateway: if a townhall has been seen at their natural (`natural_townhall_seen_at`), drop that reason and log `SCOUT proxy check: expansion first`. If the natural hasn't been in vision since `PROXY_NATURAL_FROM_S` (`natural_seen_at`), leave `proxy_checked` False and decide on a later tick, at the latest at `PROXY_NATURAL_WAIT_UNTIL_S` (TUNE). This mirrors the Forge-first rule (`FORGE_FIRST_UNTIL_S`). The worker-count reasons and the far-production detector are unchanged. |
+| B7 | `defense_planner.py:_plan_cannon_rush` | Pure `rush_cannon_near(cannons, homes, radius) -> bool`: an enemy Photon Cannon (finished or not, snapshots included) within `CANNON_RUSH_RADIUS` of our main or natural spot. While it's true: `plan.army_hold_point = self._ramp_hold()`, which `_safe` already keeps out of finished Cannons' reach. No leash, so home defense still clears Cannons near our bases once it can beat them (`army.py` l.436-446). CANNON_RUSH comes before the plans that set a hold point only when none is set. |
+| B8 | `scout_planner.py:_expansion_checks` | Pure `observer_trip_ok(now, trip_s, main_seen_at, last_rescout_at, free_observers) -> bool`: true if another Observer stays free, or if `main_rescout_due(now + trip_s, …)` is false. `trip_s` is the straight-line path from the Observer through the trip's points, divided by `movement_speed × NORMAL_TO_FASTER`. That speed is base game data without upgrades, so the estimate errs long. When it's false, the trip goes to a probe as before (the probe skips the enemy main and natural), and the log says the Observer was kept for the re-scout. |
 
 - **Tests:**
   - `test_m7_rules.py` gains `_main_rescout_due` cases (pure version) and the B6 decision as a pure function (main production, natural townhall seen, natural in vision, time → raise / skip / wait).
+  - It also gains `rush_cannon_near` (B7) and `observer_trip_ok` (B8) cases.
   - `test_m3_checks.py`, `test_attack_decision.py` and `test_threat_flags.py` unchanged and passing.
   - `scripts/test_outranged.py` (new, staged, case `idle_hold`): Citadel vs a scripted Protoss `StagedEnemy` (as in `test_counterattack.py`); a debug-spawned Tempest attacks our hold point.
 - **Acceptance:**
-  - Air batches on the same seeds: `reinforce_after_retreat` = 0, `lost_far` for HOLD lower than baseline.
+  - Air batches on the same seeds: `reinforce_after_retreat` = 0. (The HOLD `lost_far` criterion moved to Phase 2, D16.)
   - Main rescouts at least every ~90 s from 6:00 while an Observer is free.
+  - B8: in the Protoss Air batch, no gap over 90 s between main re-scouts from 6:00 while an Observer is alive and not held by the army or a post (Observer deaths aside).
+  - B7: cannon rush ≥ 8/10 on two runs of the seeds (one run swung 5/10 to 8/10 on the same code), and no unit lost walking to a hold point past rush Cannons.
   - B6: no PROXY flag in Protoss Air games where the enemy opened Nexus first (the baseline's `PROXY@01:30` games), and the cheese batches still raise PROXY vs `proxy_rax` (correct flag 40/40).
   - Regressions at their recorded levels: M1 Hard × 10; M2/M3 cheese × 10 each (≥ 8/10, flags 40/40, no scout lost before 4:00); M4 VeryHard × 10 per race (≥ 7 each).
 - **Ladder:** after M6 passes, Phases 0 + 1 are the first M7 upload: zip on Python 3.12, `ladder_env_test.py`, upload, `ladder_watch.py`.
@@ -170,6 +178,7 @@ Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your rev
   - `test_outranged.py`: new cases `hold_vs_tempest` (no unit dies beyond the leash; the hold point moves back) and `committed` (FIGHT units still engage).
 - **Acceptance:**
   - Air batches (same seeds): value lost/killed ratio and launch-then-retreat-within-60-s count better than Phase 1.
+  - HOLD `lost_far` in the Air batches lower than Phase 1's (8 in the Protoss Air batch; D16).
   - Regressions: M1, M2/M3, M4 (≥ 7 each), M5 staged counterattack 7/7.
 - **Ladder:** second upload.
 
