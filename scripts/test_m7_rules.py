@@ -3,7 +3,7 @@
     poetry run python scripts/test_m7_rules.py
 
 Each M7 step adds its cases here: the fight-input text (O1), the expansion-first proxy check
-(B6) and the main re-scout gate (B4). Prints PASS/FAIL per case; exits 1 on any failure.
+(B6), the main re-scout gate (B4), the cannon-rush ramp hold (B7) and the Observer trip gate (B8). Prints PASS/FAIL per case; exits 1 on any failure.
 """
 
 import os
@@ -16,13 +16,16 @@ os.chdir(ROOT)
 sys.path.insert(0, str(ROOT))
 
 import run  # noqa: E402,F401  (puts ares-sc2 on sys.path)
+from sc2.position import Point2  # noqa: E402
 
 from bot.army.engagement import FightInputs, composition_text  # noqa: E402
 from bot.constants import (  # noqa: E402
+    CANNON_RUSH_RADIUS,
     MAIN_STALE_FROM_S,
     MAIN_STALE_S,
     PROXY_NATURAL_WAIT_UNTIL_S,
 )
+from bot.defense.defense_planner import rush_cannon_near  # noqa: E402
 from bot.intel.detectors import (  # noqa: E402
     PROXY_EXPANSION,
     PROXY_MISSING,
@@ -30,7 +33,7 @@ from bot.intel.detectors import (  # noqa: E402
     PROXY_WAIT,
     proxy_production_check,
 )
-from bot.intel.scout_planner import main_rescout_due  # noqa: E402
+from bot.intel.scout_planner import main_rescout_due, observer_trip_ok, trip_seconds  # noqa: E402
 
 # (name, function, args, kwargs, expected)
 CASES: list[tuple[str, Callable, tuple, dict, Any]] = []
@@ -89,6 +92,26 @@ case("rescout: main never seen, none sent", main_rescout_due, T, None, -MAIN_STA
 case("rescout: main seen recently", main_rescout_due, T, T - MAIN_STALE_S + 1, -MAIN_STALE_S, expected=False)
 case("rescout: main stale, one sent recently", main_rescout_due, T, T - MAIN_STALE_S - 1, T - 10, expected=False)
 case("rescout: main stale, last one long ago", main_rescout_due, T, T - MAIN_STALE_S - 1, T - MAIN_STALE_S, expected=True)
+
+# -- B7: the cannon-rush ramp hold (§4.2, D14) ----------------------------------------------------
+MAIN, NAT = Point2((20, 20)), Point2((40, 30))
+case("cannon hold: no Cannon", rush_cannon_near, [], [MAIN, NAT], CANNON_RUSH_RADIUS, expected=False)
+case("cannon hold: a Cannon near the natural", rush_cannon_near, [Point2((45, 35))], [MAIN, NAT], CANNON_RUSH_RADIUS, expected=True)
+case("cannon hold: a Cannon in the main", rush_cannon_near, [Point2((25, 15))], [MAIN, NAT], CANNON_RUSH_RADIUS, expected=True)
+case(
+    "cannon hold: a Cannon far from both",
+    rush_cannon_near, [Point2((40 + CANNON_RUSH_RADIUS + 1, 30))], [MAIN, NAT], CANNON_RUSH_RADIUS, expected=False,
+)
+
+# -- B8: the Observer expansion trip gate (§4.3, D15) ---------------------------------------------
+case("trip: straight-line legs at speed 2", trip_seconds, Point2((0, 0)), [Point2((3, 4)), Point2((3, 10))], 2.0, expected=5.5)
+case("trip: no speed", trip_seconds, Point2((0, 0)), [Point2((3, 4))], 0.0, expected=float("inf"))
+case("trip: no points", trip_seconds, Point2((0, 0)), [], 2.0, expected=0.0)
+case("observer trip: a second free Observer", observer_trip_ok, T, 200.0, T - 10, T - 10, 2, expected=True)
+case("observer trip: back before the main goes stale", observer_trip_ok, T, MAIN_STALE_S - 20, T - 10, T - 10, 1, expected=True)
+case("observer trip: the main goes stale during it", observer_trip_ok, T, MAIN_STALE_S + 40, T - 10, T - 10, 1, expected=False)
+case("observer trip: main never seen", observer_trip_ok, T, 10.0, None, -MAIN_STALE_S, 1, expected=False)
+case("observer trip: all before MAIN_STALE_FROM_S", observer_trip_ok, 0.0, MAIN_STALE_FROM_S - 1, None, -MAIN_STALE_S, 1, expected=True)
 
 
 def main() -> int:

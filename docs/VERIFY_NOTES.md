@@ -1590,6 +1590,11 @@ API checks and Citadel's choices for M7 (`docs/M7_PLAN.md`). Checked before the 
 - ares's SpawnController morphs Archons from any two idle, ready High Templar not already morphing
   (`ares-sc2/src/ares/behaviors/macro/spawn_controller.py`, `_handle_archon_morph`), so Archons
   stay out of its mix and Citadel morphs them itself (§4.5.3).
+- **B8's trip estimate** (python-sc2 in the Poetry environment):
+  - `Unit.movement_speed` is "the unit movement speed on game speed 'normal'. To convert it to 'faster' movement speed, multiply it by a factor of '1.4'". It doesn't include upgrades or buffs (`sc2/unit.py:322-326`).
+  - `BotAI.time` is `game_loop / 22.4`, seconds on "faster" (`sc2/bot_ai.py:46-48`).
+  - So an Observer covers `movement_speed × 1.4` per `bot.time` second without Gravitic Boosters, and more with them; the estimate errs long (`NORMAL_TO_FASTER`).
+  - `Unit.distance_per_step` divides `real_speed` by 22.4 without the 1.4 (`sc2/unit.py:385-388`), so B8 doesn't use it.
 - **B2's in-game check (`poetry run python scripts/test_outranged.py --case idle_hold`, PylonAIE_v4,
   code `f62475a`):** do units at their hold point get drawn out after an attacker beyond the
   leash? No.

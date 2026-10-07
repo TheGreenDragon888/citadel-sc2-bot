@@ -831,3 +831,7 @@ CAPITAL_AIR_TYPES: frozenset[UnitTypeId] = frozenset(
 # is down by ~1:05-1:20 in the baseline replays), and waits for that until PROXY_NATURAL_WAIT_UNTIL_S
 PROXY_NATURAL_SEEN_FROM_S: float = 90.0
 PROXY_NATURAL_WAIT_UNTIL_S: float = 150.0
+# M7 B8 (§4.3, user decision): an Observer's expansion trip time is estimated from its game-data
+# speed, which is per second on the "normal" game speed; bot.time counts "faster" seconds (game
+# loop / 22.4), 1.4 times as many (python-sc2 unit.py `movement_speed`, bot_ai.py `time`)
+NORMAL_TO_FASTER: float = 1.4

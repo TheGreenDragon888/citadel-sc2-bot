@@ -13,7 +13,8 @@ Plans (§4.2):
 - WORKER_RUSH: pull probes (worker_defense.py), Zealot first, no expansion while it lasts.
 - CANNON_RUSH: probes on unfinished Pylons/Cannons (worker_defense.py); once a Cannon is done,
   Stalkers/Immortal; while a finished Cannon covers our natural, the natural is cancelled and
-  no base is taken.
+  no base is taken; while a Cannon stands near our main or natural, the army holds the ramp
+  top (M7 B7).
 - POOL_12: no expansion until POOL_12_UNITS_BEFORE_EXPAND units and no Zerglings near our bases;
   a Zealot/Adept holds the wall gap; a Battery in the main.
 - PROXY: no expansion until PROXY_UNITS_BEFORE_EXPAND units; a 2nd Gateway and a Battery in the
@@ -38,6 +39,7 @@ from sc2.position import Point2
 from bot.constants import (
     ARMY_HOLD_LEASH,
     CANNON_COVER_EXTRA,
+    CANNON_RUSH_RADIUS,
     CANNON_SIEGE_RESERVE_UNITS,
     DEFENSE_TECH_AFTER_SUPPLY,
     EXPANSION_RETRY_S,
@@ -86,6 +88,12 @@ GROUND_ARMY: frozenset[UnitTypeId] = frozenset(
 )
 ROACHES: frozenset[UnitTypeId] = frozenset({UnitTypeId.ROACH, UnitTypeId.RAVAGER})
 NEXUS_RADIUS: float = BUILDING_SIZE_ENUM_TO_RADIUS[STRUCTURE_TO_BUILDING_SIZE[UnitTypeId.NEXUS]]
+
+
+def rush_cannon_near(cannons: list[Point2], homes: list[Point2], radius: float) -> bool:
+    """M7 B7 (D14): an enemy Photon Cannon (finished or not) stands within `radius` of one of
+    `homes`, our main and natural spots (pure)."""
+    return any(c.distance_to(h) < radius for c in cannons for h in homes)
 
 
 @dataclass
@@ -318,6 +326,13 @@ class DefensePlanner:
                 # a natural Nexus and probes kept being made
                 plan.allow_expand = False
                 plan.reserve_units = max(plan.reserve_units, CANNON_SIEGE_RESERVE_UNITS)
+        # M7 B7 (D14): the army waits at the ramp top, not at the natural, while a rush Cannon
+        # stands; in test games every unit sent to the natural walked past the Cannons and died.
+        # No leash, so home defense still clears the Cannons once it can beat them
+        bot = self.bot
+        cannons = [s.position for s in bot.enemy_structures if s.type_id == UnitTypeId.PHOTONCANNON]
+        if rush_cannon_near(cannons, [bot.start_location, bot.mediator.get_own_nat], CANNON_RUSH_RADIUS):
+            plan.army_hold_point = self._ramp_hold()
 
     def _plan_pool_12(self, plan: DefensePlan, army: list) -> None:
         bot = self.bot
