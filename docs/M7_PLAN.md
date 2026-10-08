@@ -23,6 +23,10 @@
 | D15 | **B8 (user decision, 2026-10-07):** an Observer starts an expansion check only if the enemy main won't fall due for its re-scout before the trip ends, or another Observer stays free; otherwise a probe goes. After B4, the enemy main still went unseen for up to ~2.5 minutes while the only free Observer was on a 90-110 s expansion trip. |
 | D16 | **The HOLD `lost_far` criterion moves to Phase 2 (user decision, 2026-10-07).** Phase 1 had 8 against the Phase-0 code's 2, all in two losses to mass air, while HOLD deaths overall fell from 45 to 17. C1/C2 target those deaths. |
 | D17 | **B9 (user decision, 2026-10-08):** while PROXY is active and a proxy production structure is known, the DEFEND squad kills it once it can win that fight, as it clears Cannons near our bases. Two proxy-rax games tied at 60:00: one base, under the 150-supply launch gate, and the proxy Barracks never killed, so the flag never expired. |
+| D18 | **Melee units and the out-ranged rule (user decision, 2026-10-08):** a unit whose game-data range is at most `MELEE_RANGE_MAX` is out-ranged only by enemies it can't hit, in C1 (step-out and hold-point fallback) and C5 (penalty). On `79fdd0e`, C1/C5 treated Zealots as out-ranged by Marines: proxy rax fell from 10/10 to 7/10, losing the two games without opponent memory. |
+| D19 | **Weaponless units (user decision, 2026-10-08):** 12 types have no weapon in this game data. (a) The range rules use ares's `WEIGHT_COSTS` range for a type without a game-data weapon, on both sides. (b) When weaponless damage dealers (`WEAPONLESS_DAMAGE_TYPES`) make up at least `WEAPONLESS_CAP_SHARE` of the enemy's value, `Engagement.level` is capped by the value level (§4.5.2). (c) Our units with a range from neither source keep their pre-M7 behaviour (no step-out, not left out by C2). |
+| D20 | **The one-base proxy stalemate is investigated now (user decision, 2026-10-08):** in proxy-rax game 8 on `703b084` and `79fdd0e`, no Nexus was started although the plan allowed one, and Adepts at the ramp were picked off one at a time with no home threat logged; the game tied at 60:00 both times. |
+| D21 | **The C4 home-fight threshold `LAUNCH_HOME_FIGHT_MIN_FRACTION` is accepted (user decision, 2026-10-08).** |
 | D13 | **E0 gets a mass-Void-Ray case (user accepted).** Whether Void Ray masses also trigger the Void Ray/Tempest response is decided with those numbers. Void Rays were our top killer in 7 of 10 baseline games vs Protoss Air. |
 
 **Defaults (accepted by the user):**
@@ -170,6 +174,11 @@ Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your rev
 | C4 | `army.py:_set_intents` | **As built (DESIGN §4.5.2: "the army's Observer goes to look first"):** while `wants_intel`, the army's own Observer moves to the remembered enemy army's centre (else the enemy main), danger-aware as always (`keep_safe`). No scout-planner task. The decision logs `ARMY … launch waits, the Observer looks` once per wait. |
 | C5 | `engagement.py`, `ranges.py` | **Built: the Phase 1 batch logs show it** (64 home engagements against armies with 2+ Tempests rated ≥ 7, some at a third of the enemy's value). `Engagement.outranged_share(own, enemy)` (value share of enemies that out-range every unit of ours able to hit them, or that none can hit) → pure `ranges.outrange_penalty(share, OUTRANGE_PENALTY_PER_SHARE)` levels, subtracted in `level()` and logged in the fight inputs (`-N out-ranged`). Carriers have no weapon in game data, so they don't count (their capital-air answer is Phase 4). |
 | C5 | `scripts/test_engagement.py` | New scenario: 8 Tempests + 6 Zealots vs 30 Stalkers + 4 Colossi, to measure the raw simulator first. |
+| C6 (D18) | `ranges.py` | Pure `outranged(our_range, their_range, margin, melee_max)`: never true when `our_range` (not None) is at most `melee_max` (`MELEE_RANGE_MAX`). C1's step-out, the hold-point fallback and C5's share all go through `outranges`, so they follow. |
+| C7 (D19) | `ranges.py` | `weapon_range(unit, flying)`: python-sc2's `can_attack_*`/`*_range` (its Battlecruiser and Oracle special cases included), else ares `WEIGHT_COSTS[type]`'s `GroundRange`/`AirRange` when above 0, else None. `can_hit`, `range_vs` and `reach` use it; new `has_weapon(unit)`. |
+| C7 (D19) | `micro.py`, `army.py` | `threats_to`, `_fights_back`, the kite and harass reach checks, the MOVE filter and the fallback's longest range use `ranges` instead of `can_attack_*`/`*_range`. Own units without `has_weapon` get no out-rangers (no step-out) and stay in `_able`. |
+| C7 (D19) | `engagement.py` | Pure `value_level(own_value, enemy_value)` (ares's mapping with values as health). `level()`: if `WEAPONLESS_DAMAGE_TYPES` hold ≥ `WEAPONLESS_CAP_SHARE` of the enemy's value, the raw level is capped at the value level before C5's penalty; the fight inputs log `value cap N` when it lowers the level. |
+| C8 (D20) | as found | Investigate proxy-rax game 8: why no Nexus while `expand=yes`, and why Adepts at the ramp die with no home threat. A fix inside the spec is made here; anything needing a spec change goes to the user. |
 
 - **VERIFY:**
   - Do Tempests' ground attacks add influence to ares's ground grid?
@@ -180,10 +189,12 @@ Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your rev
   - `test_m7_rules.py`: `outranged`, `retreat_may_shoot`, the C2 eligibility function, and `outrange_penalty` if built.
   - `test_attack_decision.py`: cooldown cases.
   - `test_outranged.py`: new cases `hold_vs_tempest` (no unit dies beyond the leash; the hold point moves back) and `committed` (FIGHT units still engage).
+  - D18/D19: `test_m7_rules.py` gains the melee cut-off, `weapon_range` fallbacks (stand-ins) and `value_level`; `test_engagement.py` checks 2 Zealots vs 4 Marines (no penalty) and the weaponless rows (capped).
 - **Acceptance:**
   - Air batches (same seeds): value lost/killed ratio and launch-then-retreat-within-60-s count better than Phase 1.
   - HOLD `lost_far` in the Air batches lower than Phase 1's (8 in the Protoss Air batch; D16).
   - Regressions: M1, M2/M3, M4 (≥ 7 each), M5 staged counterattack 7/7.
+  - D18: proxy rax ≥ 8/10 on two runs.
 - **Ladder:** second upload.
 
 ## Phase 3: Blink and Templar

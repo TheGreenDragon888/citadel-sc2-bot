@@ -283,8 +283,9 @@ MIN_STATE_SECONDS = 20  # no attack/retreat flip within 20 s unless result <= 2
   - **Launch (M7):** the inputs above see only what is near the squad or its target, and in the first ladder loss every launch read 8-10 against an army the bot had not seen. So a launch also needs all of these:
     1. The level against the remembered enemy army as a whole (every enemy fighter seen and not known dead, seen within `LAUNCH_CACHE_MAX_AGE_S`, TUNE) also passes the gate.
     2. At least `LAUNCH_INTEL_FRESH_FRACTION` (TUNE) of that army was seen within the last 15 s. Otherwise the army's Observer goes to look first, and the launch waits at most `LAUNCH_INTEL_WAIT_S` (TUNE).
-    3. No launch within `LAUNCH_AFTER_DEFEND_S` (TUNE) of a home fight.
-  - **Out-range penalty (M7, only if needed):** if the fight-input logs (§8) show the simulator rating fights against out-ranging enemies as wins, lower the level by `OUTRANGE_PENALTY_PER_SHARE` (TUNE) per share of enemy value that out-ranges all our units able to hit it, or that none of them can hit. The simulator never sees positions (§11.3).
+    3. No launch within `LAUNCH_AFTER_DEFEND_S` (TUNE) of a home fight against a group worth at least `LAUNCH_HOME_FIGHT_MIN_FRACTION` (TUNE) of the defenders' value (user decision: a trickle of a few Zerglings held a 200-supply army at home for 13 minutes).
+  - **Out-range penalty (M7, only if needed):** if the fight-input logs (§8) show the simulator rating fights against out-ranging enemies as wins, lower the level by `OUTRANGE_PENALTY_PER_SHARE` (TUNE) per share of enemy value that out-ranges all our units able to hit it, or that none of them can hit. The simulator never sees positions (§11.3). "Out-ranges" is as in §4.5.3, so an enemy a melee unit of ours can hit doesn't count.
+  - **Weaponless units (M7, user decision):** Void Rays, Carriers, Battlecruisers, Oracles, Banelings, Widow Mines, Disruptors and Swarm Hosts have no weapon in this game data, so the simulator sees them as harmless. When they make up at least `WEAPONLESS_CAP_SHARE` (TUNE) of the enemy's value, the level is at most the **value level**: the level the mapping above gives if each side's resource value (game-data costs) were its health and the larger side kept the difference. The out-range penalty then applies to that.
 - **Retreat** at ≤ `RETREAT_AT`, or when the squad's current value is < 40% of its start value.
 - **After retreating,** fall back to the defensive position at our newest base, re-max, and don't re-launch for 45 s.
 - **Targets:** nearest known enemy expansion → the next one → the main.
@@ -292,8 +293,10 @@ MIN_STATE_SECONDS = 20  # no attack/retreat flip within 20 s unless result <= 2
 
 #### 4.5.3 Unit control (M7)
 Citadel's choices, decided after the first ladder losses. Every threshold is TUNE in `bot/constants.py`; ranges and speeds come from game data.
+- **Weapon ranges (user decision):** game data's, through python-sc2. A type with no weapon there uses ares's influence-map range for it (`WEIGHT_COSTS`), ours and the enemy's: Void Rays, Carriers, Sentries, Banelings, burrowed Widow Mines and Infestors. Our units with a range from neither keep their pre-M7 behaviour: they go with the squad, answer threats and never step out.
 - **Out-ranged rule:**
   - A unit that is not committed to a fight (holding, moving or retreating) and is inside the reach of a visible enemy it can't hit, or that out-ranges it by ≥ `OUTRANGED_MARGIN`, steps out of that enemy's reach (ares `KeepUnitSafe`).
+  - **Melee units (user decision):** a unit whose range is at most `MELEE_RANGE_MAX` (TUNE) is out-ranged only by enemies it can't hit. Closing the gap is its job: on Phase 2's first code, Zealots stepped back from Marines and lost two proxy-rax games.
   - Committed units (an attack, or a home fight the squad chose) keep fighting.
   - If out-rangers the squad can't beat cover the defensive position, it moves back toward the main in steps (`HOLD_FALLBACK_STEP` × at most `HOLD_FALLBACK_STEPS`).
 - **Retreat:** retreating units shoot only enemies that fight back, and only when faster than every visible threat that can hit them. Blink Stalkers blink away first.
