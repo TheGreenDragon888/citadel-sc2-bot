@@ -1932,3 +1932,124 @@ SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --opponent ca
 **Notes**
 - **Load.** The cheese batches run two bots and two SC2 clients per game. With three of them in parallel (load ~12 on 4 cores), the M6 step guard fired 1-14 times per cheese game, and the worst step was 7.0 s (proxy rax game 6). In the Air batches it fired in 3 of 30 games (once or twice each).
 - **One non-proxy flag.** Protoss Air game 6 raised CANNON_RUSH at 2:05 from an enemy probe that stayed in our main for 10 s (UNIT evidence). It expired at 2:30 with the natural still taken ("expand=yes"); it is §4.4's existing rule, not a proxy.
+
+### Phase 1 additions B7 and B8 (user decisions D14-D16), run 2026-10-07
+
+Code under test:
+- **`703b084`:** B7 (the army holds the main ramp top while a rush Cannon stands near our main or natural) and B8 (the Observer expansion-trip gate).
+- **`d89b6ff`:** the B7 follow-up. `_safe` keeps the whole `HOLD_RADIUS` around a hold point out of finished Cannons' reach, and takes the least-covered step when none is clear. It came from the first two B7 cannon batches, where one game lost 32 holding units within 8 of the ramp hold point.
+- **Which batches ran on which:** cannon rush C and D and proxy rax ran on `d89b6ff`; everything else on `703b084`. The follow-up only changes anything when a finished enemy Cannon covers one of our hold points, so it doesn't affect the other batches.
+
+Three batches ran at a time on 4 cores. Logs were kept outside the repo; replays are in `replays/m7-p1b-<race>/`, not in git.
+
+**Summary**
+
+| Criterion (M7_PLAN.md Phase 1, with D14-D16) | Result |
+|---|---|
+| B7: cannon rush ≥ 8/10 on two runs | **PASS on `d89b6ff`: 9/10 and 9/10.** On `703b084`: 7/10 and 9/10, which led to the follow-up |
+| B7: no unit lost walking to a hold point past rush Cannons | **Nearly**: 2 per run, both in game 5 (main variant): a lone Zealot sent to clear the first Cannon walks back once home defense switches to hold. The Phase 1 runs had 22 and 10 |
+| B8: no gap over 90 s between main re-scouts from 6:00 while a free Observer exists | **PASS**: 76 re-scouts in the Protoss Air batch (Phase 1: 62). The two longer gaps had no free Observer (below) |
+| `reinforce_after_retreat` = 0 | **PASS**: 0 in every game below |
+| HOLD `lost_far` in the Air batches | Moved to Phase 2 (D16) |
+| D11 targets (end of M7, recorded for progress) | Terran Air 10/10 and Zerg Air 10/10 meet theirs. Protoss Air is 4/10 with free openers and 7/10 with Phase 1's openers; the Phase 1 code scored 8/10 and 6/10 the same two ways (see the variance table) |
+| M1: Hard × 10 | **PASS**: 10/10 |
+| M4: VeryHard × 10 per race (≥ 7) | **PASS**: Terran 9/10, Zerg 9/10, Protoss 9/10 |
+| M2/M3: cheese × 10 (≥ 8/10, correct flag, no scout lost before 4:00 in ≥ 7) | **PASS**: worker rush 10/10, 12 pool 10/10, proxy rax 8/10 (2 ties, below), cannon rush 9/10 and 9/10. Correct flag in every game. Scout criterion: worker rush 9/10 (game 6 again: the fallback main probe killed by a leftover Drone, at 3:09), the rest 10/10 |
+
+**Offline tests** (`poetry run python scripts/<name>.py`):
+- `test_m7_rules`: 33/33. It adds `rush_cannon_near`, `safe_hold_point`, `trip_seconds` and `observer_trip_ok`.
+- `test_attack_decision` 16/16, `test_threat_flags` 20/20, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38.
+- `check_game_log.py` after the batches: `RESULT PASS`, 200 records (the cap), 0 malformed.
+
+**Smoke games** (`703b084`, one game each):
+- Cannon rush game 8 (the natural-variant game every earlier run had lost or tied): the plan logged `hold=(128, 36)` at the ramp top, cleared the Cannons from 4:18 to 5:30, and won at 12:47.
+- Protoss Air game 1: the Observer re-scouted the enemy main every 60 s from 6:00 to the end (largest gap 61 s), and probes took the expansion trips.
+
+**B7: cannon rush, every run on the same seeds** (`--opponent cannon_rush --map all --total 10 --seed 100 --game-seed 5000`, each run with its own fresh opponent id; W/L/T = win/loss/tie at 60:00):
+
+| # | map | variant | Phase 0 | P1 run 1 | P1 run 2 | B7 A | B7 B | B7+safe C | B7+safe D |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Magannatha | natural | W | W | W | W | W | W | W |
+| 2 | Ultralove | natural | W | **T** | **L** | **L** | **T** | W | W |
+| 3 | LeyLines | main | W | W | W | W | W | W | W |
+| 4 | Torches | natural | W | W | W | W | W | W | W |
+| 5 | Pylon | main | W | **T** | W | **L** | W | **L** | **T** |
+| 6 | Persephone | main | W | W | W | W | W | W | W |
+| 7 | Incorporeal | natural | W | W | W | W | W | W | W |
+| 8 | Magannatha | natural | **L** | **T** | **L** | W | W | W | W |
+| 9 | Ultralove | main | W | **L** | W | **T** | W | W | W |
+| 10 | LeyLines | main | W | **L** | W | W | W | W | W |
+| | | wins | **9/10** | **5/10** | **8/10** | **7/10** | **9/10** | **9/10** | **9/10** |
+| | | HOLD deaths (farther than 12) | 9 (7) | 22 (22) | 11 (10) | 35 (7) | 55 (2) | 15 (2) | 12 (2) |
+
+Codes: Phase 0 `4a36da2`, Phase 1 `07d4ddd`, B7 `703b084`, B7 + `_safe` `d89b6ff`.
+
+- **Natural-variant games:** all 10 were won on `d89b6ff` (games 1, 2, 4, 7, 8 in both runs).
+  - Game 8 had been lost or tied in all three earlier runs: units sent to the natural's hold point walked past the rush Cannons.
+  - Game 2 had failed in every run since Phase 1.
+- **Main variant:** game 5 (Pylon) is lost or tied in 4 of 7 runs, on every code. The rush Cannons kill the main Nexus by about 3:30 with minerals at 5-10 from 2:30, and the main Nexus dies whatever the army's hold point. It is the known close case from M2.
+- **The `_safe` follow-up:** before it, run B lost 36 holding units in game 1. 32 died within 8 of the ramp hold point (128, 36), at about (125, 34), between 3:07 and 12:23.
+  - Holding units stand anywhere within `HOLD_RADIUS` (6) without moving, and fight only enemies within `HOLD_ENGAGE_RADIUS` (12) of the point. The nearest Cannon was out of the point's reach but in theirs, and beyond the 12.
+  - With the whole radius kept out of reach, HOLD deaths per run fell from 35 and 55 to 15 and 12.
+
+**B8: main re-scouts** (Protoss Air, seed 7000, from 6:00):
+- Phase 1 sent 62 main re-scouts; B8 sent 76.
+- Phase 1 had 5 intervals over 90 s, all because the only free Observer was on an expansion trip or had died. B8 had 2:
+  - game 6, 95 s: one re-scout trip took that long, and the next left the moment it returned;
+  - game 8, 5:44: the only Observer took the PvP home post when a Twilight Council was seen (§4.3), so none was free.
+- The cost: probes on expansion trips lost per 10 games went from 16 to 19 (22 in the opener-matched batch).
+- PvT, Terran Air × 10 (Phase 1 → B8): Observer expansion trips 26 → 2; probe expansion trips 16 → 45; Observer main re-scouts 26 → 42. The log shows the Observer kept for the re-scout 23 times, and Hallucinations ran 25 times, the same as before (B5).
+
+**Protoss Air variance.** The free-opener batch on `703b084` went 4/10, against Phase 1's 8/10, so both codes were run again with each game forced to the opener Phase 1 picked. This is the same method as the Phase 0 comparison: a `git worktree` of `07d4ddd` with `ares-sc2` linked in, run with the same Poetry environment's Python.
+
+```
+SC2PATH=$HOME/StarCraftII python scripts/run_matches.py --difficulty VeryHard --race Protoss --build Air --map all --game-seed 7000 --total 6 --opener C_2GateRobo
+... --start 7 --total 7 --opener C2_1GateExpand
+... --start 8 --total 8 --opener C_2GateRobo
+... --start 9 --total 10 --opener C2_1GateExpand
+```
+
+| Batch | Openers | Wins | Units lost | HOLD deaths | Probes lost on expansion trips |
+|---|---|---|---|---|---|
+| Phase 1 (`07d4ddd`), 2026-10-06 | free (picked these) | 8/10 | 475 | 17 | 16 |
+| Phase 1 (`07d4ddd`), rerun | forced, the same | 6/10 | 640 | 10 | 18 |
+| B7/B8 (`703b084`) | free (5 games differ) | 4/10 | 639 | 28 | 19 |
+| B7/B8 (`703b084`) | forced, the same | 7/10 | 714 | 23 | 22 |
+
+- **With the same openers, B7/B8 won 7/10 against the Phase 1 code's 6/10.** The 4/10 batch played a different opener in 5 games and won 2 of them; Phase 1 won all 5 of its own.
+- **The same code swings by about ±2 wins in 10 here** (Phase 1: 8 then 6). A 10-game Protoss Air batch can't show a change smaller than that. Phase 2's comparisons should use opener-matched pairs, or 20 games.
+- B7 never triggered in the Air games, which had no rush Cannons.
+
+**Regressions**
+
+```
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race <Terran|Zerg|Protoss> --build Air --map all --total 10 --game-seed <7100|7200|7000> --replays replays/m7-p1b-<race>
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race <Terran|Zerg|Protoss> --map all --total 10 --game-seed 3000 --opponent-id m7b8-vh-<race>
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty Hard --map all --total 10 --race Terran Zerg Protoss Random --game-seed 4000
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --opponent <bot> --map all --total 10 --seed 100 --game-seed 5000 --opponent-id m7b8-<bot>
+```
+
+The VeryHard Terran and Zerg batches were cut off at 2 hours, after game 8 and game 7 respectively. They were finished with `--start 9` and `--start 8`, keeping the same opponent ids.
+
+| Batch | Wins | Notes |
+|---|---|---|
+| Terran Air | **10/10** | |
+| Zerg Air | **10/10** | |
+| VeryHard Terran | **9/10** | Game 3 (Ley Lines; Phase 1 won it): ONE_BASE_ALLIN from ares's marauder-rush flag held us on one base, then a home fight lost at 9:30-10:00 |
+| VeryHard Zerg | **9/10** | Game 3 (Ley Lines), the 12-pool into Roach push lost on every commit since M5 |
+| VeryHard Protoss | **9/10** | Game 5 (Pylon; Phase 1 won it): 9 Stalkers and a Zealot hit our 6 units at 4:50, before anything B7 or B8 changes |
+| M1: Hard × 10 | **10/10** | |
+| Worker rush | **10/10** | Correct flag 10/10; game 6 lost its fallback main probe to a leftover Drone at 3:09, as in Phase 1 |
+| 12 pool | **10/10** | Correct flag 10/10 |
+| Proxy rax | **8/10** (2 ties at 60:00) | Correct flag 10/10. Phase 1 and M5 went 10/10 on these seeds; see below |
+
+No crashes and no caught errors in any of these games; every `ROW` has `log=ok` and `raa=0`.
+
+**The proxy-rax ties (games 8 and 9) are a stalemate that predates M7, now hit at the margin.**
+- In both, the Nexus builders died to the proxy Marines (game 8 at 8:43; game 9 at 3:56, 6:13 and 10:19), so we stayed on one base.
+- The PROXY flag never expired: the proxy Barracks was never killed, and the Observer's §5 evidence re-scouts every ~2 minutes never contradicted it.
+- With the plan holding the natural and the main mined out from about 14:00, supply peaked at 146 (game 8, 13:00) against the attack's 150 launch gate, so no attack ever went out (`engage=0/0/0`). Value was 3.8k lost against 16.6k killed in game 8.
+- The 40:00 structure hunt switched on and off as the Barracks came in and out of vision.
+- Phase 1's run of the same seeds had the same one-base state and the same PROXY flag. Its army reached 150 supply and attacked at 11:44 and 11:45, and it won both by 14:00 (in game 9 the flag expired at 12:15, when the Barracks was gone).
+- No probes were lost scouting in either run, and there are no Cannons, so neither B7 nor B8 is involved.
+- Put to the user as a finding; no change made.
