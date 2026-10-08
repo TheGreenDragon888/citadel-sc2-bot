@@ -486,7 +486,7 @@ class Army:
         left behind is the army's); enemy structures once the squad has ARMY_CLEAR_STRUCTURES_SUPPLY
         and beats the finished Cannons near our bases and the units around them at
         CLEAR_STATIC_LEVEL, and before that a finished Cannon that can hit one of our townhalls once
-        the squad beats the Cannons covering it (and those units) at that level. With the leash, only enemies near the hold point or inside the main."""
+        the squad beats the Cannons covering it (and those units) at that level. With the leash, only enemies near the hold point, inside the main, or (M7 C8) shooting our units at the hold point."""
         bot = self.bot
         homes = self._homes()
         cannons = [
@@ -501,6 +501,12 @@ class Army:
             not cannons or self.engagement.level(defenders, cannons + guards, ENEMY_DEFENDS) >= CLEAR_STATIC_LEVEL
         )
         candidates = [e for e in bot.enemy_units if not e.is_memory]
+        # M7 C8 (D20): the units standing at a leashed hold point, which an enemy beyond the leash
+        # can still shoot (holders stand up to HOLD_RADIUS from it; a Marine reaches ~6 farther)
+        holders = (
+            [u for u in defenders if u.distance_to(self.hold_point) <= HOLD_RADIUS + 1.0]
+            if self.hold_point is not None and self.leash is not None else []
+        )
         if strong_enough:
             # snapshots too: Cannons at our natural out of vision were never attacked in an M2
             # test game that tied at 60:00; the engine drops a snapshot once its spot is seen empty
@@ -524,7 +530,14 @@ class Army:
             ):
                 continue
             if self.hold_point is not None and self.leash is not None:
-                if not self._inside_main(enemy.position) and enemy.distance_to(self.hold_point) > self.leash:
+                # beyond the leash only an enemy shooting our holders counts: in proxy-rax test
+                # games Marines below the ramp picked off 24-37 holding Adepts one at a time, and
+                # their presence kept the PROXY plan (and one base) up for 60 minutes
+                if (
+                    not self._inside_main(enemy.position)
+                    and enemy.distance_to(self.hold_point) > self.leash
+                    and not self._reaches_any(enemy, holders)
+                ):
                     continue
             radius = ARMY_WORKER_THREAT_RADIUS if is_worker else ARMY_DEFEND_RADIUS
             for home in homes:
@@ -532,6 +545,15 @@ class Army:
                 if d < radius and (best is None or d < best[0]):
                     best = (d, enemy)
         return best[1] if best is not None else None
+
+    @staticmethod
+    def _reaches_any(enemy: Unit, units: list[Unit]) -> bool:
+        """`enemy` has one of `units` within its reach (+ OUTRANGED_REACH_BUFFER)."""
+        for u in units:
+            r = micro.reach(enemy, u)
+            if r is not None and enemy.distance_to(u) <= r + OUTRANGED_REACH_BUFFER:
+                return True
+        return False
 
     def _proxy_clear(self, defenders: list[Unit]) -> Optional[tuple[Unit, int, Optional[FightInputs]]]:
         """M7 B9 (D17): while PROXY is active, the known proxy production structure nearest our
