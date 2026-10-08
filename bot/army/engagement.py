@@ -26,7 +26,8 @@ from sc2.position import Point2
 from sc2.unit import Unit
 from sc2_helper.combat_simulator import CombatSimulator
 
-from bot.constants import ENGAGE_ENEMY_RADIUS, ENGAGE_STATIC_RADIUS, FIGHT_LOG_TYPES
+from bot.army.ranges import can_hit, outrange_penalty, outranges
+from bot.constants import ENGAGE_ENEMY_RADIUS, ENGAGE_STATIC_RADIUS, FIGHT_LOG_TYPES, OUTRANGE_PENALTY_PER_SHARE
 
 if TYPE_CHECKING:
     from ares import AresBot
@@ -89,9 +90,13 @@ class FightInputs(NamedTuple):
     own_value: float
     enemy_text: str
     enemy_value: float
+    penalty: int = 0  # M7 C5: levels taken off for out-ranging enemies
 
     def text(self) -> str:
-        return f"vs {self.enemy_text} ({self.enemy_value:.0f}) | ours {self.own_text} ({self.own_value:.0f})"
+        return (
+            f"vs {self.enemy_text} ({self.enemy_value:.0f}) | ours {self.own_text} ({self.own_value:.0f})"
+            + (f"; -{self.penalty} out-ranged" if self.penalty else "")
+        )
 
 
 def composition_text(pairs: Iterable[tuple[str, float]], max_types: int = FIGHT_LOG_TYPES) -> tuple[str, float]:
@@ -212,7 +217,30 @@ class Engagement:
         won, health_left = self.sim.predict_engage(list(own), list(enemy), defender_player=defender)
         own_health = sum(u.health + u.shield for u in own)
         enemy_health = sum(u.health + u.shield for u in enemy)
-        return int(level_from_sim(won, health_left, own_health, enemy_health))
+        raw = int(level_from_sim(won, health_left, own_health, enemy_health))
+        # M7 C5 (§4.5.2): the simulator never sees positions, and rated home fights against
+        # Tempest armies 7-9 at a third of their value in the Phase 1 batches
+        penalty = outrange_penalty(self.outranged_share(own, enemy), OUTRANGE_PENALTY_PER_SHARE)
+        self.last_inputs = self.last_inputs._replace(penalty=penalty)
+        return max(int(EngagementResult.LOSS_EMPHATIC), raw - penalty)
+
+    def outranged_share(self, own: Sequence[Unit], enemy: Sequence[Unit]) -> float:
+        """M7 C5: the share of the enemy's value that out-ranges every unit of ours able to hit it
+        (by OUTRANGED_MARGIN), or that none of ours can hit while it can hit some of them."""
+        kinds = list({u.type_id: u for u in own}.values())  # one unit per type
+        total = out = 0.0
+        for e in enemy:
+            v = self.value([e])
+            if v <= 0:
+                continue
+            total += v
+            hitters = [u for u in kinds if can_hit(u, e)]
+            if hitters:
+                if all(outranges(e, u) for u in hitters):
+                    out += v
+            elif any(can_hit(e, u) for u in kinds):
+                out += v
+        return out / total if total > 0 else 0.0
 
     def _inputs(self, own: Sequence[Unit], enemy: Sequence[Unit]) -> FightInputs:
         def pairs(units: Sequence[Unit]) -> list[tuple[str, float]]:

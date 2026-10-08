@@ -3,12 +3,15 @@
     poetry run python scripts/test_m7_rules.py
 
 Each M7 step adds its cases here: the fight-input text (O1), the expansion-first proxy check
-(B6), the main re-scout gate (B4), the cannon-rush ramp hold (B7) and the Observer trip gate (B8). Prints PASS/FAIL per case; exits 1 on any failure.
+(B6), the main re-scout gate (B4), the cannon-rush ramp hold (B7), the Observer trip gate (B8),
+and Phase 2's out-ranged rule (C1), eligibility (C2), retreat shooting (C3) and penalty (C5).
+Units are stand-ins with only the attributes the rules read (no game needed). Prints PASS/FAIL per case; exits 1 on any failure.
 """
 
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable
 
 ROOT: Path = Path(__file__).resolve().parent.parent
@@ -18,10 +21,14 @@ sys.path.insert(0, str(ROOT))
 import run  # noqa: E402,F401  (puts ares-sc2 on sys.path)
 from sc2.position import Point2  # noqa: E402
 
+from bot.army.army import Army  # noqa: E402
 from bot.army.engagement import FightInputs, composition_text  # noqa: E402
+from bot.army.micro import retreat_may_shoot  # noqa: E402
+from bot.army.ranges import can_hit, outrange_penalty, outranged, outranges, reach  # noqa: E402
 from bot.constants import (  # noqa: E402
     CANNON_RUSH_RADIUS,
     MAIN_STALE_FROM_S,
+    OUTRANGED_MARGIN,
     MAIN_STALE_S,
     PROXY_NATURAL_WAIT_UNTIL_S,
 )
@@ -124,6 +131,54 @@ case("observer trip: back before the main goes stale", observer_trip_ok, T, MAIN
 case("observer trip: the main goes stale during it", observer_trip_ok, T, MAIN_STALE_S + 40, T - 10, T - 10, 1, expected=False)
 case("observer trip: main never seen", observer_trip_ok, T, 10.0, None, -MAIN_STALE_S, 1, expected=False)
 case("observer trip: all before MAIN_STALE_FROM_S", observer_trip_ok, 0.0, MAIN_STALE_FROM_S - 1, None, -MAIN_STALE_S, 1, expected=True)
+
+# -- Phase 2: stand-in units (ranges as in game data: Stalker 6, Tempest 10 ground / 14 air) -------
+def unit(name, ground=0.0, air=0.0, flying=False, radius=0.5):  # noqa: E302
+    return SimpleNamespace(
+        name=name, ground_range=ground, air_range=air, can_attack_ground=ground > 0, can_attack_air=air > 0,
+        is_flying=flying, radius=radius,
+    )
+STALKER, ZEALOT = unit("stalker", 6, 6, radius=0.625), unit("zealot", 0.1, radius=0.5)  # noqa: E305
+TEMPEST, VOIDRAY = unit("tempest", 10, 14, flying=True, radius=1.25), unit("voidray", 6, 6, flying=True, radius=1.0)
+CANNON, OVERLORD = unit("cannon", 7, 7, radius=1.125), unit("overlord", flying=True, radius=1.0)
+
+# C1: the out-ranged rule
+case("outranged: they can't hit us", outranged, 6.0, None, OUTRANGED_MARGIN, expected=False)
+case("outranged: we can't hit them", outranged, None, 6.0, OUTRANGED_MARGIN, expected=True)
+case("outranged: 10 vs 6", outranged, 6.0, 10.0, OUTRANGED_MARGIN, expected=True)
+case("outranged: 7 vs 6, inside the margin", outranged, 6.0, 7.0, OUTRANGED_MARGIN, expected=False)
+case("outranges: Tempest vs Stalker", outranges, TEMPEST, STALKER, expected=True)
+case("outranges: Void Ray vs Stalker", outranges, VOIDRAY, STALKER, expected=False)
+case("outranges: Void Ray vs Zealot (can't hit back)", outranges, VOIDRAY, ZEALOT, expected=True)
+case("outranges: Cannon vs Zealot", outranges, CANNON, ZEALOT, expected=True)
+case("outranges: Cannon vs Stalker", outranges, CANNON, STALKER, expected=False)
+case("outranges: Overlord (no weapon) vs Zealot", outranges, OVERLORD, ZEALOT, expected=False)
+case("can_hit: Zealot vs Void Ray", can_hit, ZEALOT, VOIDRAY, expected=False)
+case("reach: Tempest vs Stalker", reach, TEMPEST, STALKER, expected=10 + 1.25 + 0.625)
+case("reach: Zealot vs Void Ray", reach, ZEALOT, VOIDRAY, expected=None)
+
+# C2: only defenders that can hit something in the threat group answer it
+case(
+    "eligibility: Zealots sit out vs Void Rays",
+    lambda: [u.name for u in Army._able([STALKER, ZEALOT], [VOIDRAY])], expected=["stalker"],
+)
+case(
+    "eligibility: both answer a mixed group",
+    lambda: [u.name for u in Army._able([STALKER, ZEALOT], [VOIDRAY, ZEALOT])], expected=["stalker", "zealot"],
+)
+
+# C3: retreating units shoot only enemies that fight back, and only when faster than every threat
+case("retreat: faster than every threat", retreat_may_shoot, 4.13, [3.15, 2.25], True, expected=True)
+case("retreat: a threat as fast", retreat_may_shoot, 4.13, [3.15, 4.13], True, expected=False)
+case("retreat: nothing that fights back", retreat_may_shoot, 4.13, [], False, expected=False)
+case("retreat: no threats", retreat_may_shoot, 4.13, [], True, expected=True)
+
+# C5: the out-range penalty, whole levels per share
+case("penalty: none", outrange_penalty, 0.0, 4.0, expected=0)
+case("penalty: an all-Tempest army", outrange_penalty, 1.0, 4.0, expected=4)
+case("penalty: 8 Tempests + 6 Zealots (85% of the value)", outrange_penalty, 3400 / 4000, 4.0, expected=3)
+case("penalty: an eighth rounds to 1", outrange_penalty, 0.125, 4.0, expected=1)
+case("penalty: under an eighth rounds to 0", outrange_penalty, 0.12, 4.0, expected=0)
 
 
 def main() -> int:

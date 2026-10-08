@@ -13,6 +13,9 @@ each scenario prints the most common level of REPEATS calls (and the range) from
 Finally it checks `Engagement.attack_inputs` (the §4.5.2 enemy side): workers, the Observer and
 the Pylon left out; Stalkers, Zealots, Cannons and the Battery in.
 
+M7 C5: out-ranged scenarios (Tempests, Void Rays vs Zealots, Carriers), printed with the raw
+simulator level and the out-range penalty; the penalty itself is checked (EXPECT_PENALTY).
+
 Exit code 1 if an expectation in EXPECT fails.
 """
 
@@ -54,6 +57,13 @@ EXPECT: dict[str, Tuple[int, int]] = {
     "6 Stalkers vs 3 Cannons (attacking)": (0, 6),  # a costly fight: at best a narrow win
     "6 Stalkers vs 6 Cannons (attacking)": (0, 4),  # a loss (ares: VICTORY_EMPHATIC)
     "12 Stalkers vs 3 Cannons (attacking)": (6, 10),  # a clear win: scales with army size
+}
+# M7 C5: scenario -> expected out-range penalty (levels)
+EXPECT_PENALTY: dict[str, int] = {
+    "6 Stalkers vs 6 Stalkers": 0,
+    "30 Stalkers + 4 Colossi vs 8 Tempests + 4 Zealots": 4,  # ~89% of the value out-ranges them
+    "12 Zealots vs 4 Void Rays": 4,  # none of ours can hit them
+    "12 Stalkers vs 4 Void Rays": 0,
 }
 
 
@@ -110,7 +120,9 @@ class EngagementProbe(AresBot):
         behind = own.towards(centre, -4)
         await self.client.debug_create_unit(
             [
-                [UnitTypeId.STALKER, 12, own, OWN],
+                [UnitTypeId.STALKER, 30, own, OWN],
+                [UnitTypeId.COLOSSUS, 4, own.towards(centre, -6), OWN],
+                [UnitTypeId.ZEALOT, 12, own.towards(centre, -9), OWN],
                 [UnitTypeId.PYLON, 1, behind, OWN],
                 [UnitTypeId.PHOTONCANNON, 1, behind.offset((2, 2)), OWN],
                 [UnitTypeId.PHOTONCANNON, 1, behind.offset((-2, -2)), OWN],
@@ -120,6 +132,9 @@ class EngagementProbe(AresBot):
                 [UnitTypeId.SHIELDBATTERY, 1, centre.offset((0, -5)), ENEMY],
                 [UnitTypeId.PROBE, 4, centre.offset((-5, 0)), ENEMY],
                 [UnitTypeId.OBSERVER, 1, centre.offset((5, 5)), ENEMY],
+                [UnitTypeId.TEMPEST, 8, centre.towards(own, -6), ENEMY],
+                [UnitTypeId.VOIDRAY, 4, centre.towards(own, -8), ENEMY],
+                [UnitTypeId.CARRIER, 2, centre.towards(own, -10), ENEMY],
             ]
             + [[UnitTypeId.PHOTONCANNON, 1, centre.offset(o), ENEMY] for o in CANNON_OFFSETS]
         )
@@ -131,11 +146,17 @@ class EngagementProbe(AresBot):
 
     async def _evaluate(self) -> None:
         own = self.units(UnitTypeId.STALKER)
+        colossi, own_zealots = self.units(UnitTypeId.COLOSSUS), self.units(UnitTypeId.ZEALOT)
+        tempests, voidrays = self.enemy_units(UnitTypeId.TEMPEST), self.enemy_units(UnitTypeId.VOIDRAY)
+        carriers = self.enemy_units(UnitTypeId.CARRIER)
         own_cannons = self.structures(UnitTypeId.PHOTONCANNON).ready.filter(lambda c: c.is_powered)
         stalkers = self.enemy_units(UnitTypeId.STALKER)
         zealots = self.enemy_units(UnitTypeId.ZEALOT)
         cannons = self.enemy_structures(UnitTypeId.PHOTONCANNON).filter(lambda c: c.is_ready and c.is_powered)
-        ready = len(own) == 12 and len(stalkers) == 6 and len(zealots) == 4 and len(cannons) == 6 and len(own_cannons) == 2
+        ready = (
+            len(own) == 30 and len(stalkers) == 6 and len(zealots) == 4 and len(cannons) == 6 and len(own_cannons) == 2
+            and len(colossi) == 4 and len(own_zealots) == 12 and len(tempests) == 8 and len(voidrays) == 4 and len(carriers) == 2
+        )
         if not ready:
             if self.state.game_loop - self.phase_started > PHASE_TIMEOUT_LOOPS:
                 self.log(
@@ -146,7 +167,7 @@ class EngagementProbe(AresBot):
                 await self.finish()
             return
         eng = Engagement(self)
-        six, twelve = list(own[:6]), list(own)
+        six, twelve, thirty = list(own[:6]), list(own[:12]), list(own)
         cannons = cannons.sorted(lambda c: c.distance_to(own.center))
         scenarios: List[Tuple[str, list, list, int]] = [
             ("6 Stalkers vs nothing", six, [], ENEMY_DEFENDS),
@@ -157,18 +178,32 @@ class EngagementProbe(AresBot):
             ("12 Stalkers vs 3 Cannons (attacking)", twelve, list(cannons[:3]), ENEMY_DEFENDS),
             ("6 Stalkers vs 6 Stalkers (defending)", six, list(stalkers), WE_DEFEND),
             ("6 Stalkers + 2 Cannons vs 6 Stalkers (defending)", six + list(own_cannons), list(stalkers), WE_DEFEND),
+            # M7 C5
+            ("30 Stalkers + 4 Colossi vs 8 Tempests + 4 Zealots", thirty + list(colossi), list(tempests) + list(zealots), ENEMY_DEFENDS),
+            ("30 Stalkers vs 8 Tempests", thirty, list(tempests), ENEMY_DEFENDS),
+            ("12 Stalkers vs 8 Tempests", twelve, list(tempests), ENEMY_DEFENDS),
+            ("12 Zealots vs 4 Void Rays", list(own_zealots), list(voidrays), ENEMY_DEFENDS),
+            ("12 Stalkers vs 4 Void Rays", twelve, list(voidrays), ENEMY_DEFENDS),
+            ("12 Stalkers vs 2 Carriers (no Interceptors)", twelve, list(carriers), ENEMY_DEFENDS),
         ]
-        self.log(f"{'scenario':<52} {'Citadel':>14} {'ares can_win_fight':>20}")
+        self.log(f"{'scenario':<52} {'Citadel':>14} {'(raw, penalty)':>15} {'ares can_win_fight':>20}")
         for label, ours, theirs, defender in scenarios:
             mine = self.sample(lambda: eng.level(ours, theirs, defender))
+            penalty = eng.last_inputs.penalty if eng.last_inputs is not None else 0
             ares = self.sample(
                 lambda: self.mediator.can_win_fight(own_units=Units(ours, self), enemy_units=Units(theirs, self)).value
             )
-            self.log(f"{label:<52} {mine[0]:>3} ({mine[1]}-{mine[2]}){'':>6} {ares[0]:>3} ({ares[1]}-{ares[2]})")
+            self.log(
+                f"{label:<52} {mine[0]:>3} ({mine[1]}-{mine[2]}) {f'({mine[0] + penalty}, -{penalty})':>15}"
+                f"{'':>6} {ares[0]:>3} ({ares[1]}-{ares[2]})"
+            )
             if label in EXPECT:
                 low, high = EXPECT[label]
-                if not low <= mine[0] <= high:
-                    self.failures.append(f"{label}: {mine[0]} not in {low}-{high}")
+                # M4's expectations are on the simulator's own level (before the M7 penalty)
+                if not low <= mine[0] + penalty <= high:
+                    self.failures.append(f"{label}: {mine[0] + penalty} not in {low}-{high}")
+            if label in EXPECT_PENALTY and penalty != EXPECT_PENALTY[label]:
+                self.failures.append(f"{label}: penalty {penalty} != {EXPECT_PENALTY[label]}")
         # §4.5.2 enemy side: fighters and static defense in, workers/Observer/Pylon out
         found = eng.attack_inputs(own.center, self.centre)
         kinds = Counter(u.type_id.name for u in found)

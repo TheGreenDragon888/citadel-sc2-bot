@@ -4,7 +4,10 @@
   between shots step out of danger (`KeepUnitSafe`, i.e. ares's `StutterUnitBack`) if the unit
   out-ranges the closest threat; melee and short-range units attack-move.
 - `retreat`: path home around danger (`PathUnitToTarget`); a ranged unit whose weapon is ready
-  shoots a target already in range first.
+  shoots a target already in range first, only one that fights back and only when faster than
+  every visible threat (M7 C3, `retreat_may_shoot`).
+- `step_out` (M7 C1, §4.5.3 out-ranged rule): a unit not committed to a fight steps out of the
+  reach of enemies that out-range it by OUTRANGED_MARGIN or that it can't hit (`out_rangers`).
 - `move`: attack-move (FIGHT/HOLD) or move (REINFORCE, support units) to a point; python-sc2 drops
   an order identical to the unit's current one (§6 APM).
 - `harass`: the §4.6 counterattack squad: on the way, shoot only what can fight back; inside the
@@ -24,7 +27,14 @@ from sc2.position import Point2
 from sc2.unit import Unit
 
 from bot.army.engagement import WORKERS, is_static_defense
-from bot.constants import COUNTER_BASE_RADIUS, COUNTER_THREAT_MARGIN, KITE_RANGE_MARGIN, MOVE_REISSUE_DIST
+from bot.army.ranges import can_hit, outranged, outranges, range_vs, reach  # noqa: F401 (re-exported)
+from bot.constants import (
+    COUNTER_BASE_RADIUS,
+    COUNTER_THREAT_MARGIN,
+    KITE_RANGE_MARGIN,
+    MOVE_REISSUE_DIST,
+    OUTRANGED_REACH_BUFFER,
+)
 
 if TYPE_CHECKING:
     from ares import AresBot
@@ -39,12 +49,8 @@ KITERS: frozenset[UnitTypeId] = frozenset(
 )
 
 
-def _range_vs(unit: Unit, target: Unit) -> float:
-    return unit.air_range if target.is_flying else unit.ground_range
-
-
-def _can_hit(unit: Unit, target: Unit) -> bool:
-    return unit.can_attack_air if target.is_flying else unit.can_attack_ground
+_range_vs = range_vs
+_can_hit = can_hit
 
 
 def threats_to(unit: Unit, enemies: Sequence[Unit]) -> list[Unit]:
@@ -58,6 +64,29 @@ def _fights_back(e: Unit) -> bool:
         e.type_id not in WORKERS and (e.can_attack_ground or e.can_attack_air)
         and (not e.is_structure or is_static_defense(e))
     )
+
+
+def out_rangers(unit: Unit, enemies: Sequence[Unit]) -> list[Unit]:
+    """The enemies that out-range `unit` by OUTRANGED_MARGIN, or that it can't hit, and have it
+    within their reach plus OUTRANGED_REACH_BUFFER (weapon ranges from game data)."""
+    return [
+        e for e in enemies
+        if outranges(e, unit) and e.distance_to(unit) <= reach(e, unit) + OUTRANGED_REACH_BUFFER
+    ]
+
+
+def step_out(bot: "AresBot", unit: Unit) -> bool:
+    """M7 C1: a unit holding, moving or retreating in an out-ranger's reach (`out_rangers`) steps
+    to the nearest safe cell of the influence grid (ares `KeepUnitSafe`; with none within 11, the
+    least dangerous one, VERIFY_NOTES "M7 findings"). True if it acted."""
+    grid = bot.mediator.get_air_grid if unit.is_flying else bot.mediator.get_ground_grid
+    return KeepUnitSafe(unit=unit, grid=grid).execute(bot, bot.config, bot.mediator)
+
+
+def retreat_may_shoot(own_speed: float, threat_speeds: Sequence[float], target_fights_back: bool) -> bool:
+    """M7 C3 (§4.5.3): a retreating unit shoots only an enemy that fights back, and only when it is
+    faster than every visible threat that can hit it (pure)."""
+    return target_fights_back and all(own_speed > speed for speed in threat_speeds)
 
 
 def fight(bot: "AresBot", unit: Unit, enemies: Sequence[Unit], fallback: Point2) -> None:
@@ -120,11 +149,17 @@ def harass(
 
 
 def retreat(bot: "AresBot", unit: Unit, enemies: Sequence[Unit], home: Point2, move_now: bool = True) -> None:
-    """A ranged unit whose weapon is ready shoots a target in range; otherwise, on `move_now`
-    (the path query is throttled), it paths home around danger."""
+    """A ranged unit whose weapon is ready shoots a target in range that fights back, if it is
+    faster than every visible threat (M7 C3; game-data speeds without upgrades on both sides);
+    otherwise, on `move_now` (the path query is throttled), it paths home around danger."""
     if unit.type_id in KITERS and unit.weapon_cooldown == 0:
-        targets = [e for e in enemies if _can_hit(unit, e) and not e.is_memory]
-        if targets and ShootTargetInRange(unit=unit, targets=targets).execute(bot, bot.config, bot.mediator):
+        targets = [e for e in enemies if _can_hit(unit, e) and not e.is_memory and _fights_back(e)]
+        speeds = [e.movement_speed for e in threats_to(unit, enemies) if not e.is_structure and not e.is_memory]
+        if (
+            targets
+            and retreat_may_shoot(unit.movement_speed, speeds, bool(targets))
+            and ShootTargetInRange(unit=unit, targets=targets).execute(bot, bot.config, bot.mediator)
+        ):
             return
     if not move_now:
         return

@@ -33,6 +33,7 @@ DECISION_EVERY_STEPS, half a period after the main attack decision; a main attac
 HARASS squad in.
 """
 
+import math
 from typing import TYPE_CHECKING, NamedTuple, Optional
 
 from ares.consts import TOWNHALL_TYPES, EngagementResult, UnitRole, UnitTreeQueryType
@@ -73,12 +74,19 @@ from bot.constants import (
     ENGAGE_ENEMY_RADIUS,
     ENGAGE_STATIC_RADIUS,
     HOLD_ENGAGE_RADIUS,
+    HOLD_FALLBACK_MEMORY_S,
+    HOLD_FALLBACK_STEP,
+    HOLD_FALLBACK_STEPS,
     HOLD_RADIUS,
+    LAUNCH_CACHE_MAX_AGE_S,
+    LAUNCH_INTEL_FRESH_FRACTION,
     HUNT_GRID_STEP,
     HUNT_VISIT_RADIUS,
     MAIN_RADIUS,
     MICRO_RADIUS,
     OBSERVER_WITH_ARMY_FROM_S,
+    OUT_OF_POSITION_FRESH_S,
+    OUTRANGED_REACH_BUFFER,
     PROXY_CLEAR_SUPPLY,
     REGROUP_FRACTION,
     REINFORCE_JOIN_RADIUS,
@@ -153,6 +161,12 @@ class Army:
         self.threat: Optional[Point2] = None
         self.home_level: int = -1  # the DEFEND squad's level against the home threat (-1: not simulated)
         self._defend_state: str = ""
+        # M7 C2: the DEFEND units that can hit the evaluated threat group (None: all of them)
+        self._defend_tags: Optional[set[int]] = None
+        self._home_fight_at: Optional[float] = None  # M7 C4: last time the DEFEND squad fought units
+        self._fallback_steps: int = 0  # M7 C1: steps the defensive position moved back
+        self.wants_intel: bool = False  # M7 C4: the launch waits for the army's Observer to look
+        self._intel_wait_logged: bool = False
         # main attack
         self.target: Optional[Point2] = None
         self._target_tag: Optional[int] = None
@@ -209,7 +223,7 @@ class Army:
             and u.build_progress == 1  # not while warping in
         ]
         self.squads.update(army, self.scout_tags, self.held_tags)
-        self.anchor = self.hold_point if self.hold_point is not None else self._rally_point()
+        self.anchor = self._fallback_anchor(self.hold_point if self.hold_point is not None else self._rally_point())
         self._claim_observer()
         if iteration % DECISION_EVERY_STEPS == 0:
             self._decide()
@@ -239,6 +253,7 @@ class Army:
         now = bot.time
         defenders = self.fighters(Role.DEFEND)
         self._home_defense(defenders)
+        self.wants_intel = False
         attackers = self.fighters(Role.ATTACK)
         if self.decision.state == ATTACK and self.threat is not None and self.defend_target is None:
             near = self.engagement.enemies_near([self.threat])
@@ -269,7 +284,20 @@ class Army:
         level = self.engagement.level(candidates, enemy, ENEMY_DEFENDS)
         self._attack_inputs = self.engagement.last_inputs
         self.last_level = level
-        decision = self.decision.evaluate(bot.time, level, bot.supply_used, self.engagement.value(candidates), self._value_ratio())
+        # M7 C4: the level against the remembered enemy army as a whole, and how fresh it is
+        cached = [u for u in bot.mediator.get_cached_enemy_army if is_fighter(u) and u.age <= LAUNCH_CACHE_MAX_AGE_S]
+        army_level = self.engagement.level(candidates, cached, ENEMY_DEFENDS) if cached else None
+        total = self.engagement.value(cached)
+        fresh = self.engagement.value(u for u in cached if u.age <= OUT_OF_POSITION_FRESH_S)
+        since_fight = bot.time - self._home_fight_at if self._home_fight_at is not None else math.inf
+        decision = self.decision.evaluate(
+            bot.time, level, bot.supply_used, self.engagement.value(candidates), self._value_ratio(),
+            since_home_fight_s=since_fight, army_level=army_level,
+            intel_fresh=total > 0 and fresh >= LAUNCH_INTEL_FRESH_FRACTION * total,
+        )
+        if decision.wants_intel and not self._intel_wait_logged:
+            logger.info(f"ARMY {bot.time_formatted} launch waits, the Observer looks: {decision.reason}")
+        self.wants_intel = self._intel_wait_logged = decision.wants_intel
         if decision.action == "launch":
             self.squads.assign([u.tag for u in candidates], Role.ATTACK)
             self.target = target
@@ -345,6 +373,11 @@ class Army:
 
     # -- home defense ----------------------------------------------------------------------------
 
+    @staticmethod
+    def _able(defenders: list[Unit], enemies: list[Unit]) -> list[Unit]:
+        """M7 C2: the defenders that can hit at least one of `enemies` (game data)."""
+        return [u for u in defenders if any(micro.can_hit(u, e) for e in enemies)]
+
     def _homes(self) -> list[Point2]:
         # our townhalls, and the natural spot even before it has one (it is ours to hold)
         return [th.position for th in self.bot.townhalls] + [self.bot.mediator.get_own_nat]
@@ -377,6 +410,7 @@ class Army:
         self.defend_target = None
         self.home_level = -1
         self._home_inputs = None
+        self._defend_tags = None
         state = "none"
         if found is None and (proxy := self._proxy_clear(defenders)) is not None:
             found, level, self._home_inputs = proxy
@@ -398,10 +432,21 @@ class Army:
                 else:
                     state = f"hold, {found.type_id.name} covered (level {level} < {CLEAR_STATIC_LEVEL})"
             elif self._inside_main(found.position) or found.distance_to(self.anchor) <= ARMY_HOLD_LEASH:
-                self.defend_target, state = found.position, "last stand (main or defensive position)"
+                # M7 C2: only units that can hit the group answer it; the others hold
+                group = self.engagement.enemies_near([found.position]) or [found]
+                able = self._able(defenders, group)
+                if able:
+                    self.defend_target, state = found.position, "last stand (main or defensive position)"
+                    self._defend_tags = {u.tag for u in able}
+                else:
+                    state = "hold, nothing can hit it (main or defensive position)"
             else:
                 enemy = self.engagement.enemies_near([found.position]) + self.engagement.static_defense_near(found.position)
-                level = self.engagement.level(defenders + self.own_cannons_near(found.position), enemy, WE_DEFEND)
+                # M7 C2 (§4.5.2): only units that can hit something in the group answer it, and only
+                # they count in its simulation
+                able = self._able(defenders, enemy or [found])
+                self._defend_tags = {u.tag for u in able}
+                level = self.engagement.level(able + self.own_cannons_near(found.position), enemy, WE_DEFEND)
                 self._home_inputs = self.engagement.last_inputs
                 self.home_level = level
                 covered = self._covered_by_battery(found.position)
@@ -411,6 +456,8 @@ class Army:
                     state = f"engage (level {level} >= {needed}{', batteries' if covered else ''})"
                 else:
                     state = f"hold (level {level} < {needed}{', batteries' if covered else ''})"
+        if self.defend_target is not None and not (found.is_structure or found.type_id in WORKERS):
+            self._home_fight_at = self.bot.time  # M7 C4
         if state != self._defend_state:
             self._defend_state = state
             if found is not None or self.decision.state != ATTACK:
@@ -602,7 +649,9 @@ class Army:
             intent = self.intents.get(u.tag)
             if intent is not None and intent[0] == RETREAT and u.distance_to(anchor) > RETREAT_DONE_RADIUS:
                 self.intents[u.tag] = (RETREAT, anchor)
-            elif self.defend_target is not None and is_fighter(u):
+            elif self.defend_target is not None and is_fighter(u) and (
+                self._defend_tags is None or u.tag in self._defend_tags
+            ):
                 self.intents[u.tag] = (FIGHT, self.defend_target)
             elif intent is not None and intent[0] == FIGHT and u.distance_to(anchor) > HOLD_ENGAGE_RADIUS:
                 # a home fight turned bad: fall back, not attack-move back through the enemy
@@ -638,7 +687,45 @@ class Army:
         # the army's Observer: with the ATTACK squad's main group while it is out, else at home
         if self.observer_tag is not None:
             where = self.attack_center if self.decision.state == ATTACK and self.attack_center is not None else anchor
+            if self.wants_intel and self.decision.state != ATTACK:
+                where = self._look_point()  # M7 C4: look at the enemy army before launching
             self.intents[self.observer_tag] = (MOVE, where)
+
+    def _look_point(self) -> Point2:
+        """M7 C4: where the army's Observer looks before a launch: the remembered enemy army's
+        centre, else the enemy main."""
+        army = [u for u in self.bot.mediator.get_cached_enemy_army if is_fighter(u)]
+        return Point2.center([u.position for u in army]) if army else self.bot.enemy_start_locations[0]
+
+    def _fallback_anchor(self, anchor: Point2) -> Point2:
+        """M7 C1 (§4.5.3): while enemies that out-range every DEFEND unit type (seen within
+        HOLD_FALLBACK_MEMORY_S) have the defensive position in reach and home defense isn't
+        fighting, the position steps toward our main, HOLD_FALLBACK_STEP at a time, at most
+        HOLD_FALLBACK_STEPS times. Logged when the number of steps changes."""
+        steps = 0
+        defenders = self.fighters(Role.DEFEND)
+        if self.defend_target is None and defenders:
+            kinds = list({u.type_id: u for u in defenders}.values())  # one unit per type
+            longest = max(max(u.ground_range, u.air_range) for u in kinds)
+            covers = []
+            for e in self.bot.mediator.get_cached_enemy_army:
+                if e.age > HOLD_FALLBACK_MEMORY_S or e.distance_to(anchor) > longest + 30:
+                    continue
+                if all(micro.outranges(e, u) for u in kinds):
+                    reaches = [r for u in kinds if (r := micro.reach(e, u)) is not None]
+                    if reaches:
+                        covers.append((e.position, max(reaches) + OUTRANGED_REACH_BUFFER))
+            home = self.bot.start_location
+            while steps < HOLD_FALLBACK_STEPS and any(p.distance_to(anchor) <= r for p, r in covers):
+                anchor = anchor.towards(home, HOLD_FALLBACK_STEP)
+                steps += 1
+        if steps != self._fallback_steps:
+            self._fallback_steps = steps
+            logger.info(
+                f"ARMY {self.bot.time_formatted} hold point back to {anchor.rounded} ({steps} of {HOLD_FALLBACK_STEPS} steps)"
+                if steps else f"ARMY {self.bot.time_formatted} hold point restored to {anchor.rounded}"
+            )
+        return anchor
 
     def _claim_observer(self) -> None:
         """§4.3: from OBSERVER_WITH_ARMY_FROM_S one Observer travels with the army."""
@@ -685,6 +772,11 @@ class Army:
                     micro.keep_safe(bot, unit, point)
                 continue
             visible = [e for e in near if not e.is_memory and e.type_id not in NOT_TARGETS]
+            if mode in (HOLD, MOVE, RETREAT) and micro.out_rangers(unit, visible):
+                # M7 C1 (§4.5.3): not committed to a fight, so out of the out-rangers' reach first
+                # (Stalkers holding at the natural died in place to Tempests in the first ladder loss)
+                if not own_tick or micro.step_out(bot, unit):
+                    continue
             if mode == HARASS:
                 micro.harass(bot, unit, visible, point, goals, own_tick)
                 continue

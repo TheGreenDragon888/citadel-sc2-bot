@@ -1595,6 +1595,13 @@ API checks and Citadel's choices for M7 (`docs/M7_PLAN.md`). Checked before the 
   - `BotAI.time` is `game_loop / 22.4`, seconds on "faster" (`sc2/bot_ai.py:46-48`).
   - So an Observer covers `movement_speed × 1.4` per `bot.time` second without Gravitic Boosters, and more with them; the estimate errs long (`NORMAL_TO_FASTER`).
   - `Unit.distance_per_step` divides `real_speed` by 22.4 without the 1.4 (`sc2/unit.py:385-388`), so B8 doesn't use it.
+- **Phase 2 VERIFY items** (ares `8730865`, python-sc2 in the Poetry environment, map_analyzer):
+  - **Do Tempests add influence to ares's ground grid? Yes.** `Tempest` has a fixed entry in `ares/dicts/weight_costs.py`: GroundCost 17, GroundRange 10, AirCost 17, AirRange 14. `GridManager._add_cost_to_all_grids` adds it over range + `Pathing.RangeBuffer` (4.0 in ares's `config.yml`; Citadel's doesn't override it), so 14 on the ground grid (`managers/grid_manager.py` `_handle_weight_cost_unit`).
+    - Units with no entry use their game-data range and dps (`_handle_generic_unit`), so a Carrier gets the fixed entry (11) and its Interceptors their own weapons.
+  - **What does `KeepUnitSafe` do with no safe cell nearby?** When its cell isn't safe, it paths to `find_closest_safe_spot(radius=11)`: map_analyzer's `lowest_cost_points_array` returns the cells with the lowest cost within 11 (`Pather.py:276-282`), and ares takes the closest of them (`managers/path_manager.py:154-182`).
+    - So with no safe cell within 11 it walks to the least dangerous cell, which may still be in reach. It returns True (it acted) whenever the unit's cell isn't safe.
+  - **Does `Unit.movement_speed` exclude upgrades? Yes**, normal-speed game data without upgrades or buffs (`sc2/unit.py:322-326`; B8 above).
+  - **Is a cached army unit's `age` the time since it was last seen? Yes.** `Unit.age` is `(game_loop - unit.game_loop) / 22.4` (`sc2/unit.py:471-473`). ares stores every visible enemy each step (`main.py:631` → `UnitCacheManager.store_enemy_unit`), replacing the stored Unit by tag (`unit_cache_manager.py:281-327`), so a cached unit's `game_loop` is the last step it was in vision. `bot/intel/army_position.py` relies on the same.
 - **B2's in-game check (`poetry run python scripts/test_outranged.py --case idle_hold`, PylonAIE_v4,
   code `f62475a`):** do units at their hold point get drawn out after an attacker beyond the
   leash? No.

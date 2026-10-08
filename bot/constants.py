@@ -838,3 +838,26 @@ PROXY_NATURAL_WAIT_UNTIL_S: float = 150.0
 # speed, which is per second on the "normal" game speed; bot.time counts "faster" seconds (game
 # loop / 22.4), 1.4 times as many (python-sc2 unit.py `movement_speed`, bot_ai.py `time`)
 NORMAL_TO_FASTER: float = 1.4
+
+# Phase 2: combat (§4.5.2-4.5.3)
+# C1 out-ranged rule: a unit holding, moving or retreating steps out of the reach (+ this buffer) of
+# a visible enemy it can't hit or that out-ranges it by at least OUTRANGED_MARGIN
+OUTRANGED_MARGIN: float = 2.0
+OUTRANGED_REACH_BUFFER: float = 1.0
+# C1: while out-rangers the home defense isn't fighting cover the defensive position, it steps this
+# far toward our main, at most this many times; enemies seen this recently count (Tempests fire
+# from the edge of vision)
+HOLD_FALLBACK_STEP: float = 3.0
+HOLD_FALLBACK_STEPS: int = 4
+HOLD_FALLBACK_MEMORY_S: float = 10.0
+# C4 launch gate: no launch within LAUNCH_AFTER_DEFEND_S of a home fight; the level against the
+# remembered enemy army (fighters seen within LAUNCH_CACHE_MAX_AGE_S) must pass the gate too; at
+# least LAUNCH_INTEL_FRESH_FRACTION of its value seen within OUT_OF_POSITION_FRESH_S, else the
+# army's Observer looks first and the launch waits at most LAUNCH_INTEL_WAIT_S
+LAUNCH_AFTER_DEFEND_S: float = 30.0
+LAUNCH_CACHE_MAX_AGE_S: float = 90.0
+LAUNCH_INTEL_FRESH_FRACTION: float = 0.5
+LAUNCH_INTEL_WAIT_S: float = 45.0
+# C5 (§4.5.2, built because the Phase 1 fight logs showed it): levels off a fight's level per
+# whole share of enemy value that out-ranges every unit of ours able to hit it, or that none can hit
+OUTRANGE_PENALTY_PER_SHARE: float = 4.0

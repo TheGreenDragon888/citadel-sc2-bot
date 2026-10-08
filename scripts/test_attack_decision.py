@@ -3,7 +3,8 @@
     poetry run python scripts/test_attack_decision.py
 
 Each case replays a sequence of evaluations (game second, level, supply used, squad value, our/
-enemy value ratio) through `AttackDecision` and checks the action after each one.
+enemy value ratio) through `AttackDecision` and checks the action after each one. A step can end
+with a dict of the M7 C4 launch inputs; "wait+intel" is a wait that asks the Observer to look.
 """
 
 import os
@@ -18,6 +19,8 @@ from bot.army.attack_decision import ATTACK, GATHER, AttackDecision  # noqa: E40
 from bot.constants import (  # noqa: E402
     END_GAME_ATTACK_FROM_S,
     END_GAME_FROM_S,
+    LAUNCH_AFTER_DEFEND_S,
+    LAUNCH_INTEL_WAIT_S,
     MIN_STATE_SECONDS,
     RELAUNCH_WAIT_S,
 )
@@ -103,6 +106,58 @@ CASES = [
             (END_GAME_FROM_S + 2, 9, 195, 3000, 1.0, "launch"),
         ],
     ),
+    # -- M7 C4: the launch gate ------------------------------------------------------------------
+    (
+        "no launch within LAUNCH_AFTER_DEFEND_S of a home fight",
+        [
+            (T0, 9, 160, 3000, 2.0, "wait", {"since_home_fight_s": LAUNCH_AFTER_DEFEND_S - 1}),
+            (T0 + 1, 9, 160, 3000, 2.0, "launch", {"since_home_fight_s": LAUNCH_AFTER_DEFEND_S}),
+        ],
+    ),
+    (
+        "the remembered army must pass the gate too",
+        [
+            (T0, 9, 160, 3000, 2.0, "wait", {"army_level": 7}),
+            (T0 + 1, 9, 160, 3000, 2.0, "launch", {"army_level": 8}),
+        ],
+    ),
+    (
+        "at 190 supply the remembered army needs ATTACK_START_MAX",
+        [
+            (T0, 6, 195, 3000, 1.0, "wait", {"army_level": 4}),
+            (T0 + 1, 6, 195, 3000, 1.0, "launch", {"army_level": 5}),
+        ],
+    ),
+    (
+        "stale intel: wait and look, then launch after LAUNCH_INTEL_WAIT_S",
+        [
+            (T0, 9, 160, 3000, 2.0, "wait+intel", {"intel_fresh": False}),
+            (T0 + LAUNCH_INTEL_WAIT_S - 1, 9, 160, 3000, 2.0, "wait+intel", {"intel_fresh": False}),
+            (T0 + LAUNCH_INTEL_WAIT_S, 9, 160, 3000, 2.0, "launch", {"intel_fresh": False}),
+        ],
+    ),
+    (
+        "stale intel: fresh intel launches at once",
+        [
+            (T0, 9, 160, 3000, 2.0, "wait+intel", {"intel_fresh": False}),
+            (T0 + 5, 9, 160, 3000, 2.0, "launch", {"intel_fresh": True}),
+        ],
+    ),
+    (
+        "stale intel: the wait restarts once the gate stops passing",
+        [
+            (T0, 9, 160, 3000, 2.0, "wait+intel", {"intel_fresh": False}),
+            (T0 + 30, 6, 160, 3000, 2.0, "wait", {"intel_fresh": False}),
+            (T0 + 60, 9, 160, 3000, 2.0, "wait+intel", {"intel_fresh": False}),
+        ],
+    ),
+    (
+        "stale intel and a weak remembered army: still no launch after the wait",
+        [
+            (T0, 9, 160, 3000, 2.0, "wait+intel", {"intel_fresh": False, "army_level": 3}),
+            (T0 + LAUNCH_INTEL_WAIT_S, 9, 160, 3000, 2.0, "wait", {"intel_fresh": False, "army_level": 3}),
+        ],
+    ),
 ]
 
 
@@ -118,10 +173,13 @@ def main() -> int:
             if step[0] == "recall":
                 machine.recall(step[1])
                 continue
-            t, level, supply, value, ratio, want = step
-            got = machine.evaluate(t, level, supply, value, ratio)
-            if got.action != want:
-                problems.append(f"t={t:g} level={level}: {got.action} ({got.reason}), wanted {want}")
+            t, level, supply, value, ratio, want = step[:6]
+            got = machine.evaluate(t, level, supply, value, ratio, **(step[6] if len(step) > 6 else {}))
+            want, want_intel = want.split("+")[0], want.endswith("+intel")
+            if got.action != want or got.wants_intel != want_intel:
+                problems.append(
+                    f"t={t:g} level={level}: {got.action}{' +intel' if got.wants_intel else ''} ({got.reason}), wanted {step[5]}"
+                )
             want_state = ATTACK if want in ("launch", "continue") else GATHER
             if machine.state != want_state:
                 problems.append(f"t={t:g}: state {machine.state}, wanted {want_state}")
