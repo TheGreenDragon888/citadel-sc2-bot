@@ -27,7 +27,14 @@ from sc2.unit import Unit
 from sc2_helper.combat_simulator import CombatSimulator
 
 from bot.army.ranges import can_hit, outrange_penalty, outranges
-from bot.constants import ENGAGE_ENEMY_RADIUS, ENGAGE_STATIC_RADIUS, FIGHT_LOG_TYPES, OUTRANGE_PENALTY_PER_SHARE
+from bot.constants import (
+    ENGAGE_ENEMY_RADIUS,
+    ENGAGE_STATIC_RADIUS,
+    FIGHT_LOG_TYPES,
+    OUTRANGE_PENALTY_PER_SHARE,
+    WEAPONLESS_CAP_SHARE,
+    WEAPONLESS_DAMAGE_TYPES,
+)
 
 if TYPE_CHECKING:
     from ares import AresBot
@@ -91,10 +98,12 @@ class FightInputs(NamedTuple):
     enemy_text: str
     enemy_value: float
     penalty: int = 0  # M7 C5: levels taken off for out-ranging enemies
+    cap: Optional[int] = None  # M7 C7: the value level, when it lowered the simulator's level
 
     def text(self) -> str:
         return (
             f"vs {self.enemy_text} ({self.enemy_value:.0f}) | ours {self.own_text} ({self.own_value:.0f})"
+            + (f"; value cap {self.cap}" if self.cap is not None else "")
             + (f"; -{self.penalty} out-ranged" if self.penalty else "")
         )
 
@@ -141,6 +150,12 @@ def level_from_sim(won: bool, health_left: float, own_health: float, enemy_healt
         if ratio > 0.2:
             return EngagementResult.LOSS_MARGINAL
     return EngagementResult.TIE
+
+
+def value_level(own_value: float, enemy_value: float) -> int:
+    """M7 C7 (§4.5.2, D19): the level `level_from_sim` gives if each side's resource value were its
+    health and the larger side kept the difference (pure)."""
+    return int(level_from_sim(own_value > enemy_value, abs(own_value - enemy_value), own_value, enemy_value))
 
 
 class Engagement:
@@ -218,6 +233,15 @@ class Engagement:
         own_health = sum(u.health + u.shield for u in own)
         enemy_health = sum(u.health + u.shield for u in enemy)
         raw = int(level_from_sim(won, health_left, own_health, enemy_health))
+        # M7 C7 (D19): the simulator sees Void Rays, Carriers, Banelings ... as harmless (it rated
+        # 12 Zealots against 4 Void Rays a 10), so their share of the enemy's value caps it by value
+        enemy_value = self.value(enemy)
+        weaponless = self.value(u for u in enemy if u.type_id in WEAPONLESS_DAMAGE_TYPES)
+        if enemy_value > 0 and weaponless >= WEAPONLESS_CAP_SHARE * enemy_value:
+            cap = value_level(self.value(own), enemy_value)
+            if cap < raw:
+                raw = cap
+                self.last_inputs = self.last_inputs._replace(cap=cap)
         # M7 C5 (§4.5.2): the simulator never sees positions, and rated home fights against
         # Tempest armies 7-9 at a third of their value in the Phase 1 batches
         penalty = outrange_penalty(self.outranged_share(own, enemy), OUTRANGE_PENALTY_PER_SHARE)

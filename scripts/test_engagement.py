@@ -15,6 +15,9 @@ the Pylon left out; Stalkers, Zealots, Cannons and the Battery in.
 
 M7 C5: out-ranged scenarios (Tempests, Void Rays vs Zealots, Carriers), printed with the raw
 simulator level and the out-range penalty; the penalty itself is checked (EXPECT_PENALTY).
+M7 D18: 2 Zealots vs 4 Marines gets no penalty (melee units). M7 D19: against Void Rays and
+Carriers (no weapon in game data) the level is capped at the value level (EXPECT_CAP), and the
+penalty sees them through ares's ranges.
 
 Exit code 1 if an expectation in EXPECT fails.
 """
@@ -41,7 +44,7 @@ from sc2.position import Point2  # noqa: E402
 from sc2.unit import Unit  # noqa: E402
 from sc2.units import Units  # noqa: E402
 
-from bot.army.engagement import ENEMY_DEFENDS, WE_DEFEND, Engagement  # noqa: E402
+from bot.army.engagement import ENEMY_DEFENDS, WE_DEFEND, Engagement, value_level  # noqa: E402
 
 OWN, ENEMY = 1, 2  # debug_create_unit owner ids
 ARMY_SEPARATION: float = 30.0  # far outside every weapon and vision range; the simulator ignores positions
@@ -63,10 +66,18 @@ EXPECT_PENALTY: dict[str, int] = {
     "6 Stalkers vs 6 Stalkers": 0,
     "30 Stalkers + 4 Colossi vs 8 Tempests + 4 Zealots": 4,  # ~89% of the value out-ranges them
     "12 Zealots vs 8 Tempests": 4,  # none of ours can hit them
-    "12 Stalkers vs 4 Void Rays": 0,
+    "12 Stalkers vs 4 Void Rays": 0,  # 6 vs 6 (ares's Void Ray range, D19)
+    "12 Zealots vs 4 Void Rays": 4,  # none of ours can hit them, and they hit us (D19)
+    "12 Stalkers vs 2 Carriers (no Interceptors)": 4,  # 11 vs 6 (ares's Carrier range, D19)
+    "2 Zealots vs 4 Marines (defending)": 0,  # melee units (D18)
 }
-# Printed only: Void Rays and Carriers have no weapon in this game data (VERIFY_NOTES "M7 findings"),
-# so neither the simulator nor the penalty sees them; these rows show that gap.
+# M7 D19: scenarios whose level must be capped at the value level (Void Rays and Carriers have no
+# weapon in this game data, so the simulator calls these 10); every other scenario must have no cap
+EXPECT_CAP: set[str] = {
+    "12 Zealots vs 4 Void Rays",
+    "12 Stalkers vs 4 Void Rays",
+    "12 Stalkers vs 2 Carriers (no Interceptors)",
+}
 
 
 class EngagementProbe(AresBot):
@@ -137,6 +148,7 @@ class EngagementProbe(AresBot):
                 [UnitTypeId.TEMPEST, 8, centre.towards(own, -6), ENEMY],
                 [UnitTypeId.VOIDRAY, 4, centre.towards(own, -8), ENEMY],
                 [UnitTypeId.CARRIER, 2, centre.towards(own, -10), ENEMY],
+                [UnitTypeId.MARINE, 4, centre.towards(own, -12), ENEMY],
             ]
             + [[UnitTypeId.PHOTONCANNON, 1, centre.offset(o), ENEMY] for o in CANNON_OFFSETS]
         )
@@ -154,10 +166,12 @@ class EngagementProbe(AresBot):
         own_cannons = self.structures(UnitTypeId.PHOTONCANNON).ready.filter(lambda c: c.is_powered)
         stalkers = self.enemy_units(UnitTypeId.STALKER)
         zealots = self.enemy_units(UnitTypeId.ZEALOT)
+        marines = self.enemy_units(UnitTypeId.MARINE)
         cannons = self.enemy_structures(UnitTypeId.PHOTONCANNON).filter(lambda c: c.is_ready and c.is_powered)
         ready = (
             len(own) == 30 and len(stalkers) == 6 and len(zealots) == 4 and len(cannons) == 6 and len(own_cannons) == 2
             and len(colossi) == 4 and len(own_zealots) == 12 and len(tempests) == 8 and len(voidrays) == 4 and len(carriers) == 2
+            and len(marines) == 4
         )
         if not ready:
             if self.state.game_loop - self.phase_started > PHASE_TIMEOUT_LOOPS:
@@ -188,18 +202,27 @@ class EngagementProbe(AresBot):
             ("12 Zealots vs 4 Void Rays", list(own_zealots), list(voidrays), ENEMY_DEFENDS),
             ("12 Stalkers vs 4 Void Rays", twelve, list(voidrays), ENEMY_DEFENDS),
             ("12 Stalkers vs 2 Carriers (no Interceptors)", twelve, list(carriers), ENEMY_DEFENDS),
+            # M7 D18
+            ("2 Zealots vs 4 Marines (defending)", list(own_zealots[:2]), list(marines), WE_DEFEND),
         ]
-        self.log(f"{'scenario':<52} {'Citadel':>14} {'(raw, penalty)':>15} {'ares can_win_fight':>20}")
+        self.log(f"{'scenario':<52} {'Citadel':>14} {'(raw, penalty)':>15} {'value cap':>10} {'ares can_win_fight':>20}")
         for label, ours, theirs, defender in scenarios:
             mine = self.sample(lambda: eng.level(ours, theirs, defender))
             penalty = eng.last_inputs.penalty if eng.last_inputs is not None else 0
+            cap = eng.last_inputs.cap if eng.last_inputs is not None else None
             ares = self.sample(
                 lambda: self.mediator.can_win_fight(own_units=Units(ours, self), enemy_units=Units(theirs, self)).value
             )
             self.log(
                 f"{label:<52} {mine[0]:>3} ({mine[1]}-{mine[2]}) {f'({mine[0] + penalty}, -{penalty})':>15}"
-                f"{'':>6} {ares[0]:>3} ({ares[1]}-{ares[2]})"
+                f" {'-' if cap is None else cap:>10}{'':>6} {ares[0]:>3} ({ares[1]}-{ares[2]})"
             )
+            if label in EXPECT_CAP:
+                want = value_level(eng.value(ours), eng.value(theirs))
+                if cap != want:
+                    self.failures.append(f"{label}: value cap {cap} != {want}")
+            elif cap is not None:
+                self.failures.append(f"{label}: unexpected value cap {cap}")
             if label in EXPECT:
                 low, high = EXPECT[label]
                 # M4's expectations are on the simulator's own level (before the M7 penalty)

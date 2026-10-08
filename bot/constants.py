@@ -844,6 +844,9 @@ NORMAL_TO_FASTER: float = 1.4
 # a visible enemy it can't hit or that out-ranges it by at least OUTRANGED_MARGIN
 OUTRANGED_MARGIN: float = 2.0
 OUTRANGED_REACH_BUFFER: float = 1.0
+# C6 (D18): a unit with at most this range (game data: Zealot, Dark Templar, Zergling 0.1, workers 0.2,
+# Ultralisk 1.0) is out-ranged only by enemies it can't hit; closing the gap is its job
+MELEE_RANGE_MAX: float = 1.0
 # C1: while out-rangers the home defense isn't fighting cover the defensive position, it steps this
 # far toward our main, at most this many times; enemies seen this recently count (Tempests fire
 # from the edge of vision)
@@ -863,3 +866,15 @@ LAUNCH_INTEL_WAIT_S: float = 45.0
 # C5 (§4.5.2, built because the Phase 1 fight logs showed it): levels off a fight's level per
 # whole share of enemy value that out-ranges every unit of ours able to hit it, or that none can hit
 OUTRANGE_PENALTY_PER_SHARE: float = 4.0
+# C7 (D19, §4.5.2): army types with no weapon in this game data that deal damage themselves, which the
+# simulator sees as harmless (VERIFY_NOTES "M7 findings"). Casters (Sentry, Infestor, Viper) and the
+# Bunker (its cargo shoots) are left out. When these hold at least WEAPONLESS_CAP_SHARE of the enemy's
+# value, a fight's level is capped at the value level
+WEAPONLESS_DAMAGE_TYPES: frozenset[UnitTypeId] = frozenset(
+    {
+        UnitTypeId.VOIDRAY, UnitTypeId.CARRIER, UnitTypeId.BATTLECRUISER, UnitTypeId.ORACLE,
+        UnitTypeId.BANELING, UnitTypeId.WIDOWMINE, UnitTypeId.WIDOWMINEBURROWED, UnitTypeId.DISRUPTOR,
+        UnitTypeId.SWARMHOSTMP,
+    }
+)
+WEAPONLESS_CAP_SHARE: float = 0.2

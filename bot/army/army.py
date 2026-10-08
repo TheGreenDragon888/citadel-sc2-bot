@@ -381,8 +381,9 @@ class Army:
 
     @staticmethod
     def _able(defenders: list[Unit], enemies: list[Unit]) -> list[Unit]:
-        """M7 C2: the defenders that can hit at least one of `enemies` (game data)."""
-        return [u for u in defenders if any(micro.can_hit(u, e) for e in enemies)]
+        """M7 C2: the defenders that can hit at least one of `enemies` (game data, else ares's range),
+        and those with no weapon from either source, which keep their pre-M7 behaviour (D19)."""
+        return [u for u in defenders if not micro.has_weapon(u) or any(micro.can_hit(u, e) for e in enemies)]
 
     def _homes(self) -> list[Point2]:
         # our townhalls, and the natural spot even before it has one (it is ours to hold)
@@ -587,7 +588,7 @@ class Army:
         grounded = [s for s in bot.enemy_structures if not s.is_flying]
         townhalls = [s for s in grounded if s.type_id in TOWNHALL_TYPES]
         pool = townhalls or grounded
-        if not pool and self.endgame is not None and self.endgame.hunting and any(u.can_attack_air for u in units):
+        if not pool and self.endgame is not None and self.endgame.hunting and any(micro.can_hit_layer(u, True) for u in units):
             # §4.7: lifted Terran buildings, for the units that can shoot up
             pool = [s for s in bot.enemy_structures if s.is_flying]
         if pool:
@@ -717,10 +718,11 @@ class Army:
         reach every 15 s). Logged when the number of steps changes."""
         base = anchor
         steps = 0
-        defenders = self.fighters(Role.DEFEND)
-        if self.defend_target is None and defenders:
-            kinds = list({u.type_id: u for u in defenders}.values())  # one unit per type
-            longest = max(max(u.ground_range, u.air_range) for u in kinds)
+        # one DEFEND unit per type; types with no weapon from either source keep their pre-M7
+        # behaviour (D19)
+        kinds = [u for u in {u.type_id: u for u in self.fighters(Role.DEFEND)}.values() if micro.has_weapon(u)]
+        if self.defend_target is None and kinds:
+            longest = max(max(micro.weapon_range(u, False) or 0.0, micro.weapon_range(u, True) or 0.0) for u in kinds)
             covers = []
             for e in self.bot.mediator.get_cached_enemy_army:
                 if e.age > HOLD_FALLBACK_MEMORY_S or e.distance_to(anchor) > longest + 30:
@@ -808,7 +810,7 @@ class Army:
                 continue
             if mode == MOVE:
                 # walking out to the squad: fight only what can fight back
-                visible = [e for e in visible if e.can_attack_ground or e.can_attack_air]
+                visible = [e for e in visible if micro.has_weapon(e)]
             elif mode == HOLD:
                 radius = self.leash if (self.leash is not None and point == self.hold_point) else HOLD_ENGAGE_RADIUS
                 visible = [e for e in visible if e.distance_to(point) <= radius or self._inside_main(e.position)]

@@ -27,7 +27,16 @@ from sc2.position import Point2
 from sc2.unit import Unit
 
 from bot.army.engagement import WORKERS, is_static_defense
-from bot.army.ranges import can_hit, outranged, outranges, range_vs, reach  # noqa: F401 (re-exported)
+from bot.army.ranges import (  # noqa: F401 (re-exported)
+    can_hit,
+    can_hit_layer,
+    has_weapon,
+    outranged,
+    outranges,
+    range_vs,
+    reach,
+    weapon_range,
+)
 from bot.constants import (
     COUNTER_BASE_RADIUS,
     COUNTER_THREAT_MARGIN,
@@ -54,21 +63,24 @@ _can_hit = can_hit
 
 
 def threats_to(unit: Unit, enemies: Sequence[Unit]) -> list[Unit]:
-    """Enemies that can attack `unit`."""
-    return [e for e in enemies if (e.can_attack_air if unit.is_flying else e.can_attack_ground)]
+    """Enemies that can attack `unit` (game data, else ares's range: M7 D19)."""
+    return [e for e in enemies if can_hit(e, unit)]
 
 
 def _fights_back(e: Unit) -> bool:
     """An enemy that can fight: a unit that can attack (not a worker), or finished static defense."""
     return (
-        e.type_id not in WORKERS and (e.can_attack_ground or e.can_attack_air)
+        e.type_id not in WORKERS and has_weapon(e)
         and (not e.is_structure or is_static_defense(e))
     )
 
 
 def out_rangers(unit: Unit, enemies: Sequence[Unit]) -> list[Unit]:
     """The enemies that out-range `unit` by OUTRANGED_MARGIN, or that it can't hit, and have it
-    within their reach plus OUTRANGED_REACH_BUFFER (weapon ranges from game data)."""
+    within their reach plus OUTRANGED_REACH_BUFFER (weapon ranges: `ranges.weapon_range`). None for
+    a unit with no weapon from either source: it keeps its pre-M7 behaviour (D19)."""
+    if not has_weapon(unit):
+        return []
     return [
         e for e in enemies
         if outranges(e, unit) and e.distance_to(unit) <= reach(e, unit) + OUTRANGED_REACH_BUFFER
@@ -105,7 +117,7 @@ def fight(bot: "AresBot", unit: Unit, enemies: Sequence[Unit], fallback: Point2)
         threats = threats_to(unit, fighters)
         closest = min(threats, key=lambda e: e.distance_to(unit), default=None)
         if closest is not None:
-            their_reach = (closest.air_range if unit.is_flying else closest.ground_range) + closest.radius + unit.radius
+            their_reach = range_vs(closest, unit) + closest.radius + unit.radius
             our_reach = _range_vs(unit, closest) + closest.radius + unit.radius
             if our_reach > their_reach and closest.distance_to(unit) < our_reach + KITE_RANGE_MARGIN:
                 grid = bot.mediator.get_air_grid if unit.is_flying else bot.mediator.get_ground_grid
@@ -136,7 +148,7 @@ def harass(
     threats = [
         e for e in fighters
         if e.distance_to(unit)
-        <= (e.air_range if unit.is_flying else e.ground_range) + e.radius + unit.radius + COUNTER_THREAT_MARGIN
+        <= range_vs(e, unit) + e.radius + unit.radius + COUNTER_THREAT_MARGIN
     ]
     for group in [threats] + [list(g) for g in goals]:
         reachable = [e for e in group if _can_hit(unit, e)]

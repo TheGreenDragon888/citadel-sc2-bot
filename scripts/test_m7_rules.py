@@ -4,7 +4,8 @@
 
 Each M7 step adds its cases here: the fight-input text (O1), the expansion-first proxy check
 (B6), the main re-scout gate (B4), the cannon-rush ramp hold (B7), the Observer trip gate (B8),
-and Phase 2's out-ranged rule (C1), eligibility (C2), retreat shooting (C3) and penalty (C5).
+and Phase 2's out-ranged rule (C1), eligibility (C2), retreat shooting (C3), penalty (C5), the melee
+rule (C6, D18) and weaponless units (C7, D19).
 Units are stand-ins with only the attributes the rules read (no game needed). Prints PASS/FAIL per case; exits 1 on any failure.
 """
 
@@ -19,15 +20,17 @@ os.chdir(ROOT)
 sys.path.insert(0, str(ROOT))
 
 import run  # noqa: E402,F401  (puts ares-sc2 on sys.path)
+from sc2.ids.unit_typeid import UnitTypeId  # noqa: E402
 from sc2.position import Point2  # noqa: E402
 
 from bot.army.army import Army  # noqa: E402
-from bot.army.engagement import FightInputs, composition_text  # noqa: E402
+from bot.army.engagement import FightInputs, composition_text, value_level  # noqa: E402
 from bot.army.micro import retreat_may_shoot  # noqa: E402
-from bot.army.ranges import can_hit, outrange_penalty, outranged, outranges, reach  # noqa: E402
+from bot.army.ranges import can_hit, has_weapon, outrange_penalty, outranged, outranges, range_vs, reach  # noqa: E402
 from bot.constants import (  # noqa: E402
     CANNON_RUSH_RADIUS,
     MAIN_STALE_FROM_S,
+    MELEE_RANGE_MAX,
     OUTRANGED_MARGIN,
     MAIN_STALE_S,
     PROXY_NATURAL_WAIT_UNTIL_S,
@@ -133,14 +136,21 @@ case("observer trip: main never seen", observer_trip_ok, T, 10.0, None, -MAIN_ST
 case("observer trip: all before MAIN_STALE_FROM_S", observer_trip_ok, 0.0, MAIN_STALE_FROM_S - 1, None, -MAIN_STALE_S, 1, expected=True)
 
 # -- Phase 2: stand-in units (ranges as in game data: Stalker 6, Tempest 10 ground / 14 air) -------
-def unit(name, ground=0.0, air=0.0, flying=False, radius=0.5):  # noqa: E302
+def unit(name, ground=0.0, air=0.0, flying=False, radius=0.5, type_id=None):  # noqa: E302
     return SimpleNamespace(
         name=name, ground_range=ground, air_range=air, can_attack_ground=ground > 0, can_attack_air=air > 0,
-        is_flying=flying, radius=radius,
+        is_flying=flying, radius=radius, type_id=type_id,
     )
 STALKER, ZEALOT = unit("stalker", 6, 6, radius=0.625), unit("zealot", 0.1, radius=0.5)  # noqa: E305
 TEMPEST, VOIDRAY = unit("tempest", 10, 14, flying=True, radius=1.25), unit("voidray", 6, 6, flying=True, radius=1.0)
 CANNON, OVERLORD = unit("cannon", 7, 7, radius=1.125), unit("overlord", flying=True, radius=1.0)
+MARINE = unit("marine", 5, 5, radius=0.375)
+# no weapon in game data (VERIFY_NOTES "M7 findings"): ares's WEIGHT_COSTS ranges apply (D19), except
+# for the Disruptor, which ares has none for
+VOIDRAY_DATA = unit("voidray", flying=True, radius=1.0, type_id=UnitTypeId.VOIDRAY)
+CARRIER_DATA = unit("carrier", flying=True, radius=1.25, type_id=UnitTypeId.CARRIER)
+SENTRY_DATA = unit("sentry", radius=0.5, type_id=UnitTypeId.SENTRY)
+DISRUPTOR_DATA = unit("disruptor", radius=0.5, type_id=UnitTypeId.DISRUPTOR)
 
 # C1: the out-ranged rule
 case("outranged: they can't hit us", outranged, 6.0, None, OUTRANGED_MARGIN, expected=False)
@@ -150,12 +160,34 @@ case("outranged: 7 vs 6, inside the margin", outranged, 6.0, 7.0, OUTRANGED_MARG
 case("outranges: Tempest vs Stalker", outranges, TEMPEST, STALKER, expected=True)
 case("outranges: Void Ray vs Stalker", outranges, VOIDRAY, STALKER, expected=False)
 case("outranges: Void Ray vs Zealot (can't hit back)", outranges, VOIDRAY, ZEALOT, expected=True)
-case("outranges: Cannon vs Zealot", outranges, CANNON, ZEALOT, expected=True)
+case("outranges: Cannon vs Zealot (melee, D18)", outranges, CANNON, ZEALOT, expected=False)
 case("outranges: Cannon vs Stalker", outranges, CANNON, STALKER, expected=False)
 case("outranges: Overlord (no weapon) vs Zealot", outranges, OVERLORD, ZEALOT, expected=False)
 case("can_hit: Zealot vs Void Ray", can_hit, ZEALOT, VOIDRAY, expected=False)
 case("reach: Tempest vs Stalker", reach, TEMPEST, STALKER, expected=10 + 1.25 + 0.625)
 case("reach: Zealot vs Void Ray", reach, ZEALOT, VOIDRAY, expected=None)
+
+# C6 (D18): a melee unit is out-ranged only by enemies it can't hit
+case("outranged: melee 0.1 vs 5", outranged, 0.1, 5.0, OUTRANGED_MARGIN, MELEE_RANGE_MAX, expected=False)
+case("outranged: at the melee cut-off", outranged, MELEE_RANGE_MAX, 7.0, OUTRANGED_MARGIN, MELEE_RANGE_MAX, expected=False)
+case("outranged: just above the cut-off", outranged, MELEE_RANGE_MAX + 0.5, 7.0, OUTRANGED_MARGIN, MELEE_RANGE_MAX, expected=True)
+case("outranged: melee that can't hit", outranged, None, 5.0, OUTRANGED_MARGIN, MELEE_RANGE_MAX, expected=True)
+case("outranges: Marine vs Zealot", outranges, MARINE, ZEALOT, expected=False)
+case("outranges: Tempest vs Zealot (can't hit air)", outranges, TEMPEST, ZEALOT, expected=True)
+case("outranges: Marine vs Stalker", outranges, MARINE, STALKER, expected=False)
+
+# C7 (D19): types with no game-data weapon use ares's ranges; with neither, no weapon
+case("range: Void Ray (ares 6) vs Stalker", range_vs, VOIDRAY_DATA, STALKER, expected=6.0)
+case("range: Carrier (ares 11) vs Void Ray", range_vs, CARRIER_DATA, VOIDRAY, expected=11.0)
+case("range: Disruptor (neither)", range_vs, DISRUPTOR_DATA, STALKER, expected=0.0)
+case("can_hit: Zealot vs Sentry (ground)", can_hit, ZEALOT, SENTRY_DATA, expected=True)
+case("can_hit: our Sentry (ares 5) vs Zealot", can_hit, SENTRY_DATA, ZEALOT, expected=True)
+case("outranges: Carrier vs Stalker (11 vs 6)", outranges, CARRIER_DATA, STALKER, expected=True)
+case("outranges: Void Ray vs Stalker (6 vs 6)", outranges, VOIDRAY_DATA, STALKER, expected=False)
+case("outranges: Void Ray vs Zealot (can't hit back)", outranges, VOIDRAY_DATA, ZEALOT, expected=True)
+case("has_weapon: Sentry (ares)", has_weapon, SENTRY_DATA, expected=True)
+case("has_weapon: Disruptor (neither)", has_weapon, DISRUPTOR_DATA, expected=False)
+case("has_weapon: Overlord", has_weapon, OVERLORD, expected=False)
 
 # C2: only defenders that can hit something in the threat group answer it
 case(
@@ -165,6 +197,14 @@ case(
 case(
     "eligibility: both answer a mixed group",
     lambda: [u.name for u in Army._able([STALKER, ZEALOT], [VOIDRAY, ZEALOT])], expected=["stalker", "zealot"],
+)
+case(
+    "eligibility: a weaponless unit of ours stays in (D19)",
+    lambda: [u.name for u in Army._able([STALKER, ZEALOT, DISRUPTOR_DATA], [VOIDRAY_DATA])], expected=["stalker", "disruptor"],
+)
+case(
+    "eligibility: our Sentry answers Zealots (ares range)",
+    lambda: [u.name for u in Army._able([SENTRY_DATA], [ZEALOT])], expected=["sentry"],
 )
 
 # C3: retreating units shoot only enemies that fight back, and only when faster than every threat
@@ -179,6 +219,18 @@ case("penalty: an all-Tempest army", outrange_penalty, 1.0, 4.0, expected=4)
 case("penalty: 8 Tempests + 6 Zealots (85% of the value)", outrange_penalty, 3400 / 4000, 4.0, expected=3)
 case("penalty: an eighth rounds to 1", outrange_penalty, 0.125, 4.0, expected=1)
 case("penalty: under an eighth rounds to 0", outrange_penalty, 0.12, 4.0, expected=0)
+
+# C7 (D19): the value level (ares's mapping, values as health)
+case("value level: equal", value_level, 1000.0, 1000.0, expected=5)
+case("value level: 1.25x (a fifth left, not above)", value_level, 1250.0, 1000.0, expected=5)
+case("value level: 1.3x", value_level, 1300.0, 1000.0, expected=6)
+case("value level: 2x", value_level, 2000.0, 1000.0, expected=7)
+case("value level: 2.5x", value_level, 2500.0, 1000.0, expected=8)
+case("value level: 10x", value_level, 10000.0, 1000.0, expected=10)
+case("value level: half", value_level, 1000.0, 2000.0, expected=3)
+case("value level: nothing of ours", value_level, 0.0, 1000.0, expected=0)
+case("fight inputs: value cap and penalty", lambda: FightInputs("4 STALKER", 700, "4 VOIDRAY", 1000, 1, 3).text(),
+     expected="vs 4 VOIDRAY (1000) | ours 4 STALKER (700); value cap 3; -1 out-ranged")
 
 
 def main() -> int:
