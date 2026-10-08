@@ -8,7 +8,8 @@ Home defense (DEFEND squad; Defense > Main attack, §3):
 - A home threat is the enemy nearest one of our bases (townhalls and the natural spot) within
   ARMY_DEFEND_RADIUS: army units; lone workers within ARMY_WORKER_THREAT_RADIUS; enemy structures
   (proxy Pylons, Cannons) once the squad can take them (M2 rules, now on the simulator). With the
-  defense plan's leash, only enemies near its hold point or inside our main.
+  defense plan's leash, only enemies near its hold point or inside our main. With no other threat,
+  a known proxy production structure while PROXY is active, once the squad can take it (M7 B9).
 - The squad fights it if the enemy is inside our main or at the defensive position (nowhere to
   fall back to), at >= DEFEND_ENGAGE when the fight is within a ready Shield Battery's reach
   (§4.5.2: batteries are not simulated), or at >= ATTACK_CONTINUE elsewhere; otherwise it holds
@@ -52,6 +53,7 @@ from bot.army.engagement import (
     is_fighter,
 )
 from bot.army.squads import Role, Squads
+from bot.intel.threat_flags import Threat
 from bot.constants import (
     ARMY_CLEAR_STRUCTURES_SUPPLY,
     ARMY_DEFEND_RADIUS,
@@ -77,6 +79,7 @@ from bot.constants import (
     MAIN_RADIUS,
     MICRO_RADIUS,
     OBSERVER_WITH_ARMY_FROM_S,
+    PROXY_CLEAR_SUPPLY,
     REGROUP_FRACTION,
     REINFORCE_JOIN_RADIUS,
     REINFORCE_MIN_SUPPLY,
@@ -133,6 +136,7 @@ class Army:
         self.engagement = Engagement(bot)
         self.decision = AttackDecision()
         self.squads = Squads(bot)
+        self.flags = flags
         self.counter = Counterattack(bot, self, flags)  # §4.6
         # set by CitadelBot each army tick
         self.held_tags: set[int] = set()  # the wall-gap holder (other modules control it)
@@ -374,7 +378,12 @@ class Army:
         self.home_level = -1
         self._home_inputs = None
         state = "none"
-        if found is not None:
+        if found is None and (proxy := self._proxy_clear(defenders)) is not None:
+            found, level, self._home_inputs = proxy
+            self.threat = self.defend_target = found.position
+            self.home_level = level
+            state = f"clearing proxy {found.type_id.name} (level {level})"
+        elif found is not None:
             if found.is_structure or found.type_id in WORKERS:
                 # static defense covering the target, and the units around it, fight for it
                 # (M4 cannon_rush Ultralove: the Cannons around a Pylon near our base were just
@@ -464,6 +473,27 @@ class Army:
                 if d < radius and (best is None or d < best[0]):
                     best = (d, enemy)
         return best[1] if best is not None else None
+
+    def _proxy_clear(self, defenders: list[Unit]) -> Optional[tuple[Unit, int, Optional[FightInputs]]]:
+        """M7 B9 (D17): while PROXY is active, the known proxy production structure nearest our
+        natural (the proxy_structure flag's evidence) and the level against what guards it, if the
+        DEFEND squad has PROXY_CLEAR_SUPPLY and beats that at CLEAR_STATIC_LEVEL. Only then is it a
+        home threat: one the squad holds against would stop launches and reinforcements. In two
+        test games the PROXY plan held one base for 60 minutes under the launch gate's supply while
+        the proxy Barracks stood."""
+        flag = self.flags.get(Threat.PROXY, "proxy_structure") if self.flags is not None else None
+        if flag is None or self._supply(defenders) < PROXY_CLEAR_SUPPLY:
+            return None
+        structures = [s for s in self.bot.enemy_structures if s.tag in flag.evidence_tags]
+        if not structures:
+            return None
+        nat = self.bot.mediator.get_own_nat
+        target = min(structures, key=lambda s: s.distance_to(nat))
+        guard = self.engagement.static_defense_near(target.position) + self.engagement.enemies_near([target.position])
+        if not guard:
+            return target, int(EngagementResult.VICTORY_EMPHATIC), None
+        level = self.engagement.level(defenders, guard, ENEMY_DEFENDS)
+        return (target, level, self.engagement.last_inputs) if level >= CLEAR_STATIC_LEVEL else None
 
     def _sieging(self, cannons: list[Unit]) -> list[Unit]:
         """Visible finished Cannons that can hit one of our ready townhalls."""

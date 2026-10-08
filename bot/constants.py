@@ -507,6 +507,9 @@ ARMY_HOLD_LEASH: float = 8.0  # ramp holds: engage only enemies this close to th
 # and enemy structures near our townhalls once the army has this much supply.
 ARMY_WORKER_THREAT_RADIUS: float = 12.0
 ARMY_CLEAR_STRUCTURES_SUPPLY: int = 8
+# M7 B9 (§4.2 proxy row, user decision): the DEFEND squad clears a known proxy production
+# structure while PROXY is active once it has this much supply (and wins at CLEAR_STATIC_LEVEL)
+PROXY_CLEAR_SUPPLY: int = 20
 NATURAL_HOLD_OFFSET: float = 6.0  # hold point: natural moved this far toward the enemy
 MAIN_BATTERY_RAMP_DIST: float = 6.0  # main batteries within this of the ramp top, main level
 # ... but clear of the path from the ramp top and the wall gap into the main (this long, and
