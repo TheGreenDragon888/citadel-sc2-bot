@@ -1627,6 +1627,15 @@ API checks and Citadel's choices for M7 (`docs/M7_PLAN.md`). Checked before the 
   directly.
   - `ENGAGE 09:28 launch level=10 ...; vs nothing (0) | ours 17 ADEPT 8 STALKER 2 IMMORTAL 1 COLOSSUS 3 ZEALOT (5025)`
   - 24 s later: `ENGAGE 09:52 retreat level=3 ...; vs 8 VOIDRAY 10 STALKER 2 PHOENIX 3 ADEPT 1 ORACLE 2 SENTRY +4 more (6875)`.
+- **D18/D19 sources** (ares `8730865`, python-sc2 in the Poetry environment):
+  - `ares.dicts.weight_costs.WEIGHT_COSTS` (`ares-sc2/src/ares/dicts/weight_costs.py`) is a `dict[UnitTypeId, dict]` with the keys `AirCost`, `GroundCost`, `AirRange` and `GroundRange`.
+    - It has entries for the game-data-weaponless types Void Ray (6/6), Carrier (11/11), Battlecruiser (6/6), Oracle (ground 4), Sentry (5/5), Baneling (ground 3), burrowed Widow Mine (5.5/5.5) and Infestor (10/10).
+    - It has none for the Disruptor, Swarm Host, Viper, Bunker or unburrowed Widow Mine.
+    - Some entries include upgrades (Hydralisk 6). Citadel reads it only for types with no game-data weapon (`ranges.weapon_range`).
+  - python-sc2 gives the Battlecruiser `can_attack_ground`/`can_attack_air` and ranges 6/6, and the Oracle `can_attack_ground` and range 4 (`sc2/unit.py:228-294`). So those two never reach the ares fallback.
+  - Game-data ranges of the melee types (a one-off `_proto.weapons` dump on PylonAIE_v4): Zealot, Dark Templar, Zergling and Broodling 0.1; Probe, SCV and Drone 0.2; Ultralisk 1.0. The shortest ranged weapon is the Hellbat's 2.0 and the Interceptor's 2.0. Hence `MELEE_RANGE_MAX` = 1.0.
+  - The unburrowed Widow Mine has no weapon either (the earlier dump only had the burrowed one).
+  - ares's `BuildingManager` drops a Protoss build order 120 s after it was given (`BUILDING_WORKER_TIMEOUT`, `managers/building_manager.py:67, 229-235`). So a stuck Nexus order can't block the schedule for good (D20).
 
 ## M7 baseline
 
