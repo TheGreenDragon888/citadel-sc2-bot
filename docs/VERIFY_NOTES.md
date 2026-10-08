@@ -2223,3 +2223,120 @@ No crashes and no caught errors in any of these games; every `ROW` has `log=ok` 
   - The simulator and C1/C5 don't see the enemy's: the Protoss Air and capital-air goals can't be measured fairly until they do.
   - Our Sentries: C2 leaves them out of home fights, and C1 steps them away from every enemy.
 - The 38-minute stalled attack in the `7cf384f` 12-pool game 2 didn't happen again in two replays on `79fdd0e` (wins at 10:46 and 11:06). The ARMY status line now shows the attack squad's centre and its intents.
+
+### D18-D21 (user decisions, 2026-10-08): melee rule, weaponless units, the proxy stalemate, re-verified
+
+**Code under test:**
+- `4c39bbf`: C6 (D18) and C7 (D19).
+- `641cf24`: C8 (D20), the leash gap. It only changes a leashed hold point, which the Air batches don't use.
+- The Air batches ran on `4c39bbf`, from a `git worktree` pinned there. The other batches and the staged tests ran on `641cf24`, from another pinned worktree. Logs were kept outside the repo; replays are in `replays/m7-p2g-*`, not in git.
+
+**Summary**
+
+| Criterion | Result |
+|---|---|
+| D18: proxy rax ≥ 8/10 on two runs | **PASS: 10/10 and 10/10**, no tie. Games 1-2 won at 8:44-8:55; they were lost on `79fdd0e` |
+| Phase 2: Air ratio and launch-then-retreat-within-60-s count better than Phase 1 | **Better on both, inside the spread for the ratio.** Quick retreats per Protoss Air batch average 6.7 (Phase 1 code 12; Phase 2 before D18-D20 10.7). Ratio averages 1.03 (1.21; 1.09). Terran and Zerg Air: 0 quick retreats, as before |
+| Phase 2: HOLD `lost_far` in the Air batches below Phase 1's 8 | **FAIL: 24, 14 and 23** (Phase 2 before: 3, 14, 0). Most follow a home-defense flip from engage to hold (below) |
+| M1: Hard × 10 | **PASS**: 10/10 |
+| M2/M3: cheese × 10 (≥ 8/10, correct flag, no scout lost before 4:00 in ≥ 7) | **PASS**: proxy rax 10/10 twice, cannon rush 10/10, 12 pool 10/10, worker rush 10/10. Correct flag 50/50; scout criterion 9-10/10 in each |
+| M4: VeryHard × 10 per race (≥ 7) | **PASS**: Terran 9/10 (game 4, below), Zerg 9/10 (the usual Ley Lines game 3), Protoss 9/10 (game 5: 9 Stalkers and a Zealot hit our 6 units at 4:50, as in the B7/B8 run) |
+| M5: staged counterattack 7/7 | **PASS**: 7/7 |
+| D11 targets (end of M7, for progress) | Terran Air 10/10, Zerg Air 10/10. Protoss Air 6/10, 5/10, 6/10 (target ≥ 7) |
+
+**Offline tests** (`poetry run python scripts/<name>.py`):
+- `test_m7_rules`: 86/86. New: the melee cut-off (C6); `weapon_range` with ares's fallback on stand-ins of game-data-weaponless types (Void Ray 6, Carrier 11, Sentry 5, a Disruptor with none); `has_weapon`; C2 eligibility for weaponless own units; `value_level`; the `value cap` text.
+- `test_attack_decision` 23/23, `test_threat_flags` 20/20, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38.
+- `check_game_log.py` after the batches: `RESULT PASS`, 200 records (the cap), 0 malformed, `./data` 518 KB.
+
+**Staged tests** (`641cf24`, one game each):
+
+| Test | Result |
+|---|---|
+| `test_engagement.py` | PASS, with the D18/D19 rows (below) |
+| `test_outranged.py --case idle_hold` | PASS: no Stalker drawn toward the Tempests (closest 11.6, limit 8.5); home defense held |
+| `test_outranged.py --case hold_vs_tempest` | PASS: 1 of 6 Stalkers died; the defensive position moved 4.8 farther from the Tempests |
+| `test_outranged.py --case committed` | PASS: home defense engaged (level 6), killed both Tempests, lost 1 of 12 Stalkers |
+| `test_counterattack.py` (M5, all 7 cases) | **7/7 PASS** |
+
+`test_engagement.py` levels (most common of 20 calls). The second column is after the value cap and before the out-range penalty:
+
+| Scenario | Level | (capped, penalty) | Value cap | ares `can_win_fight` |
+|---|---|---|---|---|
+| 30 Stalkers + 4 Colossi vs 8 Tempests + 4 Zealots | 5 | (9, -4) | - | 10 |
+| 12 Zealots vs 8 Tempests | 0 | (4, -4) | - | 0 |
+| 12 Zealots vs 4 Void Rays | **0** | (4, -4) | 4 | 10 |
+| 12 Stalkers vs 4 Void Rays | **6** | (6, -0) | 6 | 10 |
+| 12 Stalkers vs 2 Carriers (no Interceptors) | **3** | (7, -4) | 7 | 10 |
+| 2 Zealots vs 4 Marines (defending) | **7** | (7, -0) | - | 6 |
+
+On `79fdd0e` the four bold rows read 10, 10, 10 and 3: the simulator saw no Void Ray or Carrier attack, and C5 took 4 levels off the Zealots against Marines.
+
+**D18: proxy rax** (`--opponent proxy_rax --map all --total 10 --seed 100 --game-seed 5000 --opponent-id m7p2h<a|b>-proxy_rax`):
+
+| Batch | Wins | Win times | Units lost | HOLD deaths | Probes lost |
+|---|---|---|---|---|---|
+| B9 run A (`2307de5`, before Phase 2) | 10/10 | mean 11:40 | 22 | 16 | 17 |
+| B9 run B (`2307de5`) | 10/10 | mean 11:20 | 9 | 2 | 23 |
+| Phase 2 (`79fdd0e`) | 7/10 (2 losses, 1 tie) | mean 13:00 (wins) | 69 | 51 | 139 |
+| **D18-D20 run A (`641cf24`)** | **10/10** | 8:44-13:13, mean 11:22 | 11 | 2 | 26 |
+| **D18-D20 run B (`641cf24`)** | **10/10** | 8:50-14:43, mean 11:46 | 19 | 7 | 38 |
+
+- Games 1 and 2 (no opponent memory) engage the first Marines with 2-3 Zealots at levels 8-9, with no out-range penalty, as B9's runs did. On `79fdd0e` the same fights read 3 (−4 out-ranged), the Zealots held and stepped back, and both games were lost.
+- B9 cleared the proxy Barracks at 3:51-5:00 in 9 games of each run. Game 4 (Torches) had no clear in either run, as in B9's runs.
+
+**D20: the one-base proxy stalemate** (`79fdd0e` game 8 tied at 60:00, as `703b084`'s games 8 and 9 had):
+- **Debug rerun** of game 8 (a throwaway worktree with extra log lines; not committed), with the same opponent memory.
+  - Every holding unit that died was shot by Marines 10.2-11.4 from the ramp hold point, with home defense's threat `None`. The leash is `ARMY_HOLD_LEASH` (8); holders stand up to `HOLD_RADIUS` (6) from the point, and a Marine reaches about 6 beyond that.
+  - Those Marines also re-confirmed ares's marine-rush PROXY and ONE_BASE_ALLIN flags (UNIT evidence, within `BRIDGE_HOME_RADIUS` of our bases), so the plans never expired.
+  - With the plans up, their unit production comes before the waiting Nexus: a Nexus order waited from 2:13 with minerals at 5-250 for the whole game.
+- **C8** (`641cf24`): at a leashed hold point, an enemy beyond the leash that has one of our holders in reach is a home threat. The squad simulates it like any other: engage as a group at the gate, else hold.
+- **Rerun of the stalled spawn with C8:** home defense engaged those Marines at level 10 from 2:48 on. No army unit was lost; the attack launched at 10:51 at 150 supply, and the game was won at 12:11. Before C8: 37 HOLD deaths and a 60:00 tie.
+- Both proxy runs on `641cf24`: 20/20, no tie.
+- **Still open (put to the user):** under the PROXY and ONE_BASE_ALLIN plans, the plan's units still come before the Nexus (§3 Defense > Economy). Every proxy-rax game stays on one base until 10:00 or later; the wins come from a one-base attack at 150 supply. §4.2 says only "skip the natural until 2 units are out".
+
+**D19: Air batches** (`4c39bbf`; Protoss with free openers, and twice with Phase 1's openers forced, as in the B7/B8 section):
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Phase 1 code, free / forced | 8 / 6 | 0.94 / 1.23 | 20 / 26 | 6 / 16 | 17 (8) / 10 (4) | 29 / 103 | 475 / 640 |
+| Phase 2 before D18-D20, free / A / B | 5 / 5 / 8 | 1.17 / 1.26 / 0.85 | 22 / 18 / 19 | 16 / 9 / 7 | 43 (3) / 37 (14) / 6 (0) | 66 / 73 / 22 | 721 / 562 / 570 |
+| **D19, free** | **6/10** | **0.90** | 12 | **5** | 81 (24) | 73 | 649 |
+| **D19, forced A** | **5/10** | **1.13** | 18 | **10** | 89 (14) | 104 | 671 |
+| **D19, forced B** | **6/10** | **1.06** | 14 | **5** | 71 (23) | 88 | 693 |
+| Terran Air (D19) | 10/10 | 0.35 | 10 | 0 | 1 (0) | 0 | 119 |
+| Zerg Air (D19) | 10/10 | 0.30 | 11 | 0 | 1 (0) | 0 | 128 |
+
+- **The cap works at launch time.** Before D19, every log line reporting the level against the remembered enemy army read 8-10. It now reads 5-10. Each Protoss Air batch logs 47-55 `launch held` lines (one per reason and wait), and quick retreats fell to 5, 10 and 5.
+- **Home defense flips.** Home defense has no hysteresis: it engages at ≥ 5 (≥ 4 under a Battery), and otherwise holds, at every evaluation. Against Void Ray and Tempest armies the capped level now sits near that gate, so a fight that starts at 5-7 flips to "hold" at 4 as soon as it turns slightly against us.
+  - The enemy is then at the defensive position. Holding units follow C1: they step out of the Tempests' reach without shooting, and the hold point steps back, while the Void Rays keep firing.
+  - Measured (`flips.py`, the HOLD deaths within 30 s of an engage → hold flip):
+
+| Batch | Engage → hold flips | of them with a value cap | HOLD deaths | … within 30 s of a flip |
+|---|---|---|---|---|
+| Phase 1 code, free / forced | 2 / 4 | 0 / 0 | 17 / 23 | 0 / 8 |
+| Phase 2 before D18-D20, free / A / B | 6 / 2 / 5 | 0 | 43 / 37 / 6 | 18 / 6 / 4 |
+| D19, free / A / B | 11 / 10 / 8 | 8 / 10 / 7 | 81 / 89 / 71 | 47 / 76 / 35 |
+
+  - Example, forced A game 9 at 12:10: `engage (level 5 >= 5) … value cap 6` became `hold (level 4 < 5) vs 7 VOIDRAY 3 TEMPEST 3 STALKER … value cap 5`, and 18 Stalkers and a Colossus died at hold within 10 s.
+- **Put to the user** (the spec has no rule for it): what home defense does once a fight it engaged turns.
+
+**Regressions** (`641cf24`):
+
+| Batch | Wins | Notes |
+|---|---|---|
+| M1: Hard × 10 | **10/10** | |
+| M4: VeryHard Terran | **9/10** | Game 4 (Torches; `7cf384f` won it) lost at 20:33 after four launches into sieged Siege Tanks, each retreating within 15-44 s. A side effect of D18 (below) |
+| M4: VeryHard Zerg | **9/10** | Game 3 (Ley Lines), lost on every commit since M5. The value cap fired once in the batch |
+| M4: VeryHard Protoss | **9/10** | Game 5 (Pylon): 9 Stalkers and a Zealot hit our 6 units at 4:50, as in the B7/B8 run |
+| M2/M3: worker rush | **10/10** | Correct flag 10/10, no scout lost before 4:00 |
+| M2/M3: 12 pool | **10/10** | All won in 9:43-14:02; correct flag 10/10 |
+| M2/M3: cannon rush | **10/10** | Correct flag 10/10. Games 1-2 took 17:13 and 18:47 on the other spawn, losing 89 units in the batch (49 on `79fdd0e`). The early clears rate 4 Stalkers against 3-4 Cannons at 9-10, as on `79fdd0e` |
+| M2/M3: proxy rax | **10/10, 10/10** | Above |
+
+No crashes and no caught errors; every `ROW` has `log=ok`, `err=0` and `raa=0`.
+
+**A side effect of D18 on C5.** C5 counts an enemy as out-ranging when it out-ranges every unit of ours able to hit it. A Zealot can hit a Siege Tank, and under D18 it is never out-ranged. So sieged tanks add nothing to the penalty while Zealots are in our army.
+- In the VeryHard Terran batch, 36 fight lines against sieged tanks had no penalty, 19 of them with Zealots on our side. None of the 20 penalised lines had Zealots.
+- That matches game 4: four launches whose remembered-army level read 8-10 against tank lines.
+- Put to the user.
