@@ -856,6 +856,7 @@ HOLD_FALLBACK_KEEP_S: float = 30.0  # ... and once back, it stays back this long
 # least LAUNCH_INTEL_FRESH_FRACTION of its value seen within OUT_OF_POSITION_FRESH_S, else the
 # army's Observer looks first and the launch waits at most LAUNCH_INTEL_WAIT_S
 LAUNCH_AFTER_DEFEND_S: float = 30.0
+LAUNCH_HOME_FIGHT_MIN_FRACTION: float = 0.2  # ... a home fight counts when the enemy group is worth this share of the defenders
 LAUNCH_CACHE_MAX_AGE_S: float = 90.0
 LAUNCH_INTEL_FRESH_FRACTION: float = 0.5
 LAUNCH_INTEL_WAIT_S: float = 45.0

@@ -80,6 +80,7 @@ from bot.constants import (
     HOLD_FALLBACK_STEPS,
     HOLD_RADIUS,
     LAUNCH_CACHE_MAX_AGE_S,
+    LAUNCH_HOME_FIGHT_MIN_FRACTION,
     LAUNCH_INTEL_FRESH_FRACTION,
     HUNT_GRID_STEP,
     HUNT_VISIT_RADIUS,
@@ -462,7 +463,12 @@ class Army:
                 else:
                     state = f"hold (level {level} < {needed}{', batteries' if covered else ''})"
         if self.defend_target is not None and not (found.is_structure or found.type_id in WORKERS):
-            self._home_fight_at = self.bot.time  # M7 C4
+            # M7 C4: a home fight that holds the launch is one worth LAUNCH_HOME_FIGHT_MIN_FRACTION
+            # of the defenders; a 12-pool bot's trickle of 1-8 Zerglings every 15-20 s held a
+            # 200-supply army at home for 13 minutes in a test game
+            group = self.engagement.enemies_near([found.position]) or [found]
+            if self.engagement.value(group) >= LAUNCH_HOME_FIGHT_MIN_FRACTION * self.engagement.value(defenders):
+                self._home_fight_at = self.bot.time
         if state != self._defend_state:
             self._defend_state = state
             if found is not None or self.decision.state != ATTACK:
@@ -835,6 +841,13 @@ class Army:
             + (f"; {inputs.text()}" if inputs is not None else "")
         )
 
+    def _intent_counts(self) -> str:
+        """How many army units have each intent, for the status line."""
+        counts: dict[str, int] = {}
+        for mode, _ in self.intents.values():
+            counts[mode] = counts.get(mode, 0) + 1
+        return ",".join(f"{k}:{v}" for k, v in sorted(counts.items())) or "-"
+
     def _status(self) -> None:
         bot = self.bot
         if bot.time - self._last_status < ARMY_STATUS_EVERY_S:
@@ -845,9 +858,14 @@ class Army:
             units = self.squads.units(role)
             if units:
                 parts.append(f"{role.value}={len(units)}/{self._supply(units):g}")
+        center = (
+            f"attack_center={self.attack_center.rounded} "
+            if self.attack_center is not None and self.decision.state == ATTACK else ""
+        )
         logger.info(
             f"ARMY {bot.time_formatted} state={self.decision.state} {' '.join(parts) or 'no units'} "
-            f"anchor={self.anchor.rounded} target={self.target.rounded if self.target else '-'} "
+            f"anchor={self.anchor.rounded} target={self.target.rounded if self.target else '-'} {center}"
+            f"intents={self._intent_counts()} "
             f"level={self.last_level if self.last_level is not None else '-'} defend={self._defend_state} "
             f"counter={self.counter.state}"
             + (f" (enemy army: {self.counter.position.last.why})" if self.counter.position.last is not None else "")
