@@ -62,9 +62,11 @@ EXPECT: dict[str, Tuple[int, int]] = {
 EXPECT_PENALTY: dict[str, int] = {
     "6 Stalkers vs 6 Stalkers": 0,
     "30 Stalkers + 4 Colossi vs 8 Tempests + 4 Zealots": 4,  # ~89% of the value out-ranges them
-    "12 Zealots vs 4 Void Rays": 4,  # none of ours can hit them
+    "12 Zealots vs 8 Tempests": 4,  # none of ours can hit them
     "12 Stalkers vs 4 Void Rays": 0,
 }
+# Printed only: Void Rays and Carriers have no weapon in this game data (VERIFY_NOTES "M7 findings"),
+# so neither the simulator nor the penalty sees them; these rows show that gap.
 
 
 class EngagementProbe(AresBot):
@@ -182,6 +184,7 @@ class EngagementProbe(AresBot):
             ("30 Stalkers + 4 Colossi vs 8 Tempests + 4 Zealots", thirty + list(colossi), list(tempests) + list(zealots), ENEMY_DEFENDS),
             ("30 Stalkers vs 8 Tempests", thirty, list(tempests), ENEMY_DEFENDS),
             ("12 Stalkers vs 8 Tempests", twelve, list(tempests), ENEMY_DEFENDS),
+            ("12 Zealots vs 8 Tempests", list(own_zealots), list(tempests), ENEMY_DEFENDS),
             ("12 Zealots vs 4 Void Rays", list(own_zealots), list(voidrays), ENEMY_DEFENDS),
             ("12 Stalkers vs 4 Void Rays", twelve, list(voidrays), ENEMY_DEFENDS),
             ("12 Stalkers vs 2 Carriers (no Interceptors)", twelve, list(carriers), ENEMY_DEFENDS),
@@ -204,6 +207,13 @@ class EngagementProbe(AresBot):
                     self.failures.append(f"{label}: {mine[0] + penalty} not in {low}-{high}")
             if label in EXPECT_PENALTY and penalty != EXPECT_PENALTY[label]:
                 self.failures.append(f"{label}: penalty {penalty} != {EXPECT_PENALTY[label]}")
+            if label in EXPECT_PENALTY and theirs:
+                o, e = ours[0], theirs[0]
+                self.log(
+                    f"    share {eng.outranged_share(ours, theirs):.2f}; own {o.type_id.name} air={o.can_attack_air} "
+                    f"ground={o.can_attack_ground} flying={o.is_flying}; enemy {e.type_id.name} air={e.can_attack_air} "
+                    f"ground={e.can_attack_ground} flying={e.is_flying} ranges {e.ground_range}/{e.air_range}"
+                )
         # §4.5.2 enemy side: fighters and static defense in, workers/Observer/Pylon out
         found = eng.attack_inputs(own.center, self.centre)
         kinds = Counter(u.type_id.name for u in found)

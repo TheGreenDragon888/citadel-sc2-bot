@@ -850,6 +850,7 @@ OUTRANGED_REACH_BUFFER: float = 1.0
 HOLD_FALLBACK_STEP: float = 3.0
 HOLD_FALLBACK_STEPS: int = 4
 HOLD_FALLBACK_MEMORY_S: float = 10.0
+HOLD_FALLBACK_KEEP_S: float = 30.0  # ... and once back, it stays back this long after it was last needed
 # C4 launch gate: no launch within LAUNCH_AFTER_DEFEND_S of a home fight; the level against the
 # remembered enemy army (fighters seen within LAUNCH_CACHE_MAX_AGE_S) must pass the gate too; at
 # least LAUNCH_INTEL_FRESH_FRACTION of its value seen within OUT_OF_POSITION_FRESH_S, else the

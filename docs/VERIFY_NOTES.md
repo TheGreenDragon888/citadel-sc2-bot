@@ -1590,6 +1590,13 @@ API checks and Citadel's choices for M7 (`docs/M7_PLAN.md`). Checked before the 
 - ares's SpawnController morphs Archons from any two idle, ready High Templar not already morphing
   (`ares-sc2/src/ares/behaviors/macro/spawn_controller.py`, `_handle_archon_morph`), so Archons
   stay out of its mix and Citadel morphs them itself (§4.5.3).
+- **Weaponless unit types in this game data (found in Phase 2's staged engagement test).** A one-off check of `game_data.units[t]._proto.weapons` on PylonAIE_v4 (SC2 4.10 with the AIE map's data) found **no weapons** for:
+  - Sentry, Disruptor, Void Ray, Oracle, Carrier, Widow Mine (burrowed), Battlecruiser, Bunker, Baneling, Infestor, Swarm Host and Viper.
+  - The other army types checked have their weapons. The Tempest's are 10 against ground and 13 against air here.
+  - python-sc2 special-cases only the Battlecruiser's and Oracle's range and `can_attack_*` (`sc2/unit.py:230-297`). So a Void Ray reads `can_attack_air = can_attack_ground = False` with ranges 0/0, and so does a Carrier.
+  - ares hard-codes ranges and costs for its influence grids for several of these (`dicts/weight_costs.py`: Void Ray 6/6, Carrier 11/11, Battlecruiser 6/6, Oracle, Widow Mine, Baneling).
+  - **The combat simulator sees no attack for them either:** `Engagement.level` and ares's `can_win_fight` both rate 12 Zealots against 4 Void Rays at 10 (an emphatic win). The Phase 1 home fights rated 7-9 at a third of the enemy's value were against Void Ray and Carrier armies.
+  - So C1's out-ranged rule and C5's penalty don't see Void Rays or Carriers, and the simulator underrates every army built on them. **Put to the user;** no stand-in values were added (CLAUDE.md: no hard-coded unit stats).
 - **B8's trip estimate** (python-sc2 in the Poetry environment):
   - `Unit.movement_speed` is "the unit movement speed on game speed 'normal'. To convert it to 'faster' movement speed, multiply it by a factor of '1.4'". It doesn't include upgrades or buffs (`sc2/unit.py:322-326`).
   - `BotAI.time` is `game_loop / 22.4`, seconds on "faster" (`sc2/bot_ai.py:46-48`).

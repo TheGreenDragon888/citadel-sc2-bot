@@ -74,6 +74,7 @@ from bot.constants import (
     ENGAGE_ENEMY_RADIUS,
     ENGAGE_STATIC_RADIUS,
     HOLD_ENGAGE_RADIUS,
+    HOLD_FALLBACK_KEEP_S,
     HOLD_FALLBACK_MEMORY_S,
     HOLD_FALLBACK_STEP,
     HOLD_FALLBACK_STEPS,
@@ -165,8 +166,9 @@ class Army:
         self._defend_tags: Optional[set[int]] = None
         self._home_fight_at: Optional[float] = None  # M7 C4: last time the DEFEND squad fought units
         self._fallback_steps: int = 0  # M7 C1: steps the defensive position moved back
+        self._fallback_keep_until: float = 0.0  # M7 C1: ... kept back until then
         self.wants_intel: bool = False  # M7 C4: the launch waits for the army's Observer to look
-        self._intel_wait_logged: bool = False
+        self._launch_blocked_by: str = ""  # M7 C4: logged when it changes
         # main attack
         self.target: Optional[Point2] = None
         self._target_tag: Optional[int] = None
@@ -295,9 +297,12 @@ class Army:
             since_home_fight_s=since_fight, army_level=army_level,
             intel_fresh=total > 0 and fresh >= LAUNCH_INTEL_FRESH_FRACTION * total,
         )
-        if decision.wants_intel and not self._intel_wait_logged:
-            logger.info(f"ARMY {bot.time_formatted} launch waits, the Observer looks: {decision.reason}")
-        self.wants_intel = self._intel_wait_logged = decision.wants_intel
+        if decision.blocked_by != self._launch_blocked_by:
+            self._launch_blocked_by = decision.blocked_by
+            if decision.blocked_by:
+                look = ", the Observer looks" if decision.wants_intel else ""
+                logger.info(f"ARMY {bot.time_formatted} launch held by the {decision.blocked_by}{look}: {decision.reason}")
+        self.wants_intel = decision.wants_intel
         if decision.action == "launch":
             self.squads.assign([u.tag for u in candidates], Role.ATTACK)
             self.target = target
@@ -701,7 +706,10 @@ class Army:
         """M7 C1 (§4.5.3): while enemies that out-range every DEFEND unit type (seen within
         HOLD_FALLBACK_MEMORY_S) have the defensive position in reach and home defense isn't
         fighting, the position steps toward our main, HOLD_FALLBACK_STEP at a time, at most
-        HOLD_FALLBACK_STEPS times. Logged when the number of steps changes."""
+        HOLD_FALLBACK_STEPS times, and stays back for HOLD_FALLBACK_KEEP_S after that was last
+        needed (in the staged test the restored position walked the units back into the Tempests'
+        reach every 15 s). Logged when the number of steps changes."""
+        base = anchor
         steps = 0
         defenders = self.fighters(Role.DEFEND)
         if self.defend_target is None and defenders:
@@ -715,10 +723,18 @@ class Army:
                     reaches = [r for u in kinds if (r := micro.reach(e, u)) is not None]
                     if reaches:
                         covers.append((e.position, max(reaches) + OUTRANGED_REACH_BUFFER))
-            home = self.bot.start_location
             while steps < HOLD_FALLBACK_STEPS and any(p.distance_to(anchor) <= r for p, r in covers):
-                anchor = anchor.towards(home, HOLD_FALLBACK_STEP)
+                anchor = anchor.towards(self.bot.start_location, HOLD_FALLBACK_STEP)
                 steps += 1
+        now = self.bot.time
+        needed = steps
+        if now < self._fallback_keep_until and self.defend_target is None:
+            steps = max(steps, self._fallback_steps)
+        if needed:
+            self._fallback_keep_until = now + HOLD_FALLBACK_KEEP_S
+        anchor = base
+        for _ in range(steps):
+            anchor = anchor.towards(self.bot.start_location, HOLD_FALLBACK_STEP)
         if steps != self._fallback_steps:
             self._fallback_steps = steps
             logger.info(

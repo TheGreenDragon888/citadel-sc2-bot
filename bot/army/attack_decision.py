@@ -54,6 +54,7 @@ class Decision:
     action: str  # "launch", "retreat", "continue" or "wait"
     reason: str
     wants_intel: bool = False  # M7 C4: the launch waits for the army's Observer to look
+    blocked_by: str = ""  # M7 C4: "home fight", "intel" or "remembered army" when that held a launch
 
     @property
     def flipped(self) -> bool:
@@ -100,7 +101,7 @@ class AttackDecision:
                 return Decision(GATHER, "wait", f"level {level}, supply {supply_used:g}")
             # M7 C4: the gate above sees only what is near the squad or its target
             if since_home_fight_s < LAUNCH_AFTER_DEFEND_S:
-                return Decision(GATHER, "wait", f"{why}, but a home fight {since_home_fight_s:.0f} s ago")
+                return Decision(GATHER, "wait", f"{why}, but a home fight {since_home_fight_s:.0f} s ago", blocked_by="home fight")
             if intel_fresh:
                 self.intel_wait_since = None
             else:
@@ -108,11 +109,15 @@ class AttackDecision:
                     self.intel_wait_since = now
                 waited = now - self.intel_wait_since
                 if waited < LAUNCH_INTEL_WAIT_S:
-                    return Decision(GATHER, "wait", f"{why}, but the enemy army's whereabouts are stale ({waited:.0f} s looking)", True)
+                    return Decision(
+                        GATHER, "wait", f"{why}, but the enemy army's whereabouts are stale ({waited:.0f} s looking)", True, "intel"
+                    )
                 why += f", intel still stale after {waited:.0f} s"
             if army_level is not None:
                 if army_level < need:
-                    return Decision(GATHER, "wait", f"{why}, but level {army_level} < {need} vs the remembered army")
+                    return Decision(
+                        GATHER, "wait", f"{why}, but level {army_level} < {need} vs the remembered army", blocked_by="remembered army"
+                    )
                 why += f", remembered army level {army_level}"
             if held:
                 return Decision(GATHER, "wait", f"{why}, but {now - self.state_since:.0f} s since the last flip")

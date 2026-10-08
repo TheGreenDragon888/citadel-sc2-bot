@@ -34,7 +34,9 @@ Cases:
   "defense" (a home threat the units left at home can't hold).
 - `abort`: as the squad nears the target, Marauders and sieged Tanks appear there -> "level".
 - `merge`: once the squad is out, the main attack's supply gate is lowered so it launches -> the
-  squad joins the ATTACK squad ("merged"), with no recall (§4.6 interactions).
+  squad joins the ATTACK squad ("merged"), with no recall (§4.6 interactions). The M7 C4 launch
+  gate is switched off too (no remembered-army level, no intel wait): a 20-supply launch against
+  this setup's 16 Marines and 4 Marauders can't pass it by design, and the case tests the merge.
 Negative cases (no trigger, no launch):
 - `in_position`: the enemy army waits next to its natural, watched until NEGATIVE_WATCH_S after
   TEST_COUNTER_FROM_S.
@@ -66,6 +68,8 @@ from bot.army.squads import Role  # noqa: E402
 from bot.constants import (  # noqa: E402
     ATTACK_START_SUPPLY,
     COUNTER_FROM_S,
+    LAUNCH_CACHE_MAX_AGE_S,
+    LAUNCH_INTEL_WAIT_S,
     COUNTER_SQUAD_MAX_FRACTION,
     COUNTER_SQUAD_MIN_SUPPLY,
 )
@@ -374,8 +378,11 @@ class StagedCitadel(CitadelBot):
         elif self.case == "merge":
             army_module.ATTACK_START_SUPPLY = MERGE_ATTACK_SUPPLY
             decision_module.ATTACK_START_SUPPLY = MERGE_ATTACK_SUPPLY
+            # M7 C4 off: no cached army counts (no remembered-army level), and no intel wait
+            army_module.LAUNCH_CACHE_MAX_AGE_S = -1.0
+            decision_module.LAUNCH_INTEL_WAIT_S = 0.0
             self.event_done = True
-            self.log(f"event: main attack supply gate lowered to {MERGE_ATTACK_SUPPLY}")
+            self.log(f"event: main attack supply gate lowered to {MERGE_ATTACK_SUPPLY}, C4 launch gate off")
         elif self.case == "abort":
             if center is not None and center.distance_to(target) <= ABORT_TRIGGER_DIST:
                 await self.client.debug_create_unit([[t, n, target, ENEMY] for t, n in DEFENDERS])
@@ -447,6 +454,8 @@ def run_case(case: str, map_name: str) -> bool:
     counter_module.COUNTER_FROM_S = COUNTER_FROM_S if case == "early" else TEST_COUNTER_FROM_S
     army_module.ATTACK_START_SUPPLY = ATTACK_START_SUPPLY
     decision_module.ATTACK_START_SUPPLY = ATTACK_START_SUPPLY
+    army_module.LAUNCH_CACHE_MAX_AGE_S = LAUNCH_CACHE_MAX_AGE_S
+    decision_module.LAUNCH_INTEL_WAIT_S = LAUNCH_INTEL_WAIT_S
     script = Script()
     ours = StagedCitadel(case, script)
     theirs = StagedEnemy(script)
