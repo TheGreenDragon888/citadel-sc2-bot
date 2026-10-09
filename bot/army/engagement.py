@@ -26,7 +26,7 @@ from sc2.position import Point2
 from sc2.unit import Unit
 from sc2_helper.combat_simulator import CombatSimulator
 
-from bot.army.ranges import can_hit, outrange_penalty, outranges
+from bot.army.ranges import can_hit, outrange_penalty, outranges_hitters
 from bot.constants import (
     ENGAGE_ENEMY_RADIUS,
     ENGAGE_STATIC_RADIUS,
@@ -250,7 +250,8 @@ class Engagement:
 
     def outranged_share(self, own: Sequence[Unit], enemy: Sequence[Unit]) -> float:
         """M7 C5: the share of the enemy's value that out-ranges every unit of ours able to hit it
-        (by OUTRANGED_MARGIN), or that none of ours can hit while it can hit some of them."""
+        (by OUTRANGED_MARGIN; melee units only when they are all that can, D23), or that none of
+        ours can hit while it can hit some of them."""
         kinds = list({u.type_id: u for u in own}.values())  # one unit per type
         total = out = 0.0
         for e in enemy:
@@ -260,7 +261,7 @@ class Engagement:
             total += v
             hitters = [u for u in kinds if can_hit(u, e)]
             if hitters:
-                if all(outranges(e, u) for u in hitters):
+                if outranges_hitters(e, hitters):
                     out += v
             elif any(can_hit(e, u) for u in kinds):
                 out += v

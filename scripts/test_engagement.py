@@ -70,6 +70,8 @@ EXPECT_PENALTY: dict[str, int] = {
     "12 Zealots vs 4 Void Rays": 4,  # none of ours can hit them, and they hit us (D19)
     "12 Stalkers vs 2 Carriers (no Interceptors)": 4,  # 11 vs 6 (ares's Carrier range, D19)
     "2 Zealots vs 4 Marines (defending)": 0,  # melee units (D18)
+    "12 Stalkers + 6 Zealots vs 4 sieged Siege Tanks": 4,  # the Zealots are left out (D23)
+    "12 Zealots vs 4 sieged Siege Tanks": 0,  # only melee units can hit them (D18, D23)
 }
 # M7 D19: scenarios whose level must be capped at the value level (Void Rays and Carriers have no
 # weapon in this game data, so the simulator calls these 10); every other scenario must have no cap
@@ -149,6 +151,7 @@ class EngagementProbe(AresBot):
                 [UnitTypeId.VOIDRAY, 4, centre.towards(own, -8), ENEMY],
                 [UnitTypeId.CARRIER, 2, centre.towards(own, -10), ENEMY],
                 [UnitTypeId.MARINE, 4, centre.towards(own, -12), ENEMY],
+                [UnitTypeId.SIEGETANKSIEGED, 4, centre.towards(own, -14), ENEMY],
             ]
             + [[UnitTypeId.PHOTONCANNON, 1, centre.offset(o), ENEMY] for o in CANNON_OFFSETS]
         )
@@ -167,11 +170,12 @@ class EngagementProbe(AresBot):
         stalkers = self.enemy_units(UnitTypeId.STALKER)
         zealots = self.enemy_units(UnitTypeId.ZEALOT)
         marines = self.enemy_units(UnitTypeId.MARINE)
+        tanks = self.enemy_units(UnitTypeId.SIEGETANKSIEGED)
         cannons = self.enemy_structures(UnitTypeId.PHOTONCANNON).filter(lambda c: c.is_ready and c.is_powered)
         ready = (
             len(own) == 30 and len(stalkers) == 6 and len(zealots) == 4 and len(cannons) == 6 and len(own_cannons) == 2
             and len(colossi) == 4 and len(own_zealots) == 12 and len(tempests) == 8 and len(voidrays) == 4 and len(carriers) == 2
-            and len(marines) == 4
+            and len(marines) == 4 and len(tanks) == 4
         )
         if not ready:
             if self.state.game_loop - self.phase_started > PHASE_TIMEOUT_LOOPS:
@@ -204,6 +208,9 @@ class EngagementProbe(AresBot):
             ("12 Stalkers vs 2 Carriers (no Interceptors)", twelve, list(carriers), ENEMY_DEFENDS),
             # M7 D18
             ("2 Zealots vs 4 Marines (defending)", list(own_zealots[:2]), list(marines), WE_DEFEND),
+            # M7 D23
+            ("12 Stalkers + 6 Zealots vs 4 sieged Siege Tanks", twelve + list(own_zealots[:6]), list(tanks), ENEMY_DEFENDS),
+            ("12 Zealots vs 4 sieged Siege Tanks", list(own_zealots), list(tanks), ENEMY_DEFENDS),
         ]
         self.log(f"{'scenario':<52} {'Citadel':>14} {'(raw, penalty)':>15} {'value cap':>10} {'ares can_win_fight':>20}")
         for label, ours, theirs, defender in scenarios:

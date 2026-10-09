@@ -5,7 +5,8 @@
 Each M7 step adds its cases here: the fight-input text (O1), the expansion-first proxy check
 (B6), the main re-scout gate (B4), the cannon-rush ramp hold (B7), the Observer trip gate (B8),
 and Phase 2's out-ranged rule (C1), eligibility (C2), retreat shooting (C3), penalty (C5), the melee
-rule (C6, D18) and weaponless units (C7, D19).
+rule (C6, D18), weaponless units (C7, D19), home-defense hysteresis (C9, D22) and melee units in
+the out-range share (C10, D23).
 Units are stand-ins with only the attributes the rules read (no game needed). Prints PASS/FAIL per case; exits 1 on any failure.
 """
 
@@ -23,10 +24,19 @@ import run  # noqa: E402,F401  (puts ares-sc2 on sys.path)
 from sc2.ids.unit_typeid import UnitTypeId  # noqa: E402
 from sc2.position import Point2  # noqa: E402
 
-from bot.army.army import Army  # noqa: E402
+from bot.army.army import Army, home_engages  # noqa: E402
 from bot.army.engagement import FightInputs, composition_text, value_level  # noqa: E402
 from bot.army.micro import retreat_may_shoot  # noqa: E402
-from bot.army.ranges import can_hit, has_weapon, outrange_penalty, outranged, outranges, range_vs, reach  # noqa: E402
+from bot.army.ranges import (  # noqa: E402
+    can_hit,
+    has_weapon,
+    outrange_penalty,
+    outranged,
+    outranges,
+    outranges_hitters,
+    range_vs,
+    reach,
+)
 from bot.constants import (  # noqa: E402
     CANNON_RUSH_RADIUS,
     MAIN_STALE_FROM_S,
@@ -145,6 +155,7 @@ STALKER, ZEALOT = unit("stalker", 6, 6, radius=0.625), unit("zealot", 0.1, radiu
 TEMPEST, VOIDRAY = unit("tempest", 10, 14, flying=True, radius=1.25), unit("voidray", 6, 6, flying=True, radius=1.0)
 CANNON, OVERLORD = unit("cannon", 7, 7, radius=1.125), unit("overlord", flying=True, radius=1.0)
 MARINE = unit("marine", 5, 5, radius=0.375)
+TANK = unit("sieged tank", 13, radius=0.875)
 # no weapon in game data (VERIFY_NOTES "M7 findings"): ares's WEIGHT_COSTS ranges apply (D19), except
 # for the Disruptor, which ares has none for
 VOIDRAY_DATA = unit("voidray", flying=True, radius=1.0, type_id=UnitTypeId.VOIDRAY)
@@ -214,6 +225,20 @@ case("retreat: nothing that fights back", retreat_may_shoot, 4.13, [], False, ex
 case("retreat: no threats", retreat_may_shoot, 4.13, [], True, expected=True)
 
 # C5: the out-range penalty, whole levels per share
+# C10 (D23): melee units count in the out-range share only when they are all that can hit the enemy
+case("share: tank vs Stalkers + Zealots (Zealots left out)", outranges_hitters, TANK, [STALKER, ZEALOT], expected=True)
+case("share: tank vs Zealots alone", outranges_hitters, TANK, [ZEALOT], expected=False)
+case("share: Marine vs Zealots alone", outranges_hitters, MARINE, [ZEALOT], expected=False)
+case("share: Marine vs Stalkers + Zealots", outranges_hitters, MARINE, [STALKER, ZEALOT], expected=False)
+case("share: Tempest vs Stalkers", outranges_hitters, TEMPEST, [STALKER], expected=True)
+
+# C9 (D22): home-defense hysteresis
+case("home: starts at the gate", home_engages, 5, 5, False, 2, expected=True)
+case("home: below the gate, not engaged", home_engages, 4, 5, False, 2, expected=False)
+case("home: engaged, fights on at 3", home_engages, 3, 5, True, 2, expected=True)
+case("home: engaged, gives up at 2", home_engages, 2, 5, True, 2, expected=False)
+case("home: under a Battery the gate is 4", home_engages, 4, 4, False, 2, expected=True)
+
 case("penalty: none", outrange_penalty, 0.0, 4.0, expected=0)
 case("penalty: an all-Tempest army", outrange_penalty, 1.0, 4.0, expected=4)
 case("penalty: 8 Tempests + 6 Zealots (85% of the value)", outrange_penalty, 3400 / 4000, 4.0, expected=3)

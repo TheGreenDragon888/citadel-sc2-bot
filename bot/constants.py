@@ -690,6 +690,10 @@ ATTACK_START_MAX_SUPPLY: int = 190
 ATTACK_CONTINUE: int = 5  # keep attacking while >= this
 RETREAT_AT: int = 4  # retreat at <= this (3-level hysteresis vs ATTACK_START)
 DEFEND_ENGAGE: int = 4  # at home, inside the battery radius (batteries are not simulated)
+# M7 C9 (D22): once engaged, the DEFEND squad keeps fighting until the level is at most this; then the
+# defensive position falls back all HOLD_FALLBACK_STEPS at once, and it doesn't engage again outside
+# the defensive position for MIN_STATE_SECONDS
+DEFEND_DISENGAGE_AT: int = 2
 MIN_STATE_SECONDS: float = 20.0  # no attack/retreat flip within this unless the result is <= ...
 FLIP_ANYWAY_AT: int = 2  # ... this
 RETREAT_VALUE_FRACTION: float = 0.4  # retreat when the squad's value is below this x its start value

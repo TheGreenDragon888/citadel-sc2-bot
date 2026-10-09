@@ -70,6 +70,7 @@ from bot.constants import (
     BATTERY_COVER_RADIUS,
     CLEAR_STATIC_LEVEL,
     DECISION_EVERY_STEPS,
+    DEFEND_DISENGAGE_AT,
     DEFEND_ENGAGE,
     ENGAGE_ENEMY_RADIUS,
     ENGAGE_STATIC_RADIUS,
@@ -86,6 +87,7 @@ from bot.constants import (
     HUNT_VISIT_RADIUS,
     MAIN_RADIUS,
     MICRO_RADIUS,
+    MIN_STATE_SECONDS,
     OBSERVER_WITH_ARMY_FROM_S,
     OUT_OF_POSITION_FRESH_S,
     OUTRANGED_REACH_BUFFER,
@@ -128,6 +130,17 @@ NOT_TARGETS: frozenset[UnitTypeId] = frozenset(
 FIGHT, HOLD, RETREAT, MOVE, HARASS = "fight", "hold", "retreat", "move", "harass"
 
 
+def _mmss(seconds: float) -> str:
+    return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
+
+
+def home_engages(level: int, needed: int, engaged: bool, disengage_at: int) -> bool:
+    """M7 C9 (§4.5.2, D22): whether the DEFEND squad fights a home threat outside the defensive
+    position: at `needed` or above to start, and once `engaged` until the level is at most
+    `disengage_at` (pure)."""
+    return level > disengage_at if engaged else level >= needed
+
+
 class DecisionRecord(NamedTuple):
     """One main-attack decision for §8: its level, and the fight values the level came from (M7)."""
 
@@ -168,6 +181,8 @@ class Army:
         self._home_fight_at: Optional[float] = None  # M7 C4: last time the DEFEND squad fought units
         self._fallback_steps: int = 0  # M7 C1: steps the defensive position moved back
         self._fallback_keep_until: float = 0.0  # M7 C1: ... kept back until then
+        self._home_engaged: bool = False  # M7 C9: the squad chose to fight the current home threat
+        self._home_reengage_at: float = 0.0  # M7 C9: no new home engagement (outside the position) before this
         self.wants_intel: bool = False  # M7 C4: the launch waits for the army's Observer to look
         self._launch_blocked_by: str = ""  # M7 C4: logged when it changes
         # main attack
@@ -413,6 +428,8 @@ class Army:
         """Sets `threat` (the home threat's position, if any) and `defend_target` (where the
         DEFEND squad fights, or None to hold the defensive position)."""
         found = self._home_threat(defenders)
+        if found is None:
+            self._home_engaged = False  # M7 C9: that fight is over
         self.threat = found.position if found is not None else None
         self.defend_target = None
         self.home_level = -1
@@ -458,9 +475,24 @@ class Army:
                 self.home_level = level
                 covered = self._covered_by_battery(found.position)
                 needed = DEFEND_ENGAGE if covered else ATTACK_CONTINUE
-                if level >= needed:
+                now = self.bot.time
+                # M7 C9 (D22): engaged, the squad fights on until DEFEND_DISENGAGE_AT; fights against
+                # Void Ray armies flipped to holding mid-fight, and holders stepped away from the
+                # Tempests without shooting (35-76 HOLD deaths per test batch within 30 s of a flip)
+                engages = home_engages(level, needed, self._home_engaged, DEFEND_DISENGAGE_AT)
+                if engages and not self._home_engaged and now < self._home_reengage_at:
+                    state = f"hold (level {level}; no new engagement until {_mmss(self._home_reengage_at)})"
+                elif engages:
                     self.defend_target = found.position
-                    state = f"engage (level {level} >= {needed}{', batteries' if covered else ''})"
+                    if self._home_engaged:
+                        state = f"engaged (level {level} > {DEFEND_DISENGAGE_AT})"
+                    else:
+                        state = f"engage (level {level} >= {needed}{', batteries' if covered else ''})"
+                    self._home_engaged = True
+                elif self._home_engaged:
+                    self._home_engaged = False
+                    self._disengage(now, level)
+                    state = f"disengage (level {level} <= {DEFEND_DISENGAGE_AT})"
                 else:
                     state = f"hold (level {level} < {needed}{', batteries' if covered else ''})"
         if self.defend_target is not None and not (found.is_structure or found.type_id in WORKERS):
@@ -479,6 +511,18 @@ class Army:
                     + f", {len(defenders)} defenders ({self._supply(defenders):g} supply)"
                     + (f"; {self._home_inputs.text()}" if self._home_inputs is not None else "")
                 )
+
+    def _disengage(self, now: float, level: int) -> None:
+        """M7 C9 (D22): a home fight the squad chose is lost: the defensive position falls back all
+        HOLD_FALLBACK_STEPS at once (for HOLD_FALLBACK_KEEP_S, through `_fallback_anchor`), and no new
+        engagement outside it starts for MIN_STATE_SECONDS."""
+        self._fallback_steps = HOLD_FALLBACK_STEPS
+        self._fallback_keep_until = now + HOLD_FALLBACK_KEEP_S
+        self._home_reengage_at = now + MIN_STATE_SECONDS
+        logger.info(
+            f"ARMY {self.bot.time_formatted} home fight lost (level {level}): hold point back "
+            f"{HOLD_FALLBACK_STEPS} steps, no new engagement until {_mmss(self._home_reengage_at)}"
+        )
 
     def _home_threat(self, defenders: list[Unit]) -> Optional[Unit]:
         """The enemy nearest one of our bases (M2 rules): army units within ARMY_DEFEND_RADIUS;

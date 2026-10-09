@@ -83,6 +83,20 @@ def outranges(enemy: Unit, unit: Unit) -> bool:
     )
 
 
+def is_melee_vs(unit: Unit, target: Unit) -> bool:
+    """`unit` hits `target` with a melee weapon (range at most MELEE_RANGE_MAX)."""
+    r = weapon_range(unit, target.is_flying)
+    return r is not None and r <= MELEE_RANGE_MAX
+
+
+def outranges_hitters(enemy: Unit, hitters: list[Unit]) -> bool:
+    """M7 C5/C10 (§4.5.2, D23): `enemy` out-ranges every unit of `hitters` (ours, each able to hit
+    it), leaving the melee ones out unless all of them are melee. Under D18 alone a Zealot in the
+    army kept sieged Siege Tanks out of the penalty."""
+    ranged = [u for u in hitters if not is_melee_vs(u, enemy)] or hitters
+    return all(outranges(enemy, u) for u in ranged)
+
+
 def outrange_penalty(share: float, per_share: float) -> int:
     """M7 C5 (§4.5.2): whole levels off a fight's level for `share` (0-1) of the enemy's value
     that out-ranges every unit of ours able to hit it, or that none can hit; rounded half up
