@@ -134,12 +134,6 @@ def _mmss(seconds: float) -> str:
     return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
 
 
-def pulls_back(now: float, pullback_until: float, distance: float, done_radius: float) -> bool:
-    """M7 C11 (§4.5.2, D26): after a lost home fight, a DEFEND unit farther than `done_radius` from
-    the fallen-back defensive position retreats to it until `pullback_until` (pure)."""
-    return now < pullback_until and distance > done_radius
-
-
 def home_engages(level: int, needed: int, engaged: bool, disengage_at: int) -> bool:
     """M7 C9 (§4.5.2, D22): whether the DEFEND squad fights a home threat outside the defensive
     position: at `needed` or above to start, and once `engaged` until the level is at most
@@ -189,7 +183,6 @@ class Army:
         self._fallback_keep_until: float = 0.0  # M7 C1: ... kept back until then
         self._home_engaged: bool = False  # M7 C9: the squad chose to fight the current home threat
         self._home_reengage_at: float = 0.0  # M7 C9: no new home engagement (outside the position) before this
-        self._pullback_until: float = 0.0  # M7 C11: after a lost home fight, units retreat to the position until this
         self.wants_intel: bool = False  # M7 C4: the launch waits for the army's Observer to look
         self._launch_blocked_by: str = ""  # M7 C4: logged when it changes
         # main attack
@@ -522,12 +515,10 @@ class Army:
     def _disengage(self, now: float, level: int) -> None:
         """M7 C9 (D22): a home fight the squad chose is lost: the defensive position falls back all
         HOLD_FALLBACK_STEPS at once (for HOLD_FALLBACK_KEEP_S, through `_fallback_anchor`), and no new
-        engagement outside it starts for MIN_STATE_SECONDS. M7 C11 (D26): for HOLD_FALLBACK_KEEP_S,
-        units away from the position retreat to it (`pulls_back`)."""
+        engagement outside it starts for MIN_STATE_SECONDS."""
         self._fallback_steps = HOLD_FALLBACK_STEPS
         self._fallback_keep_until = now + HOLD_FALLBACK_KEEP_S
         self._home_reengage_at = now + MIN_STATE_SECONDS
-        self._pullback_until = now + HOLD_FALLBACK_KEEP_S
         logger.info(
             f"ARMY {self.bot.time_formatted} home fight lost (level {level}): hold point back "
             f"{HOLD_FALLBACK_STEPS} steps, no new engagement until {_mmss(self._home_reengage_at)}"
@@ -744,11 +735,6 @@ class Army:
                 # a home fight turned bad: fall back, not attack-move back through the enemy
                 # (M4 VeryHard Zerg Torches: the squad chased lings to the natural, Roaches came,
                 # and the units died fighting their way back)
-                self.intents[u.tag] = (RETREAT, anchor)
-            elif pulls_back(self.bot.time, self._pullback_until, u.distance_to(anchor), RETREAT_DONE_RADIUS):
-                # M7 C11 (D26): a home fight was lost and the position fell back: get there as a
-                # retreat (around danger, shooting only when faster), not walking back as holders;
-                # 40 of 41 far HOLD deaths in the D22 Air batches were units caught on the way
                 self.intents[u.tag] = (RETREAT, anchor)
             else:
                 self.intents[u.tag] = (HOLD, anchor)

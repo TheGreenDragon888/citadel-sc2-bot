@@ -31,7 +31,7 @@
 | D23 | **C5 and melee units (user decision, 2026-10-09):** in the out-range share, our melee units count only when they are the only units of ours able to hit that enemy. Under D18 alone, sieged Siege Tanks added nothing to the penalty while Zealots were in the army (VeryHard Terran game 4 lost to four launches into tank lines). |
 | D24 | **Nexus priority under the PROXY and ONE_BASE_ALLIN plans stays as it is (user decision, 2026-10-09):** proxy rax went 20/20 on `641cf24`. |
 | D25 | **C8, the leash gap, is accepted (user decision, 2026-10-09).** |
-| D26 | **Pull back as a retreat (user decision, 2026-10-10):** after a lost home fight, DEFEND units farther than `RETREAT_DONE_RADIUS` from the fallen-back position get RETREAT intent for `HOLD_FALLBACK_KEEP_S`. On `f2bab76`, 40 of the 41 far HOLD deaths in the Protoss Air batches were in lost games, most of them units walking back to the moved position as holders. |
+| D26 | **Pull back as a retreat: tried and reverted (user decision to try, 2026-10-10).** After a lost home fight, DEFEND units away from the fallen-back position got RETREAT intent for `HOLD_FALLBACK_KEEP_S` (`f7aed30`). With the same seeds and openers, Protoss Air went 3, 7 and 6 of 10 against `f2bab76`'s 7, 9 and 7, at value lost/killed 1.17 against 0.82. Units lost per disengage didn't fall (14-19 against 9-14). Reverted to `f2bab76`'s behaviour (VERIFY_NOTES "M7 acceptance evidence"). |
 | D13 | **E0 gets a mass-Void-Ray case (user accepted).** Whether Void Ray masses also trigger the Void Ray/Tempest response is decided with those numbers. Void Rays were our top killer in 7 of 10 baseline games vs Protoss Air. |
 
 **Defaults (accepted by the user):**
@@ -187,7 +187,6 @@ Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your rev
 | (finding) | `main.py:_register_macro_plan` | **Decided (D24): unchanged.** Under the PROXY and ONE_BASE_ALLIN plans the plan's unit production comes before the waiting Nexus (§3 Defense > Economy), so every proxy-rax game stays on one base until 10:00 or later (debug rerun: a Nexus order waited from 2:13 with minerals at 5-250 the whole game). §4.2 says only "skip the natural until 2 units are out". |
 | C9 (D22) | `army.py:_home_defense`, `_fallback_anchor` | Pure `home_engages(level, needed, engaged, disengage_at) -> bool`. The squad remembers it engaged (`_home_engaged`); on a disengage it sets the fallback to `HOLD_FALLBACK_STEPS` for `HOLD_FALLBACK_KEEP_S`, logs `ARMY … hold point back to … (disengaged)`, and holds re-engagement outside the leash and the main until `MIN_STATE_SECONDS` later. |
 | C10 (D23) | `ranges.py`, `engagement.py` | Pure `ranges.outranges_hitters(enemy, hitters)`: the hitters' melee units are left out unless all of them are melee. `Engagement.outranged_share` uses it. |
-| C11 (D26) | `army.py:_set_intents`, `_disengage` | Pure `pulls_back(now, pullback_until, distance, done_radius)`; `_disengage` sets `_pullback_until`, and `_set_intents` gives DEFEND units it applies to `(RETREAT, anchor)`. |
 
 - **VERIFY:**
   - Do Tempests' ground attacks add influence to ares's ground grid?

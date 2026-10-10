@@ -2417,3 +2417,21 @@ No crashes and no caught errors; every `ROW` has `log=ok`, `err=0` and `raa=0`.
 | Zerg Air | **10/10** | Value lost/killed 0.25; games average 10:39 |
 
 No crashes and no caught errors; every `ROW` has `log=ok`, `err=0` and `raa=0`.
+
+### D26 (user decision to try, 2026-10-10): pull back as a retreat after a lost home fight — reverted
+
+**Change tried** (`f7aed30`): after a disengage (C9), DEFEND units farther than `RETREAT_DONE_RADIUS` from the fallen-back defensive position got RETREAT intent for `HOLD_FALLBACK_KEEP_S`. RETREAT paths home around danger and shoots only when faster. Before, they walked back as holders. The aim was the far HOLD deaths: 40 of 41 on `f2bab76` were in lost games, mostly units walking back to the moved position.
+
+**Batches** (same seeds and openers as the `f2bab76` batches, from a worktree pinned at `f7aed30`; `afterdis.py` counts army units lost within 40 s after a disengage):
+
+| Batch | Wins | Value lost / killed | Quick retreats | HOLD deaths (far) | RETREAT deaths | Units lost | Disengages | Lost within 40 s of one |
+|---|---|---|---|---|---|---|---|---|
+| `f2bab76`, free / A / B | 7 / 9 / 7 | 0.93 / 0.64 / 0.89 | 5 / 5 / 5 | 44 (21) / 13 (6) / 42 (14) | 48 / 22 / 70 | 663 / 474 / 626 | 7 / 1 / 5 | 99 / 9 / 58 |
+| **`f7aed30`, free / A / B** | **3 / 7 / 6** | **1.48 / 0.92 / 1.10** | 10 / 7 / 5 | 111 (49) / 28 (4) / 42 (10) | 152 / 80 / 111 | 859 / 711 / 620 | 10 / 6 / 6 | 145 / 84 / 116 |
+
+- **Worse on every measure but the relabelled one.**
+  - Wins fell from 23 to 16 of 30. In the free batch every game had the same opener on both codes; `f7aed30` lost games 1, 5, 7 and 9, which `f2bab76` won, and won none that it lost.
+  - Units lost per disengage didn't fall: 14.5, 14.0 and 19.3, against 14.1, 9.0 and 11.6.
+  - Far HOLD deaths fell in two batches (4 and 10), partly because units dying on the way back now count as RETREAT deaths. In the free batch they rose to 49, 30 of them in game 5.
+- M1 Hard × 10 on `f7aed30`: 10/10 (4 disengages). VeryHard Protoss, VeryHard Zerg and cannon rush were stopped part-way once the Air batches showed the regression.
+- **Reverted** to `f2bab76`'s behaviour (the revert commit leaves `bot/` and `scripts/` identical to `f2bab76`; `test_m7_rules` 96/96). D26 is recorded in M7_PLAN as tried and reverted. The `f2bab76` evidence above stands for Phase 2.
