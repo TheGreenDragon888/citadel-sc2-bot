@@ -1637,6 +1637,24 @@ API checks and Citadel's choices for M7 (`docs/M7_PLAN.md`). Checked before the 
   - The unburrowed Widow Mine has no weapon either (the earlier dump only had the burrowed one).
   - ares's `BuildingManager` drops a Protoss build order 120 s after it was given (`BUILDING_WORKER_TIMEOUT`, `managers/building_manager.py:67, 229-235`). So a stuck Nexus order can't block the schedule for good (D20).
 
+- **Phase 3 VERIFY items** (ares `8730865`, python-sc2 in the Poetry environment; one-off debug games on PylonAIE_v4 with `client.debug_upgrade()` twice and `debug_set_unit_value`):
+  - **Ability ids:**
+    - Blink is `AbilityId.EFFECT_BLINK_STALKER` (1442; game data remaps it to `EFFECT_BLINK`, 3687).
+    - Psionic Storm is `PSISTORM_PSISTORM` (1036), the Archon morph `MORPH_ARCHON` (1766).
+    - The research upgrades are `UpgradeId.BLINKTECH`, `CHARGE` (both from `TWILIGHTCOUNCIL`), `EXTENDEDTHERMALLANCE` (`ROBOTICSBAY`) and `PSISTORMTECH` (`TEMPLARARCHIVE`; python-sc2's `UPGRADE_RESEARCHED_FROM`).
+  - **`unit.abilities`** (python-sc2 `unit.py:598-618`) leaves out abilities on cooldown or without their tech, and energy counts too.
+    - After Blink, `EFFECT_BLINK_STALKER` was gone from the Stalker's set.
+    - A High Templar with Storm researched had no `PSISTORM_PSISTORM` at 53 energy, and had it at 151.
+    - So "Blink ready" and "Storm castable" are both membership tests. No energy cost is hard-coded.
+  - **Ranges:**
+    - Game data gives Psionic Storm `cast_range` 9.0 (`game_data.abilities[...]._proto.cast_range`). ares's AoE table uses 8 for it (`dicts/aoe_ability_to_range.py`).
+    - Game data gives Blink `cast_range` 500, a placeholder. **Measured:** a Stalker ordered to blink 15 away landed 8.00 away. `BLINK_RANGE` (8.0) is that measurement, since game data doesn't carry it.
+  - **Archon morph:** ares's `AresBot.request_archon_morph([ht1, ht2])` (`main.py:169`) queues one two-tag `MORPH_ARCHON` raw command, sent after the step (`custom_bot_ai.py:365-374`, `main.py:445-446`). Its SpawnController uses that to merge any two idle Templar (`spawn_controller.py:329`), so Citadel calls `request_archon_morph` itself and keeps High Templar out of SpawnController's Archon logic.
+  - **Storm:** ares `AutoUseAOEAbility(unit, targets, bonus_tags=set(), recalculate=False, stack_same_spell=False)` (`behaviors/combat/individual/auto_use_aoe_ability.py`). For Storm it needs at least 4 targets in range, avoids our own ground and air units, and doesn't stack a Storm where one already is.
+  - **Safe spots:** `mediator.find_closest_safe_spot(from_pos, grid, radius=11)` and `mediator.is_position_safe(grid, position, weight_safety_limit=1.0)` (a grid value at or below the limit; 1.0 is a pathable cell with no enemy influence) (`managers/path_manager.py:154-182, 403-424`).
+  - **Terrain and vision:** `BotAI.get_terrain_height`, `get_terrain_z_height`, `in_pathing_grid` and `is_visible` (`bot_ai.py:1204-1245`). `in_pathing_grid` reads the start-of-game pathing grid.
+  - **`client.debug_upgrade()`** researches every upgrade available at that moment. Called twice it gave Blink, Charge, Storm and +2/+2 at once, so the staged tests use it (`client.py:881-885`).
+
 ## M7 baseline
 
 Bot code `8036973` (M6, unchanged by the M7 kickoff), run on 2026-10-06 in the cloud container:
