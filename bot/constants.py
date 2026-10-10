@@ -200,6 +200,9 @@ class ScheduleItem(NamedTuple):
     only_if_until_s: Optional[float] = None
     # Activates the item before `at_s` when this condition holds
     early_if: Optional[str] = None
+    # False for the research buildings' own timed steps (M7 K1): they don't decide when the opener
+    # schedule is finished (gas per base, expansion priority and ProductionController wait for that)
+    part_of_opener: bool = True
 
 
 # Per-opener timed steps (§4.1). Names match protoss_builds.yml. Times are TUNE.
@@ -297,6 +300,7 @@ OPENER_ESSENTIALS: Tuple[ScheduleItem, ...] = (
     ScheduleItem(0, "upgrade", UpgradeId.WARPGATERESEARCH),
     ScheduleItem(0, "bases", None, 2),
 )
+
 OPENER_SCHEDULES: dict[str, Tuple[ScheduleItem, ...]] = {
     "A_Standard": _A_SCHEDULE,
     "A2_Safe": _A2_SCHEDULE,
@@ -342,19 +346,47 @@ GATEWAY_POWER_RETRY_S: float = 30.0
 # timed schedule is finished, or at this time at the latest
 PRODUCTION_CONTROLLER_START_S: float = 330.0
 MAX_PRODUCTION_STRUCTURES: int = 12
-# §4.5.1 upgrades: Forge weapons first, then armour; Twilight -> Charge (vs Z, T) or Blink (vs P);
-# then Colossus range. One at a time, in this order; UpgradeController builds the tech structures
-# each one needs.
+# §4.5.1 upgrades (M7 K1, user decisions): each research building works through its own list in
+# parallel, one upgrade at a time per building, and an upgrade never starts the building it needs
+# (UpgradeController with auto tech-up off). Forge weapons first, then armour; Twilight Blink then
+# Charge vs P and T, Charge then Blink vs Z (D7); Robotics Bay Extended Thermal Lance; Templar
+# Archives Psionic Storm (vs Z only, R1)
 UPGRADES_START_S: float = 300.0
-UPGRADES_VS_ZT: Tuple[UpgradeId, ...] = (
+_FORGE_CHAIN: Tuple[UpgradeId, ...] = (
     UpgradeId.PROTOSSGROUNDWEAPONSLEVEL1, UpgradeId.PROTOSSGROUNDWEAPONSLEVEL2,
-    UpgradeId.PROTOSSGROUNDARMORSLEVEL1, UpgradeId.CHARGE, UpgradeId.EXTENDEDTHERMALLANCE,
-    UpgradeId.PROTOSSGROUNDARMORSLEVEL2,
+    UpgradeId.PROTOSSGROUNDARMORSLEVEL1, UpgradeId.PROTOSSGROUNDARMORSLEVEL2,
 )
-UPGRADES_VS_P: Tuple[UpgradeId, ...] = (
-    UpgradeId.PROTOSSGROUNDWEAPONSLEVEL1, UpgradeId.PROTOSSGROUNDWEAPONSLEVEL2,
-    UpgradeId.PROTOSSGROUNDARMORSLEVEL1, UpgradeId.BLINKTECH, UpgradeId.EXTENDEDTHERMALLANCE,
-    UpgradeId.PROTOSSGROUNDARMORSLEVEL2,
+UPGRADE_CHAINS: dict[str, dict[UnitTypeId, Tuple[UpgradeId, ...]]] = {
+    "Terran": {
+        UnitTypeId.FORGE: _FORGE_CHAIN,
+        UnitTypeId.TWILIGHTCOUNCIL: (UpgradeId.BLINKTECH, UpgradeId.CHARGE),
+        UnitTypeId.ROBOTICSBAY: (UpgradeId.EXTENDEDTHERMALLANCE,),
+    },
+    "Protoss": {
+        UnitTypeId.FORGE: _FORGE_CHAIN,
+        UnitTypeId.TWILIGHTCOUNCIL: (UpgradeId.BLINKTECH, UpgradeId.CHARGE),
+        UnitTypeId.ROBOTICSBAY: (UpgradeId.EXTENDEDTHERMALLANCE,),
+    },
+    "Zerg": {
+        UnitTypeId.FORGE: _FORGE_CHAIN,
+        UnitTypeId.TWILIGHTCOUNCIL: (UpgradeId.CHARGE, UpgradeId.BLINKTECH),
+        UnitTypeId.ROBOTICSBAY: (UpgradeId.EXTENDEDTHERMALLANCE,),
+        UnitTypeId.TEMPLARARCHIVE: (UpgradeId.PSISTORMTECH,),
+    },
+}
+# M7 K1: the research buildings' own timed steps, shared by every opener and not part of its end
+# (ScheduleItem.part_of_opener): the Forge (A/A2 also have one at 4:15; before K1 the first upgrade
+# built it at UPGRADES_START_S), the Twilight Council per enemy race, and vs Zerg the Templar Archives
+FORGE_AT_S: float = 300.0
+TWILIGHT_AT_S: dict[str, float] = {"Terran": 330.0, "Protoss": 330.0, "Zerg": 330.0}
+TEMPLAR_ARCHIVES_AT_S: float = 480.0
+TECH_STEPS: Tuple[ScheduleItem, ...] = (
+    ScheduleItem(FORGE_AT_S, "structure", UnitTypeId.FORGE, part_of_opener=False),
+    *(
+        ScheduleItem(at_s, "structure", UnitTypeId.TWILIGHTCOUNCIL, only_if=f"vs_{race.lower()}", part_of_opener=False)
+        for race, at_s in TWILIGHT_AT_S.items()
+    ),
+    ScheduleItem(TEMPLAR_ARCHIVES_AT_S, "structure", UnitTypeId.TEMPLARARCHIVE, only_if="vs_zerg", part_of_opener=False),
 )
 
 # Army (bot/army/army.py): home defense radii, rally point, structure hunt, status log
@@ -882,3 +914,15 @@ WEAPONLESS_DAMAGE_TYPES: frozenset[UnitTypeId] = frozenset(
     }
 )
 WEAPONLESS_CAP_SHARE: float = 0.2
+
+# Phase 3: Blink and Templar (§4.5.3)
+# K2 Blink. BLINK_RANGE is measured (VERIFY_NOTES "M7 findings": game data gives a cast range of 500)
+BLINK_RANGE: float = 8.0
+BLINK_BACK_SHIELD_FRACTION: float = 0.25  # blink back at or below this share of max shields, when threatened
+BLINK_DANGER_MAX: float = 60.0  # no landing on ground-grid danger above this (ares weight units; a Stalker adds 10)
+BLINK_IN_PER_TARGET_S: float = 10.0  # one blink-in wave per out-ranger this often ...
+BLINK_IN_WAVE_S: float = 0.5  # ... which ready Stalkers join this long after it starts ...
+BLINK_IN_MIN_STALKERS: int = 3  # ... and which starts only with this many ready within BLINK_GROUP_RADIUS
+BLINK_GROUP_RADIUS: float = 8.0
+BLINK_IN_MIN_GAIN: float = 2.0  # blink in only if it saves at least this much walking
+BLINK_FINISH_LEVEL: int = 7  # blink to finish only while the local fight's level is at least this

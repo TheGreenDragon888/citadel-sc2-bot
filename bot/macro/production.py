@@ -16,7 +16,6 @@ from ares.behaviors.macro import (
 )
 from ares.consts import GATEWAY_UNITS
 from loguru import logger
-from sc2.data import Race
 from sc2.ids.ability_id import AbilityId
 from sc2.ids.unit_typeid import UnitTypeId
 from sc2.ids.upgrade_id import UpgradeId
@@ -31,17 +30,37 @@ from bot.constants import (
     MINERAL_FLOAT_BANK,
     OBSERVER_COUNT,
     PRODUCTION_CONTROLLER_START_S,
+    UPGRADE_CHAINS,
     UPGRADES_START_S,
-    UPGRADES_VS_P,
-    UPGRADES_VS_ZT,
 )
 from bot.geometry import in_map
+from bot.macro.build_executor import race_key
 
 if TYPE_CHECKING:
     from ares import AresBot
     from ares.behaviors.behavior import Behavior
 
     from bot.defense.defense_planner import DefensePlan
+
+
+def next_upgrades(
+    chains: dict[UnitTypeId, tuple[UpgradeId, ...]], ready: set[UnitTypeId], progress: dict[UpgradeId, float]
+) -> list[UpgradeId]:
+    """M7 K1 (§4.5.1): the next upgrade of each research building's chain whose building is ready,
+    none while that building's current one is in progress (`progress` 0 to 1, python-sc2's
+    `already_pending_upgrade`) (pure)."""
+    out: list[UpgradeId] = []
+    for building, chain in chains.items():
+        if building not in ready:
+            continue
+        for upgrade in chain:
+            done = progress.get(upgrade, 0.0)
+            if done >= 1:
+                continue
+            if done == 0:
+                out.append(upgrade)
+            break
+    return out
 
 
 @dataclass
@@ -135,9 +154,7 @@ class Production:
         can't be built yet (a Colossus before the Robotics Bay) otherwise leaves the rest of the
         production idle once the buildable units reach their shares.
         """
-        race = self.bot.enemy_race
-        key = race.name if race in (Race.Terran, Race.Zerg, Race.Protoss) else Race.Terran.name
-        shares = ARMY_COMPOSITION_PCT[key]
+        shares = ARMY_COMPOSITION_PCT[race_key(self.bot)]
         if tech_ready_only:
             ready = {u: pct for u, pct in shares.items() if self.bot.tech_ready_for_unit(u)}
             if ready:
@@ -148,16 +165,16 @@ class Production:
             for unit, pct in shares.items()
         }
 
-    def _next_upgrade(self) -> Optional[UpgradeId]:
+    def _next_upgrades(self, allow_forge: bool) -> list[UpgradeId]:
+        """M7 K1: one upgrade per research building that stands ready (the Forge's only while the
+        DefensePlan allows the Forge, §4.2 one-base)."""
         bot = self.bot
-        order = UPGRADES_VS_P if bot.enemy_race == Race.Protoss else UPGRADES_VS_ZT
-        for upgrade in order:
-            progress = bot.already_pending_upgrade(upgrade)
-            if progress == 0:
-                return upgrade
-            if progress < 1:
-                return None  # wait for the one in progress
-        return None
+        chains = dict(UPGRADE_CHAINS[race_key(bot)])
+        if not allow_forge:
+            chains.pop(UnitTypeId.FORGE, None)
+        ready = {b for b in chains if any(s.is_ready for s in bot.mediator.get_own_structures_dict[b])}
+        progress = {u: bot.already_pending_upgrade(u) for chain in chains.values() for u in chain}
+        return next_upgrades(chains, ready, progress)
 
     def defense_behaviors(self, plan: "DefensePlan") -> list["Behavior"]:
         """§4.2 plan units, ahead of everything else (Defense > Economy, §3): the first
@@ -187,10 +204,13 @@ class Production:
         comp = self.composition()  # full mix: ProductionController techs toward all of it
         buildable = self.composition(tech_ready_only=True)
         out: list["Behavior"] = []
-        if plan.allow_forge and not plan.hold_tech and bot.time >= UPGRADES_START_S and (upgrade := self._next_upgrade()) is not None:
-            # one at a time, in §4.5.1 order: given the whole list, UpgradeController starts every
-            # tech building at once (a Hard-Zerg loss had Forge, Twilight and Robo Bay at 5:00)
-            out.append(UpgradeController([upgrade], base_location=bot.start_location))
+        if not plan.hold_tech and bot.time >= UPGRADES_START_S:
+            # M7 K1: each research building works through its own chain; with auto tech-up off an
+            # upgrade never starts a building (given a whole list, UpgradeController once started
+            # Forge, Twilight and Robo Bay at 5:00 in a Hard-Zerg loss). The buildings come from
+            # their timed steps (constants.TECH_STEPS) or the unit mix
+            for upgrade in self._next_upgrades(plan.allow_forge):
+                out.append(UpgradeController([upgrade], base_location=bot.start_location, auto_tech_up_enabled=False))
         observers = len(bot.mediator.get_own_army_dict[UnitTypeId.OBSERVER]) + bot.unit_pending(
             UnitTypeId.OBSERVER
         )

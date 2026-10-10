@@ -43,6 +43,7 @@ from sc2.position import Point2
 from sc2.unit import Unit
 
 from bot.army import micro
+from bot.army.blink import BlinkState
 from bot.army.attack_decision import ATTACK, AttackDecision, Decision
 from bot.army.counterattack import Counterattack
 from bot.army.engagement import (
@@ -183,6 +184,7 @@ class Army:
         self._fallback_keep_until: float = 0.0  # M7 C1: ... kept back until then
         self._home_engaged: bool = False  # M7 C9: the squad chose to fight the current home threat
         self._home_reengage_at: float = 0.0  # M7 C9: no new home engagement (outside the position) before this
+        self.blink = BlinkState()  # M7 K2: blink-in waves, this step's ready Stalkers, blinks by kind
         self.wants_intel: bool = False  # M7 C4: the launch waits for the army's Observer to look
         self._launch_blocked_by: str = ""  # M7 C4: logged when it changes
         # main attack
@@ -854,6 +856,7 @@ class Army:
                 [e for tag in group if (e := get(tag)) is not None and not e.is_memory]
                 for group in self.counter.goals
             ]
+        self.blink.refresh([u for u in units if u.type_id == UnitTypeId.STALKER])
         for unit, near in zip(units, near_lists):
             mode, point = self.intents.get(unit.tag, (HOLD, self.anchor))
             own_tick = (iteration + unit.tag) % ARMY_EVERY_STEPS == 0 or unit.is_idle
@@ -862,17 +865,24 @@ class Army:
                     micro.keep_safe(bot, unit, point)
                 continue
             visible = [e for e in near if not e.is_memory and e.type_id not in NOT_TARGETS]
+            if mode in (HOLD, MOVE, RETREAT) and unit.tag in self.blink.ready_tags:
+                # M7 K2 (§4.5.3): Blink first: retreating Stalkers blink away when threatened, the
+                # others blink back on low shields (before the out-ranged step below)
+                if mode == RETREAT and micro.blink_away(bot, unit, visible, point, self.blink):
+                    continue
+                if micro.try_blink_back(bot, unit, visible, self.blink):
+                    continue
             if mode in (HOLD, MOVE, RETREAT) and micro.out_rangers(unit, visible):
                 # M7 C1 (§4.5.3): not committed to a fight, so out of the out-rangers' reach first
                 # (Stalkers holding at the natural died in place to Tempests in the first ladder loss)
                 if not own_tick or micro.step_out(bot, unit):
                     continue
             if mode == HARASS:
-                micro.harass(bot, unit, visible, point, goals, own_tick)
+                micro.harass(bot, unit, visible, point, goals, own_tick, blink=self.blink)
                 continue
             if mode == RETREAT:
-                if own_tick or unit.weapon_cooldown == 0:
-                    micro.retreat(bot, unit, visible, point, move_now=own_tick)
+                if own_tick or unit.weapon_cooldown == 0 or unit.tag in self.blink.ready_tags:
+                    micro.retreat(bot, unit, visible, point, move_now=own_tick, blink=self.blink)
                 continue
             if mode == MOVE:
                 # walking out to the squad: fight only what can fight back
@@ -885,7 +895,9 @@ class Army:
                 # §4.5.2: a Stalker ran at Tempests while the squad fought a Zealot elsewhere)
                 visible = [e for e in visible if e.distance_to(point) <= ENGAGE_ENEMY_RADIUS]
             if visible:
-                micro.fight(bot, unit, visible, point)
+                # M7 K2: blink back for everyone; blink in and to finish only in a fight the squad chose
+                level = self.home_level if self.squads.roles.get(unit.tag) == Role.DEFEND else (self.last_level or -1)
+                micro.fight(bot, unit, visible, point, blink=self.blink, committed=mode == FIGHT, level=level)
             elif own_tick and (mode != HOLD or unit.distance_to(point) > HOLD_RADIUS):
                 # only a fight is walked to with an attack-move: units going back to their hold
                 # point move, so the engine doesn't send them after whatever shoots them (M7 B2)

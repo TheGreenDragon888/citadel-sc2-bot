@@ -22,9 +22,11 @@ sys.path.insert(0, str(ROOT))
 
 import run  # noqa: E402,F401  (puts ares-sc2 on sys.path)
 from sc2.ids.unit_typeid import UnitTypeId  # noqa: E402
+from sc2.ids.upgrade_id import UpgradeId  # noqa: E402
 from sc2.position import Point2  # noqa: E402
 
 from bot.army.army import Army, home_engages  # noqa: E402
+from bot.army.blink import blink_back, blink_finish, blink_in_points, wave_allows  # noqa: E402
 from bot.army.engagement import FightInputs, composition_text, value_level  # noqa: E402
 from bot.army.micro import retreat_may_shoot  # noqa: E402
 from bot.army.ranges import (  # noqa: E402
@@ -38,7 +40,12 @@ from bot.army.ranges import (  # noqa: E402
     reach,
 )
 from bot.constants import (  # noqa: E402
+    BLINK_IN_MIN_STALKERS,
+    BLINK_IN_PER_TARGET_S,
+    BLINK_IN_WAVE_S,
+    BLINK_RANGE,
     CANNON_RUSH_RADIUS,
+    UPGRADE_CHAINS,
     MAIN_STALE_FROM_S,
     MELEE_RANGE_MAX,
     OUTRANGED_MARGIN,
@@ -54,6 +61,7 @@ from bot.intel.detectors import (  # noqa: E402
     proxy_production_check,
 )
 from bot.intel.scout_planner import main_rescout_due, observer_trip_ok, trip_seconds  # noqa: E402
+from bot.macro.production import next_upgrades  # noqa: E402
 
 # (name, function, args, kwargs, expected)
 CASES: list[tuple[str, Callable, tuple, dict, Any]] = []
@@ -238,6 +246,45 @@ case("home: below the gate, not engaged", home_engages, 4, 5, False, 2, expected
 case("home: engaged, fights on at 3", home_engages, 3, 5, True, 2, expected=True)
 case("home: engaged, gives up at 2", home_engages, 2, 5, True, 2, expected=False)
 case("home: under a Battery the gate is 4", home_engages, 4, 4, False, 2, expected=True)
+
+# K1 (§4.5.1): one upgrade per ready research building, in each chain's order
+U, B = UpgradeId, UnitTypeId
+case("upgrades vs P: Forge and Twilight ready", next_upgrades, UPGRADE_CHAINS["Protoss"], {B.FORGE, B.TWILIGHTCOUNCIL}, {},
+     expected=[U.PROTOSSGROUNDWEAPONSLEVEL1, U.BLINKTECH])
+case("upgrades vs Z: Charge before Blink", next_upgrades, UPGRADE_CHAINS["Zerg"], {B.TWILIGHTCOUNCIL}, {}, expected=[U.CHARGE])
+case("upgrades vs Z: Blink after Charge is done", next_upgrades, UPGRADE_CHAINS["Zerg"], {B.TWILIGHTCOUNCIL}, {U.CHARGE: 1.0},
+     expected=[U.BLINKTECH])
+case("upgrades vs T: Blink first", next_upgrades, UPGRADE_CHAINS["Terran"], {B.TWILIGHTCOUNCIL}, {}, expected=[U.BLINKTECH])
+case("upgrades: no building, no upgrade", next_upgrades, UPGRADE_CHAINS["Zerg"], set(), {}, expected=[])
+case("upgrades: the Forge waits for its current one", next_upgrades, UPGRADE_CHAINS["Terran"], {B.FORGE},
+     {U.PROTOSSGROUNDWEAPONSLEVEL1: 0.4}, expected=[])
+case("upgrades: the Forge's next after W1", next_upgrades, UPGRADE_CHAINS["Terran"], {B.FORGE},
+     {U.PROTOSSGROUNDWEAPONSLEVEL1: 1.0}, expected=[U.PROTOSSGROUNDWEAPONSLEVEL2])
+case("upgrades vs Z: Storm once the Archives stand", next_upgrades, UPGRADE_CHAINS["Zerg"], {B.TEMPLARARCHIVE, B.ROBOTICSBAY}, {},
+     expected=[U.EXTENDEDTHERMALLANCE, U.PSISTORMTECH])
+case("upgrades vs P: no Storm chain", lambda: B.TEMPLARARCHIVE in UPGRADE_CHAINS["Protoss"], expected=False)
+case("upgrades: chain done", next_upgrades, {B.ROBOTICSBAY: (U.EXTENDEDTHERMALLANCE,)}, {B.ROBOTICSBAY},
+     {U.EXTENDEDTHERMALLANCE: 1.0}, expected=[])
+
+# K2 (§4.5.3): Blink rules
+case("blink back: low shields, threatened", blink_back, 0.2, True, 0.25, expected=True)
+case("blink back: low shields, not threatened", blink_back, 0.2, False, 0.25, expected=False)
+case("blink back: shields fine", blink_back, 0.6, True, 0.25, expected=False)
+case("blink in: 12 away, reach 6.5 -> lands 5.5 from it, within range",
+     lambda: [p.rounded for p in blink_in_points(Point2((0, 0)), Point2((12, 0)), 6.5)][0], expected=(6, 0))
+case("blink in: every spot within BLINK_RANGE",
+     lambda: all(Point2((0, 0)).distance_to(p) <= BLINK_RANGE for p in blink_in_points(Point2((0, 0)), Point2((12, 0)), 6.5)), expected=True)
+case("blink in: too far for one blink", lambda: list(blink_in_points(Point2((0, 0)), Point2((20, 0)), 6.5)), expected=[])
+case("blink in: already near (gain < 2)", lambda: list(blink_in_points(Point2((0, 0)), Point2((7, 0)), 6.5)), expected=[])
+case("blink finish: one volley kills, safe, won", blink_finish, 20.0, 26.0, True, 8, 7, expected=True)
+case("blink finish: not enough damage", blink_finish, 40.0, 26.0, True, 8, 7, expected=False)
+case("blink finish: fight not won", blink_finish, 20.0, 26.0, True, 6, 7, expected=False)
+case("blink finish: unsafe landing", blink_finish, 20.0, 26.0, False, 8, 7, expected=False)
+case("wave: a new one with enough Stalkers", wave_allows, 10.0, None, BLINK_IN_MIN_STALKERS, expected=(True, True))
+case("wave: not alone", wave_allows, 10.0, None, BLINK_IN_MIN_STALKERS - 1, expected=(False, False))
+case("wave: join within the wave window", wave_allows, 10.0 + BLINK_IN_WAVE_S, 10.0, 0, expected=(True, False))
+case("wave: too late to join, too early for a new one", wave_allows, 10.0 + BLINK_IN_WAVE_S + 0.1, 10.0, 9, expected=(False, False))
+case("wave: a new one after the budget", wave_allows, 10.0 + BLINK_IN_PER_TARGET_S, 10.0, BLINK_IN_MIN_STALKERS, expected=(True, True))
 
 case("penalty: none", outrange_penalty, 0.0, 4.0, expected=0)
 case("penalty: an all-Tempest army", outrange_penalty, 1.0, 4.0, expected=4)

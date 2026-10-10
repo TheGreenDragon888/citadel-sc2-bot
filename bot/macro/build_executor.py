@@ -19,6 +19,7 @@ from ares.consts import ID, TARGET
 from loguru import logger
 from sc2.ids.unit_typeid import UnitTypeId
 from sc2.ids.upgrade_id import UpgradeId
+from sc2.data import Race
 from sc2.dicts.upgrade_researched_from import UPGRADE_RESEARCHED_FROM
 from sc2.position import Point2
 
@@ -28,6 +29,7 @@ from bot.constants import (
     NATURAL_RADIUS,
     OPENER_ESSENTIALS,
     OPENER_SCHEDULES,
+    TECH_STEPS,
     ScheduleItem,
 )
 
@@ -53,6 +55,13 @@ def _nat_ready(bot: "AresBot") -> bool:
     return any(th.is_ready and th.distance_to(nat) < 3 for th in bot.townhalls)
 
 
+def race_key(bot: "AresBot") -> str:
+    """The enemy race's name for per-race tables; Random counts as Terran until its race is seen
+    (§4.1)."""
+    race = bot.enemy_race
+    return race.name if race in (Race.Terran, Race.Zerg, Race.Protoss) else Race.Terran.name
+
+
 def _no_zerg_rush_flag(bot: "AresBot") -> bool:
     m = bot.mediator
     return not (m.get_enemy_ling_rushed or m.get_enemy_roach_rushed or m.get_enemy_ravager_rush)
@@ -72,6 +81,10 @@ CONDITIONS: dict[str, Callable[["AresBot"], bool]] = {
     "no_zerg_rush_flag": _no_zerg_rush_flag,
     "enemy_third": lambda bot: bool(bot.mediator.get_enemy_has_base_outside_natural),
     "enemy_expanded": lambda bot: bool(bot.mediator.get_enemy_expanded),
+    # M7 K1: the research buildings' per-race timed steps (constants.TECH_STEPS)
+    "vs_terran": lambda bot: race_key(bot) == "Terran",
+    "vs_protoss": lambda bot: race_key(bot) == "Protoss",
+    "vs_zerg": lambda bot: race_key(bot) == "Zerg",
 }
 
 
@@ -80,6 +93,7 @@ TECH_ITEMS: frozenset = frozenset(
     {
         UnitTypeId.ROBOTICSFACILITY, UnitTypeId.STARGATE, UnitTypeId.FORGE, UnitTypeId.TWILIGHTCOUNCIL,
         UnitTypeId.OBSERVER, UnitTypeId.ORACLE, UpgradeId.PROTOSSGROUNDWEAPONSLEVEL1,
+        UnitTypeId.TEMPLARARCHIVE,
     }
 )
 # structures and upgrades that need a Forge; §4.2 one-base delays the Forge
@@ -107,14 +121,15 @@ class BuildExecutor:
     @property
     def items(self) -> tuple[ScheduleItem, ...]:
         """The opener essentials (only once a threat flag or the timeout ended the opener
-        early), then the opener's timed schedule."""
+        early), then the opener's timed schedule, then the research buildings' timed steps (M7 K1)."""
         if self.planner.opener_ended_by is not None:
-            return OPENER_ESSENTIALS + self.schedule
-        return self.schedule
+            return OPENER_ESSENTIALS + self.schedule + TECH_STEPS
+        return self.schedule + TECH_STEPS
 
     @property
     def finished(self) -> bool:
-        return all(item in self._reached for item in self.items)
+        """Every opener item reached once (the research buildings' timed steps don't count)."""
+        return all(item in self._reached for item in self.items if item.part_of_opener)
 
     # -- targets used by the economy -------------------------------------------------------
 

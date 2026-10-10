@@ -282,7 +282,11 @@ def m7_cell(telemetry, army=None) -> Optional[str]:
     cell = f"far={sum(far.values())}" + (f"({by_intent})" if by_intent else "") + f"/{sum(telemetry.lost_by_intent.values())}"
     if army is not None and hasattr(army, "reinforce_after_retreat"):
         cell += f" raa={army.reinforce_after_retreat}"
-    return cell + f" rescouts={sum(1 for r in telemetry.scouts if r.task == 'rescout')}"
+    cell += f" rescouts={sum(1 for r in telemetry.scouts if r.task == 'rescout')}"
+    if army is not None and hasattr(army, "blink"):
+        b = army.blink.counts
+        cell += f" blinks={b['back']}/{b['in']}/{b['finish']}"  # M7 K2: back/in/finish
+    return cell
 
 
 def format_row(r: dict) -> str:
