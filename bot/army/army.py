@@ -44,6 +44,7 @@ from sc2.unit import Unit
 
 from bot.army import micro
 from bot.army.blink import BlinkState
+from bot.army.templar import TemplarController, TemplarOrder
 from bot.army.attack_decision import ATTACK, AttackDecision, Decision
 from bot.army.counterattack import Counterattack
 from bot.army.engagement import (
@@ -185,6 +186,7 @@ class Army:
         self._home_engaged: bool = False  # M7 C9: the squad chose to fight the current home threat
         self._home_reengage_at: float = 0.0  # M7 C9: no new home engagement (outside the position) before this
         self.blink = BlinkState()  # M7 K2: blink-in waves, this step's ready Stalkers, blinks by kind
+        self.templar = TemplarController(bot)  # M7 K3: Storm, Templar positions, Archon morphs
         self.wants_intel: bool = False  # M7 C4: the launch waits for the army's Observer to look
         self._launch_blocked_by: str = ""  # M7 C4: logged when it changes
         # main attack
@@ -230,6 +232,7 @@ class Army:
     def forget(self, tag: int) -> None:
         self.squads.forget(tag)
         self.intents.pop(tag, None)
+        self.templar.forget(tag)
         if tag == self.observer_tag:
             self.observer_tag = None
 
@@ -846,6 +849,7 @@ class Army:
             if role != Role.SCOUT and (u := get(tag)) is not None
         ]
         if not units:
+            self.templar.step([])
             return
         near_lists = bot.mediator.get_units_in_range(
             start_points=[u.position for u in units], distances=MICRO_RADIUS, query_tree=UnitTreeQueryType.AllEnemy
@@ -857,12 +861,17 @@ class Army:
                 for group in self.counter.goals
             ]
         self.blink.refresh([u for u in units if u.type_id == UnitTypeId.STALKER])
+        templar: list[tuple[Unit, list[Unit], Point2, bool]] = []
         for unit, near in zip(units, near_lists):
             mode, point = self.intents.get(unit.tag, (HOLD, self.anchor))
             own_tick = (iteration + unit.tag) % ARMY_EVERY_STEPS == 0 or unit.is_idle
             if unit.type_id in SUPPORT:
                 if own_tick:
                     micro.keep_safe(bot, unit, point)
+                continue
+            if unit.type_id == UnitTypeId.HIGHTEMPLAR:
+                # M7 K3: Templar are run by the TemplarController after everyone else
+                templar.append((unit, [e for e in near if not e.is_memory and e.type_id not in NOT_TARGETS], point, own_tick))
                 continue
             visible = [e for e in near if not e.is_memory and e.type_id not in NOT_TARGETS]
             if mode in (HOLD, MOVE, RETREAT) and unit.tag in self.blink.ready_tags:
@@ -902,6 +911,17 @@ class Army:
                 # only a fight is walked to with an attack-move: units going back to their hold
                 # point move, so the engine doesn't send them after whatever shoots them (M7 B2)
                 micro.move(unit, point, attack=mode == FIGHT)
+        self.templar.step([TemplarOrder(u, near, self._squad_centre(u, point), tick) for u, near, point, tick in templar])
+
+    def _squad_centre(self, unit: Unit, fallback: Point2) -> Point2:
+        """The centre of the fighters in `unit`'s squad (not its Templar or Observers), or
+        `fallback` (its intent point) when it has none."""
+        role = self.squads.roles.get(unit.tag)
+        mates = [
+            u.position for u in self.squads.units(role)
+            if u.type_id != UnitTypeId.HIGHTEMPLAR and u.type_id not in SUPPORT
+        ] if role is not None else []
+        return Point2.center(mates) if mates else fallback
 
     # -- logging ---------------------------------------------------------------------------------
 

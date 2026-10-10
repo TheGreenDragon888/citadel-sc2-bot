@@ -22,6 +22,8 @@ from sc2.ids.upgrade_id import UpgradeId
 from sc2.position import Point2
 
 from bot.constants import (
+    ARCHON_VS_BIO_PCT,
+    ARCHON_VS_ZEALOT_PCT,
     ARMY_COMPOSITION_PCT,
     ARMY_PRIORITY,
     GATEWAY_POWER_RETRY_S,
@@ -30,10 +32,12 @@ from bot.constants import (
     MINERAL_FLOAT_BANK,
     OBSERVER_COUNT,
     PRODUCTION_CONTROLLER_START_S,
+    TEMPLAR_SHARE_MAX,
     UPGRADE_CHAINS,
     UPGRADES_START_S,
 )
 from bot.geometry import in_map
+from bot.intel.enemy_mix import EnemyMixTracker
 from bot.macro.build_executor import race_key
 
 if TYPE_CHECKING:
@@ -60,6 +64,35 @@ def next_upgrades(
             if done == 0:
                 out.append(upgrade)
             break
+    return out
+
+
+def unit_proportions(
+    shares: dict[UnitTypeId, float], others: int, archons: int, share_max: float = TEMPLAR_SHARE_MAX
+) -> dict[UnitTypeId, float]:
+    """M7 K3 (§4.5.1): ares count proportions for a mix in percent that may hold ARCHON and
+    HIGHTEMPLAR (pure). ARCHON is never in the result: Archons come from Templar Citadel morphs
+    (`army/templar.py`), so the Templar share covers the casters (the HIGHTEMPLAR percent) plus two
+    Templar for each Archon still missing.
+
+    ares's SpawnController counts only the types in its dict, so the army size is implied by
+    `others`, our units of the mix's other types (at least 1): per percent, `others / their percent`
+    units. Archons wanted = that times the ARCHON percent, less the `archons` we have. The Templar
+    share is capped at `share_max`; the other types share the rest in their ratios."""
+    archon_pct = shares.get(UnitTypeId.ARCHON, 0.0)
+    ht_pct = shares.get(UnitTypeId.HIGHTEMPLAR, 0.0)
+    rest = {u: pct for u, pct in shares.items() if u not in (UnitTypeId.ARCHON, UnitTypeId.HIGHTEMPLAR)}
+    rest_pct = sum(rest.values())
+    if rest_pct <= 0:
+        return {UnitTypeId.HIGHTEMPLAR: 1.0} if archon_pct + ht_pct > 0 else {}
+    if archon_pct + ht_pct <= 0:
+        return {u: pct / rest_pct for u, pct in rest.items()}
+    per_pct = max(others, 1) / rest_pct
+    templar = per_pct * ht_pct + 2 * max(0.0, per_pct * archon_pct - archons)
+    share = min(share_max, templar / (max(others, 1) + templar))
+    out = {u: (1 - share) * pct / rest_pct for u, pct in rest.items()}
+    if share > 0:
+        out[UnitTypeId.HIGHTEMPLAR] = share
     return out
 
 
@@ -102,6 +135,7 @@ class Production:
     def __init__(self, bot: "AresBot"):
         self.bot = bot
         self._power_ordered: dict[int, float] = {}  # Gateway tag -> time a Pylon was ordered for it
+        self.mix = EnemyMixTracker(bot)  # M7 K3: updated each intel tick (main.py)
 
     def gateway_upkeep(self) -> None:
         """Once Warp Gate is researched, ares's SpawnController makes nothing while any ready,
@@ -149,21 +183,42 @@ class Production:
         """ares composition dict for the enemy race; vs Random, the vs-T mix until the race is
         seen (§4.1 treats Random like Terran until then).
 
+        M7 K3: vs T an Archon share while the remembered enemy army is mostly biological, vs P while
+        it is Zealot-heavy (`EnemyMixTracker` switches); Archons become a Templar share
+        (`unit_proportions`), never an ARCHON entry (ares would merge any two idle Templar).
+
         `tech_ready_only` keeps only units whose tech is ready and rescales their shares. ares's
         SpawnController fills each unit up to its share of the current army, so a unit that
         can't be built yet (a Colossus before the Robotics Bay) otherwise leaves the rest of the
         production idle once the buildable units reach their shares.
         """
-        shares = ARMY_COMPOSITION_PCT[race_key(self.bot)]
+        bot = self.bot
+        race = race_key(bot)
+        shares = dict(ARMY_COMPOSITION_PCT[race])
+        extra = 0.0
+        if race == "Terran" and self.mix.vs_bio.on:
+            extra = ARCHON_VS_BIO_PCT
+        elif race == "Protoss" and self.mix.vs_zealots.on:
+            extra = ARCHON_VS_ZEALOT_PCT
+        if extra:
+            shares[UnitTypeId.ARCHON] = shares.get(UnitTypeId.ARCHON, 0.0) + extra
+        count = bot.mediator.get_own_unit_count
+        others = sum(count(unit_type_id=u) for u in shares if u not in (UnitTypeId.ARCHON, UnitTypeId.HIGHTEMPLAR))
+        proportions = unit_proportions(shares, others, count(unit_type_id=UnitTypeId.ARCHON))
         if tech_ready_only:
-            ready = {u: pct for u, pct in shares.items() if self.bot.tech_ready_for_unit(u)}
+            ready = {u: p for u, p in proportions.items() if bot.tech_ready_for_unit(u)}
             if ready:
-                shares = ready
-        total = sum(shares.values())
+                proportions = ready
+        total = sum(proportions.values())
         return {
-            unit: {"proportion": pct / total, "priority": ARMY_PRIORITY[unit]}
-            for unit, pct in shares.items()
+            unit: {"proportion": p / total, "priority": ARMY_PRIORITY[unit]}
+            for unit, p in proportions.items()
         }
+
+    def gateway_mix(self, comp: dict[UnitTypeId, dict[str, float]]) -> dict[UnitTypeId, dict[str, float]]:
+        """The mix's Gateway units for freeflow spending (defense, a mineral float), without High
+        Templar: they are gas-heavy and only wanted at their share."""
+        return {u: info for u, info in comp.items() if u in GATEWAY_UNITS and u != UnitTypeId.HIGHTEMPLAR}
 
     def _next_upgrades(self, allow_forge: bool) -> list[UpgradeId]:
         """M7 K1: one upgrade per research building that stands ready (the Forge's only while the
@@ -190,7 +245,7 @@ class Production:
                 out.append(SpawnController({reserve.unit: {"proportion": 1.0, "priority": 0}}, freeflow_mode=True))
             out.append(reserve)
         if plan.all_gateways_producing:
-            gateway_mix = {u: info for u, info in self.composition(tech_ready_only=True).items() if u in GATEWAY_UNITS}
+            gateway_mix = self.gateway_mix(self.composition(tech_ready_only=True))
             if gateway_mix:
                 out.append(SpawnController(gateway_mix, freeflow_mode=True))
         return out
@@ -227,7 +282,7 @@ class Production:
         # behaviors/macro/spawn_controller.py), so while it saves gas for a Colossus or Immortal no
         # Gateway unit is made. Spend a mineral float on the Gateway share of the mix meanwhile.
         if bot.minerals >= MINERAL_FLOAT_BANK:
-            gateway_mix = {u: info for u, info in buildable.items() if u in GATEWAY_UNITS}
+            gateway_mix = self.gateway_mix(buildable)
             if gateway_mix:
                 out.append(SpawnController(gateway_mix, freeflow_mode=True))
         if (schedule_finished or bot.time >= PRODUCTION_CONTROLLER_START_S) and not plan.hold_tech:

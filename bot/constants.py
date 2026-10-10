@@ -312,8 +312,8 @@ OPENER_SCHEDULES: dict[str, Tuple[ScheduleItem, ...]] = {
     "A2_vRandom": _A2_SCHEDULE,
 }
 
-# §4.5.1 army composition (%). M1 scaffolding (production.py). Archons are left out because
-# High Templar are cut from v1 (§7); the remaining shares are rescaled to 100%.
+# §4.5.1 army composition (%). M1 scaffolding (production.py); M7 K3 adds the vs-Z Archon share and
+# High Templar casters (TUNE), and production.unit_proportions turns the Archon share into Templar.
 # Observers are a fixed count, not a share.
 ARMY_COMPOSITION_PCT: dict[str, dict[UnitTypeId, float]] = {
     "Terran": {
@@ -323,6 +323,8 @@ ARMY_COMPOSITION_PCT: dict[str, dict[UnitTypeId, float]] = {
     "Zerg": {
         UnitTypeId.ZEALOT: 25, UnitTypeId.STALKER: 25, UnitTypeId.IMMORTAL: 25,
         UnitTypeId.COLOSSUS: 10,
+        # M7 K3: the spec's Archon 15 (made from Templar, production.templar_share) plus casters
+        UnitTypeId.ARCHON: 15, UnitTypeId.HIGHTEMPLAR: 8,
     },
     "Protoss": {
         UnitTypeId.STALKER: 40, UnitTypeId.IMMORTAL: 25, UnitTypeId.COLOSSUS: 25,
@@ -332,7 +334,7 @@ ARMY_COMPOSITION_PCT: dict[str, dict[UnitTypeId, float]] = {
 # ares SpawnController priority (0 = highest)
 ARMY_PRIORITY: dict[UnitTypeId, int] = {
     UnitTypeId.COLOSSUS: 0, UnitTypeId.IMMORTAL: 1, UnitTypeId.STALKER: 2,
-    UnitTypeId.ZEALOT: 3, UnitTypeId.SENTRY: 4,
+    UnitTypeId.ZEALOT: 3, UnitTypeId.SENTRY: 4, UnitTypeId.HIGHTEMPLAR: 1,
 }
 OBSERVER_COUNT: int = 2  # §4.5.1 "Observer 2 fixed"
 # At this many banked minerals, also warp in Gateway units without waiting on higher-priority
@@ -926,3 +928,28 @@ BLINK_IN_MIN_STALKERS: int = 3  # ... and which starts only with this many ready
 BLINK_GROUP_RADIUS: float = 8.0
 BLINK_IN_MIN_GAIN: float = 2.0  # blink in only if it saves at least this much walking
 BLINK_FINISH_LEVEL: int = 7  # blink to finish only while the local fight's level is at least this
+# K3 High Templar and Archons (§4.5.1, §4.5.3). Vs Z the mix has Storm casters next to the spec's
+# Archon share (ARMY_COMPOSITION_PCT); Archons come only from Templar that Citadel morphs
+# (army/templar.py), never from ares's SpawnController (it merges any two idle Templar)
+TEMPLAR_MAX_CASTERS: int = 4  # Templar beyond this many (the lowest energy first) morph into Archons
+# ... and so do Templar whose Storm has been uncastable this long since the research: long enough for
+# a newly warped-in Templar to reach Storm energy, so only Templar that have spent theirs morph
+TEMPLAR_MORPH_AFTER_S: float = 60.0
+# Templar stand this far behind their squad's centre, toward our main (near enough that Storm's cast
+# range reaches past the front line)
+TEMPLAR_BEHIND: float = 2.0
+TEMPLAR_SPOT_SLACK: float = 1.5  # ... and are moved there only when farther than this from the spot
+# a Templar leaves out Storm targets within this many Storm radii of our Storms and Storm orders, so
+# a new Storm's centre is at least a radius away from them (at most half overlaps)
+TEMPLAR_STORM_SPACING: float = 2.0
+TEMPLAR_SHARE_MAX: float = 0.5  # the Templar share of the production mix never goes above this
+TEMPLAR_MORPH_RETRY_S: float = 5.0  # a pair asked to morph isn't asked again for this long
+# Archon shares vs T and P while the remembered enemy army is mostly biological / Zealot-heavy, by
+# supply; off again after the share has stayed below for MIX_SWITCH_HOLD_S. Sightings older than
+# MIX_FRESH_S fade out over another MIX_FRESH_S
+ARCHON_VS_BIO_PCT: float = 10.0
+BIO_SHARE_FOR_ARCHONS: float = 0.5
+ARCHON_VS_ZEALOT_PCT: float = 10.0
+ZEALOT_SHARE_FOR_ARCHONS: float = 0.3
+MIX_SWITCH_HOLD_S: float = 60.0
+MIX_FRESH_S: float = 60.0

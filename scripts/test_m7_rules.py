@@ -61,7 +61,9 @@ from bot.intel.detectors import (  # noqa: E402
     proxy_production_check,
 )
 from bot.intel.scout_planner import main_rescout_due, observer_trip_ok, trip_seconds  # noqa: E402
-from bot.macro.production import next_upgrades  # noqa: E402
+from bot.macro.production import next_upgrades, unit_proportions  # noqa: E402
+from bot.army.templar import TemplarInfo, behind, morph_pairs  # noqa: E402
+from bot.intel.enemy_mix import EnemyMix, MixEntry, fade, measure, switch  # noqa: E402
 
 # (name, function, args, kwargs, expected)
 CASES: list[tuple[str, Callable, tuple, dict, Any]] = []
@@ -303,6 +305,80 @@ case("value level: half", value_level, 1000.0, 2000.0, expected=3)
 case("value level: nothing of ours", value_level, 0.0, 1000.0, expected=0)
 case("fight inputs: value cap and penalty", lambda: FightInputs("4 STALKER", 700, "4 VOIDRAY", 1000, 1, 3).text(),
      expected="vs 4 VOIDRAY (1000) | ours 4 STALKER (700); value cap 3; -1 out-ranged")
+
+
+# K3: the remembered enemy army's mix (supply-weighted, fighting units only, old sightings fade)
+def _mix(*entries):  # noqa: E302
+    return measure([MixEntry(*e) for e in entries], fresh_s=60.0)
+
+
+case("fade: fresh", fade, 30.0, 60.0, expected=1.0)
+case("fade: halfway out", fade, 90.0, 60.0, expected=0.5)
+case("fade: gone", fade, 150.0, 60.0, expected=0.0)
+case("mix: nothing seen", _mix, expected=EnemyMix())
+case("mix: 10 Marines (bio) + 2 Tanks", _mix, ("MARINE", 10.0, True, True, 0.0), ("SIEGETANK", 6.0, False, True, 0.0),
+     expected=EnemyMix(16.0, 10 / 16, 0.0))
+case("mix: Medivacs can't attack, left out", _mix, ("MARINE", 10.0, True, True, 0.0), ("MEDIVAC", 4.0, True, False, 0.0),
+     expected=EnemyMix(10.0, 1.0, 0.0))
+case("mix: 8 Zealots + 4 Stalkers", _mix, ("ZEALOT", 16.0, True, True, 0.0), ("STALKER", 8.0, False, True, 0.0),
+     expected=EnemyMix(24.0, 16 / 24, 16 / 24))
+case("mix: old Zealots fade to half", _mix, ("ZEALOT", 16.0, True, True, 90.0), ("STALKER", 8.0, False, True, 0.0),
+     expected=EnemyMix(16.0, 0.5, 0.5))
+case("switch: on at the threshold", switch, False, 0.5, 0.5, None, 100.0, 60.0, expected=(True, None))
+case("switch: stays off below", switch, False, 0.4, 0.5, None, 100.0, 60.0, expected=(False, None))
+case("switch: below, the hold starts", switch, True, 0.4, 0.5, None, 100.0, 60.0, expected=(True, 100.0))
+case("switch: still within the hold", switch, True, 0.4, 0.5, 100.0, 159.0, 60.0, expected=(True, 100.0))
+case("switch: off after the hold", switch, True, 0.4, 0.5, 100.0, 160.0, 60.0, expected=(False, None))
+case("switch: back above resets the hold", switch, True, 0.6, 0.5, 100.0, 150.0, 60.0, expected=(True, None))
+
+# K3: Archon shares become Templar (production.unit_proportions); never an ARCHON entry
+_Z = {UnitTypeId.ZEALOT: 25, UnitTypeId.STALKER: 25, UnitTypeId.IMMORTAL: 25, UnitTypeId.COLOSSUS: 10,
+      UnitTypeId.ARCHON: 15, UnitTypeId.HIGHTEMPLAR: 8}
+_P = {UnitTypeId.STALKER: 40, UnitTypeId.IMMORTAL: 25, UnitTypeId.COLOSSUS: 25, UnitTypeId.ZEALOT: 10}
+
+
+def _props(shares, others, archons, share_max=0.5):  # noqa: E302
+    return {u.name: round(p, 3) for u, p in unit_proportions(shares, others, archons, share_max).items()}
+
+
+case("proportions: no Templar in the mix (vs P)", _props, _P, 20, 0,
+     expected={"STALKER": 0.4, "IMMORTAL": 0.25, "COLOSSUS": 0.25, "ZEALOT": 0.1})
+case("proportions: vs Z, no Archons yet: casters + 2 per Archon", _props, _Z, 85, 0,
+     expected={"ZEALOT": 0.203, "STALKER": 0.203, "IMMORTAL": 0.203, "COLOSSUS": 0.081, "HIGHTEMPLAR": 0.309})
+case("proportions: vs Z, Archons at their share: casters only", _props, _Z, 85, 15,
+     expected={"ZEALOT": 0.269, "STALKER": 0.269, "IMMORTAL": 0.269, "COLOSSUS": 0.108, "HIGHTEMPLAR": 0.086})
+case("proportions: vs Z, no army yet counts as one unit", _props, _Z, 0, 0,
+     expected={"ZEALOT": 0.203, "STALKER": 0.203, "IMMORTAL": 0.203, "COLOSSUS": 0.081, "HIGHTEMPLAR": 0.309})
+case("proportions: vs P with the Zealot switch on: Templar for Archons only", _props, {**_P, UnitTypeId.ARCHON: 10}, 20, 0,
+     expected={"STALKER": 0.333, "IMMORTAL": 0.208, "COLOSSUS": 0.208, "ZEALOT": 0.083, "HIGHTEMPLAR": 0.167})
+case("proportions: Archons enough and no casters: no Templar", _props, {**_P, UnitTypeId.ARCHON: 10}, 20, 2,
+     expected={"STALKER": 0.4, "IMMORTAL": 0.25, "COLOSSUS": 0.25, "ZEALOT": 0.1})
+case("proportions: the Templar share is capped", _props, {**_P, UnitTypeId.ARCHON: 100}, 20, 0, 0.5,
+     expected={"STALKER": 0.2, "IMMORTAL": 0.125, "COLOSSUS": 0.125, "ZEALOT": 0.05, "HIGHTEMPLAR": 0.5})
+case("proportions: sum to 1", lambda: round(sum(unit_proportions(_Z, 40, 3).values()), 9), expected=1.0)
+
+# K3: Archon morph pairs (army/templar.py)
+def _ht(tag, x, energy, uncastable_for=0.0):  # noqa: E302
+    return TemplarInfo(tag, Point2((x, 0)), energy, uncastable_for)
+
+
+case("morph: vs T/P every Templar, nearest pairs", morph_pairs, [_ht(1, 0, 50), _ht(2, 30, 50), _ht(3, 1, 50), _ht(4, 31, 50)], False,
+     expected=[(1, 3), (2, 4)])
+case("morph: an odd Templar waits", morph_pairs, [_ht(1, 0, 50), _ht(2, 5, 50), _ht(3, 9, 50)], False, expected=[(1, 2)])
+case("morph: vs Z casters within the cap stay", morph_pairs, [_ht(1, 0, 50), _ht(2, 5, 60), _ht(3, 9, 70)], True, 4, 60.0,
+     expected=[])
+case("morph: vs Z the spent pair morphs", morph_pairs, [_ht(1, 0, 10, 61.0), _ht(2, 5, 20, 70.0), _ht(3, 9, 70)], True, 4, 60.0,
+     expected=[(1, 2)])
+case("morph: vs Z one spent waits for a partner", morph_pairs, [_ht(1, 0, 10, 61.0), _ht(2, 5, 60), _ht(3, 9, 70)], True, 4, 60.0,
+     expected=[])
+case("morph: vs Z beyond the cap, lowest energy first", morph_pairs,
+     [_ht(1, 0, 90), _ht(2, 1, 40), _ht(3, 2, 80), _ht(4, 3, 45), _ht(5, 4, 100), _ht(6, 5, 100)], True, 4, 60.0,
+     expected=[(2, 4)])
+case("morph: vs Z spent plus the excess", morph_pairs,
+     [_ht(1, 0, 10, 65.0), _ht(2, 1, 40), _ht(3, 2, 80), _ht(4, 3, 85), _ht(5, 4, 100), _ht(6, 5, 100)], True, 4, 60.0,
+     expected=[(1, 2)])
+case("behind: toward home", lambda: behind(Point2((10, 0)), Point2((0, 0)), 2.0), expected=Point2((8, 0)))
+case("behind: home is nearer than the distance", lambda: behind(Point2((1, 0)), Point2((0, 0)), 2.0), expected=Point2((1, 0)))
 
 
 def main() -> int:

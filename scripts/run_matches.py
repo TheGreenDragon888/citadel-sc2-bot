@@ -286,6 +286,9 @@ def m7_cell(telemetry, army=None) -> Optional[str]:
     if army is not None and hasattr(army, "blink"):
         b = army.blink.counts
         cell += f" blinks={b['back']}/{b['in']}/{b['finish']}"  # M7 K2: back/in/finish
+    if army is not None and hasattr(army, "templar"):
+        t = army.templar.counts
+        cell += f" storms={t['storms']} archon={t['archons']}"  # M7 K3
     return cell
 
 

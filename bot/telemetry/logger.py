@@ -332,7 +332,7 @@ class Telemetry:
 
         counter = army.counter if army is not None else None
         return {
-            "version": 5,  # 3: M7 Phase 0 fields; 4: M7 Phase 1 fields; 5: M7 Phase 3 fields
+            "version": 6,  # 3: M7 Phase 0 fields; 4: M7 Phase 1 fields; 5, 6: M7 Phase 3 fields (K2, K3)
             "game_id": self.game_id,
             "date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "result": result,
@@ -393,6 +393,8 @@ class Telemetry:
             "rescouts": capped([round(r.started_at) for r in self.scouts if r.task == "rescout"]),
             # M7 K2/K3 §8: blinks by kind; storms cast and Archons morphed
             "blinks": dict(army.blink.counts) if army is not None and hasattr(army, "blink") else {},
+            "storms": army.templar.counts["storms"] if army is not None and hasattr(army, "templar") else 0,
+            "archons": army.templar.counts["archons"] if army is not None and hasattr(army, "templar") else 0,
             # M7 §8: enemy structure and capital ship types, first seen (game seconds)
             "tech_seen": capped([
                 {"type": name, "t": round(t, 1)}

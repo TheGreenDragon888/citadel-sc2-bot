@@ -200,6 +200,8 @@ class CitadelBot(AresBot):
                 self.flags.expire(self.time, self.detectors.expiry_context(self.supply_army))
             with guard("defense planner"):
                 self.planner.update()
+            with guard("enemy mix"):
+                self.production.mix.update()  # M7 K3: the Archon switches
         marks.append(("intel", time.perf_counter()))
         plan = self.planner.plan
         if iteration % MACRO_EVERY_STEPS == 0 and not guarded:

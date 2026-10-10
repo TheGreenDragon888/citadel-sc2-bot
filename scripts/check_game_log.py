@@ -41,6 +41,7 @@ SINCE: dict[str, tuple[int, tuple]] = {
     "tech_seen": (3, (list,)), "lost_by_intent": (3, (dict,)), "lost_far": (3, (dict,)),  # M7
     "reinforce_after_retreat": (4, (int,)), "rescouts": (4, (list,)),  # M7 Phase 1
     "blinks": (5, (dict,)),  # M7 Phase 3
+    "storms": (6, (int,)), "archons": (6, (int,)),  # M7 K3
 }
 # entries' keys added in a later record version: list name -> (first version, keys) (M7: version 3)
 ENTRY_SINCE: dict[str, tuple[int, tuple[str, ...]]] = {"engage": (3, ("own_value", "enemy_value"))}
