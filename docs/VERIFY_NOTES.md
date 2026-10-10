@@ -2340,3 +2340,80 @@ No crashes and no caught errors; every `ROW` has `log=ok`, `err=0` and `raa=0`.
 - In the VeryHard Terran batch, 36 fight lines against sieged tanks had no penalty, 19 of them with Zealots on our side. None of the 20 penalised lines had Zealots.
 - That matches game 4: four launches whose remembered-army level read 8-10 against tank lines.
 - Put to the user.
+
+### D22-D25 (user decisions, 2026-10-09): home-defense hysteresis and melee units in the out-range share, verified
+
+**Code under test:** `f2bab76` (C9 and C10 on top of `641cf24`). Every batch ran from a `git worktree` pinned there; logs were kept outside the repo, and replays are in `replays/m7-p2i-*`, not in git. A container restart stopped proxy rax after 3 games, cannon rush and 12 pool after 1, and worker rush before its first; each was resumed with `--start` and the same opponent id.
+
+**Summary**
+
+| Criterion | Result |
+|---|---|
+| Phase 2: Air ratio and launch-then-retreat-within-60-s count better than Phase 1 | **PASS.** Protoss Air ratio averages **0.82** over three batches (Phase 1 + B7/B8 code 1.21; D18-D20 1.03). Quick retreats are **5** in each (12; 6.7). Terran and Zerg Air: 10/10 each, 0 quick retreats, ratio 0.47 and 0.25 |
+| Phase 2: HOLD `lost_far` in the Air batches below Phase 1's 8 | **Not met: 21, 6 and 14.** 40 of the 41 are in lost games (details below) |
+| D11 target: Protoss Air VeryHard ≥ 7/10 | **7/10, 9/10 and 7/10**: met in every batch for the first time (Phase 1 + B7/B8 code 8, 6, 4, 7; D18-D20 6, 5, 6) |
+| D23: Siege Tanks count again against Stalkers + Zealots | **PASS**: `test_engagement.py`, and VeryHard Terran 10/10 (game 4, lost on `641cf24`, won at 11:08) |
+| M1: Hard × 10 | **PASS**: 10/10 |
+| M2/M3: cheese × 10 (≥ 8/10, correct flag, no scout lost before 4:00 in ≥ 7) | **PASS**: proxy rax 10/10, cannon rush 9/10, 12 pool 10/10, worker rush 10/10. Correct flag 40/40; scout criterion 8-10/10 in each |
+| M4: VeryHard × 10 per race (≥ 7) | **PASS**: Terran 10/10, Zerg 9/10, Protoss 9/10 |
+| M5: staged counterattack 7/7 | **PASS**: 7/7 |
+
+**Offline tests:**
+- `test_m7_rules` 96/96. It adds `home_engages` (start at the gate; once engaged, fight on above `DEFEND_DISENGAGE_AT`) and `outranges_hitters` (a sieged tank against Stalkers + Zealots counts; against Zealots alone it doesn't; neither do Marines).
+- `test_attack_decision` 23/23, `test_threat_flags` 20/20, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38.
+- `check_game_log.py` after the batches: `RESULT PASS`, 200 records (the cap), 0 malformed, `./data` 515 KB.
+
+**Staged tests** (`f2bab76`, one game each):
+
+| Test | Result |
+|---|---|
+| `test_engagement.py` | PASS, with the D23 tank rows (below) |
+| `test_outranged.py --case idle_hold` | PASS: no Stalker drawn toward the Tempests (closest 11.6, limit 8.5); home defense held |
+| `test_outranged.py --case hold_vs_tempest` | PASS: 1 of 6 Stalkers died; the defensive position moved 4.8 farther from the Tempests |
+| `test_outranged.py --case committed` | PASS: home defense engaged at level 6 and stayed engaged (`engaged (level 6 > 2)`); both Tempests killed, 1 of 12 Stalkers lost |
+| `test_counterattack.py` (M5, all 7 cases) | **7/7 PASS** |
+
+`test_engagement.py`, the D23 rows (most common of 20 calls; the rest as in the D18-D21 section):
+
+| Scenario | Level | (capped, penalty) | ares `can_win_fight` |
+|---|---|---|---|
+| 12 Stalkers + 6 Zealots vs 4 sieged Siege Tanks | **5** | (9, -4) | 10 |
+| 12 Zealots vs 4 sieged Siege Tanks | 8 | (8, -0) | 10 |
+| 2 Zealots vs 4 Marines (defending) | 7 | (7, -0) | 6 |
+
+**Protoss Air** (`--difficulty VeryHard --race Protoss --build Air --map all --game-seed 7000`; free openers, and twice with Phase 1's openers forced, as before):
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Phase 1 + B7/B8 code (4 batches, mean) | 6.3 | 1.21 | 24 | 12 | 20 (9) | 94 | 617 |
+| D18-D20 (`4c39bbf`), free / A / B | 6 / 5 / 6 | 0.90 / 1.13 / 1.06 | 12 / 18 / 14 | 5 / 10 / 5 | 81 (24) / 89 (14) / 71 (23) | 73 / 104 / 88 | 649 / 671 / 693 |
+| **D22-D23, free** | **7/10** | **0.93** | 13 | **5** | 44 (21) | 48 | 663 |
+| **D22-D23, forced A** | **9/10** | **0.64** | 15 | **5** | 13 (6) | 22 | 474 |
+| **D22-D23, forced B** | **7/10** | **0.89** | 14 | **5** | 42 (14) | 70 | 626 |
+
+- **The flips are gone.** Engage → hold flips per batch went from 11, 10 and 8 to 1, 0 and 0. Each batch logged 54-69 `engaged (level N > 2)` lines (fighting on below the gate) and 1-7 disengages (`home fight lost (level N)`). The value cap still holds launches: 49-52 `launch held` lines per batch.
+- **Where the far HOLD deaths are now.** After a disengage, the defensive position falls back `HOLD_FALLBACK_STEPS` at once. Units still walking back to it die more than 12 from the new point.
+  - Free batch: all 21 in its three losses (games 6, 8, 10), 11 of them within 40 s of a disengage.
+  - Run A: all 6 in its one loss, after its one disengage.
+  - Run B: 13 of its 14 in its three losses, 8 within 40 s of a disengage.
+  - In the 23 won games of the three batches: 1 far HOLD death.
+- **Not shown:** whether 7-9/10 holds across more seeds. Run-to-run spread on the same code is about ±2 wins (Phase 1: 8 then 6).
+
+**VeryHard Terran** (`f2bab76`): **10/10**, all won in 10:06-12:32. Game 4 (Torches), lost on `641cf24` to launches into tank lines, was won at 11:08.
+
+**Regressions** (`f2bab76`):
+
+| Batch | Wins | Notes |
+|---|---|---|
+| M1: Hard × 10 | **10/10** | 7 disengages in the batch, every game won |
+| M4: VeryHard Terran | **10/10** | Above |
+| M4: VeryHard Zerg | **9/10** | Game 3 (Ley Lines), lost on every commit since M5 |
+| M4: VeryHard Protoss | **9/10** | Game 5 (Pylon), lost on `641cf24` and in the B7/B8 run, was won. Game 8 (Magannatha; won on `641cf24`) was lost at 8:42. At 4:54, 6 units engaged a lone Stalker at level 10; 8 Stalkers and a Zealot joined, and C9 kept the squad fighting at levels 4 and 3 until it was down to 2 units. Before C9 it would have held at 4:55. This is a cost of D22 |
+| M2/M3: proxy rax | **10/10** | All won in 8:49-12:51; correct flag 10/10; no scout lost before 4:00 in 8/10 |
+| M2/M3: cannon rush | **9/10** | Game 5 (Pylon, main variant): the rush Cannons killed the main Nexus before 4:00, as in 4 of 7 earlier runs. 62 units lost in the batch (89 on `641cf24`); correct flag 10/10 |
+| M2/M3: 12 pool | **10/10** | All won in 9:55-13:54; correct flag 10/10 |
+| M2/M3: worker rush | **10/10** | Correct flag 10/10; no scout lost before 4:00 |
+| Terran Air | **10/10** | Value lost/killed 0.47 (earlier runs 0.35-0.45); 0 quick retreats |
+| Zerg Air | **10/10** | Value lost/killed 0.25; games average 10:39 |
+
+No crashes and no caught errors; every `ROW` has `log=ok`, `err=0` and `raa=0`.
