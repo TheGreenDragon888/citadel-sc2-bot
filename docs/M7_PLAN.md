@@ -32,6 +32,7 @@
 | D24 | **Nexus priority under the PROXY and ONE_BASE_ALLIN plans stays as it is (user decision, 2026-10-09):** proxy rax went 20/20 on `641cf24`. |
 | D25 | **C8, the leash gap, is accepted (user decision, 2026-10-09).** |
 | D26 | **Pull back as a retreat: tried and reverted (user decision to try, 2026-10-10).** After a lost home fight, DEFEND units away from the fallen-back position got RETREAT intent for `HOLD_FALLBACK_KEEP_S` (`f7aed30`). With the same seeds and openers, Protoss Air went 3, 7 and 6 of 10 against `f2bab76`'s 7, 9 and 7, at value lost/killed 1.17 against 0.82. Units lost per disengage didn't fall (14-19 against 9-14). Reverted to `f2bab76`'s behaviour (VERIFY_NOTES "M7 acceptance evidence"). |
+| D27 | **Phase 2 accepted (user decision, 2026-10-10)** on `f2bab76`'s behaviour. Protoss Air 7, 9 and 7 of 10; regressions hold. The HOLD `lost_far` criterion stays unmet (21, 6, 14; 40 of 41 in lost games). |
 | D13 | **E0 gets a mass-Void-Ray case (user accepted).** Whether Void Ray masses also trigger the Void Ray/Tempest response is decided with those numbers. Void Rays were our top killer in 7 of 10 baseline games vs Protoss Air. |
 
 **Defaults (accepted by the user):**
