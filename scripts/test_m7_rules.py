@@ -24,7 +24,7 @@ import run  # noqa: E402,F401  (puts ares-sc2 on sys.path)
 from sc2.ids.unit_typeid import UnitTypeId  # noqa: E402
 from sc2.position import Point2  # noqa: E402
 
-from bot.army.army import Army, home_engages  # noqa: E402
+from bot.army.army import Army, home_engages, pulls_back  # noqa: E402
 from bot.army.engagement import FightInputs, composition_text, value_level  # noqa: E402
 from bot.army.micro import retreat_may_shoot  # noqa: E402
 from bot.army.ranges import (  # noqa: E402
@@ -238,6 +238,11 @@ case("home: below the gate, not engaged", home_engages, 4, 5, False, 2, expected
 case("home: engaged, fights on at 3", home_engages, 3, 5, True, 2, expected=True)
 case("home: engaged, gives up at 2", home_engages, 2, 5, True, 2, expected=False)
 case("home: under a Battery the gate is 4", home_engages, 4, 4, False, 2, expected=True)
+
+# C11 (D26): after a lost home fight, units away from the fallen-back position retreat to it
+case("pullback: far from the position", pulls_back, 100.0, 130.0, 15.0, 8.0, expected=True)
+case("pullback: already there", pulls_back, 100.0, 130.0, 5.0, 8.0, expected=False)
+case("pullback: over", pulls_back, 131.0, 130.0, 15.0, 8.0, expected=False)
 
 case("penalty: none", outrange_penalty, 0.0, 4.0, expected=0)
 case("penalty: an all-Tempest army", outrange_penalty, 1.0, 4.0, expected=4)
