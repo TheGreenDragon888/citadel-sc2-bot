@@ -1655,6 +1655,15 @@ API checks and Citadel's choices for M7 (`docs/M7_PLAN.md`). Checked before the 
   - **Terrain and vision:** `BotAI.get_terrain_height`, `get_terrain_z_height`, `in_pathing_grid` and `is_visible` (`bot_ai.py:1204-1245`). `in_pathing_grid` reads the start-of-game pathing grid.
   - **`client.debug_upgrade()`** researches every upgrade available at that moment. Called twice it gave Blink, Charge, Storm and +2/+2 at once, so the staged tests use it (`client.py:881-885`).
 
+- **K3 build findings** (ares `8730865`):
+  - `AutoUseAOEAbility` isn't exported by `ares.behaviors.combat.individual`; it is imported from `ares.behaviors.combat.individual.auto_use_aoe_ability`.
+  - ares's Storm no-stacking check (`use_aoe_ability.py:_can_cast`) looks only at Storm effects already on the ground. In the staged `storm` case two Templar stormed overlapping spots in the same moment. Citadel spaces its Storms itself (`army/templar.py`, `TEMPLAR_STORM_SPACING`).
+  - The Storm radius Citadel uses is ares's table value (`AOE_ABILITY_SPELLS_INFO`, 2.0). The staged test measures "inside a Storm" with the effect's own radius from the game (`EffectData.radius`).
+  - Storms are counted from our `EffectId.PSISTORMPERSISTENT` effects (`EffectData.is_mine`, python-sc2 `game_state.py:96-140`), a new spot each; Archons from new `ARCHON` tags.
+  - ares's SpawnController counts only the types in its dict (`spawn_controller.py:98-103`), and `get_own_unit_count` includes units in production (`unit_cache_manager.py:425-430`). `production.unit_proportions` sizes the Templar share from those counts.
+  - Staged tests with Zerglings must spawn them after 3:00. ares raises its ling-rush flag before 2:30 with 3 Zerglings near our main, before 3:00 with 8 anywhere, and before 1:30 with 5 (`intel_manager.py:409-435`). Citadel's own early-ling flag runs to 2:20 (`EARLY_LINGS_UNTIL_S`). The 12-pool plan then pulled the army back to the main ramp, and the first `storm` run had no fight.
+  - **Blink counting** (found in the first VeryHard Zerg smoke game, 330 "finish" blinks): most finish blinks were 1-4 tile hops onto units just out of reach, and many never went off, because the next step's attack order replaced them. Counted per order, every retry counted again. Now a blink counts only when the Stalker's Blink goes on cooldown within `BLINK_CONFIRM_S` of the order, and a finish blink needs a gain of at least `BLINK_FINISH_MIN_GAIN` (3).
+
 ## M7 baseline
 
 Bot code `8036973` (M6, unchanged by the M7 kickoff), run on 2026-10-06 in the cloud container:

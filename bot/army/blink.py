@@ -7,8 +7,12 @@ set while on cooldown, VERIFY_NOTES "M7 findings"):
 - **blink in** onto an out-ranger when the squad is committed: in waves, at most one per out-ranger
   per `BLINK_IN_PER_TARGET_S`, which the Stalkers ready within `BLINK_IN_WAVE_S` of its start join,
   started only with `BLINK_IN_MIN_STALKERS` ready nearby, so they arrive as a group;
-- **blink to finish** a unit just out of reach that one volley kills, only when the landing spot is
-  safe and the local fight's level is at least `BLINK_FINISH_LEVEL`.
+- **blink to finish** a unit out of reach that one volley kills, only when the landing spot is
+  safe, the local fight's level is at least `BLINK_FINISH_LEVEL`, and the blink saves at least
+  `BLINK_FINISH_MIN_GAIN` of walking.
+
+A blink is counted (by kind, for the game record) once the Stalker's Blink goes on cooldown within
+`BLINK_CONFIRM_S` of the order; an order the next step's attack replaced isn't a blink.
 
 They never blink into fog, onto unpathable ground, or onto a cell whose ground-grid danger is above
 `BLINK_DANGER_MAX` (`landing_ok`); fog also rules out a cliff they have no vision of.
@@ -25,8 +29,10 @@ from sc2.unit import Unit
 
 from bot.constants import (
     BLINK_BACK_SHIELD_FRACTION,
+    BLINK_CONFIRM_S,
     BLINK_DANGER_MAX,
     BLINK_FINISH_LEVEL,
+    BLINK_FINISH_MIN_GAIN,
     BLINK_IN_MIN_GAIN,
     BLINK_IN_MIN_STALKERS,
     BLINK_IN_PER_TARGET_S,
@@ -74,11 +80,14 @@ def blink_in_points(
 
 
 def blink_finish(
-    target_hp_shield: float, our_volley: float, landing_safe: bool, local_level: int,
-    finish_level: int = BLINK_FINISH_LEVEL,
+    target_hp_shield: float, our_volley: float, landing_safe: bool, local_level: int, gain: float,
+    finish_level: int = BLINK_FINISH_LEVEL, min_gain: float = BLINK_FINISH_MIN_GAIN,
 ) -> bool:
-    """Blink to finish: one volley kills the target, the landing is safe and the fight is won (pure)."""
-    return our_volley >= target_hp_shield > 0 and landing_safe and local_level >= finish_level
+    """Blink to finish: one volley kills the target, the landing is safe, the fight is won, and the
+    blink saves at least `min_gain` of walking (`gain`: the distance to the landing spot) (pure)."""
+    return (
+        our_volley >= target_hp_shield > 0 and landing_safe and local_level >= finish_level and gain >= min_gain
+    )
 
 
 def wave_allows(now: float, wave_start: Optional[float], ready_near: int) -> tuple[bool, bool]:
@@ -107,23 +116,32 @@ def landing_ok(bot: "AresBot", point: Point2) -> bool:
 
 class BlinkState:
     """Per-game Blink bookkeeping, held by the army: blink-in waves (out-ranger tag -> start time),
-    this step's Stalkers with Blink ready (for "together"), and blinks by kind for the game record."""
+    this step's Stalkers with Blink ready (for "together"), and blinks by kind for the game record
+    (`ordered`: tag -> (kind, order time) until the blink is confirmed or BLINK_CONFIRM_S passes)."""
 
     def __init__(self) -> None:
         self.waves: dict[int, float] = {}
         self.ready_tags: set[int] = set()
         self.ready_positions: list[Point2] = []
+        self.ordered: dict[int, tuple[str, float]] = {}
         self.counts: dict[str, int] = {"back": 0, "in": 0, "finish": 0}
 
-    def refresh(self, stalkers: list[Unit]) -> None:
+    def refresh(self, stalkers: list[Unit], now: float) -> None:
         ready = [u for u in stalkers if blink_ready(u)]
         self.ready_tags = {u.tag for u in ready}
         self.ready_positions = [u.position for u in ready]
+        alive = {u.tag for u in stalkers}
+        for tag, (kind, at) in list(self.ordered.items()):
+            if tag in alive and tag not in self.ready_tags:
+                self.counts[kind] += 1  # Blink went on cooldown: it went off
+                del self.ordered[tag]
+            elif tag not in alive or now - at > BLINK_CONFIRM_S:
+                del self.ordered[tag]
 
     def ready_near(self, point: Point2, radius: float) -> int:
         return sum(1 for p in self.ready_positions if p.distance_to(point) <= radius)
 
-    def blink(self, unit: Unit, point: Point2, kind: str) -> None:
+    def blink(self, unit: Unit, point: Point2, kind: str, now: float) -> None:
         unit(BLINK, point)
-        self.counts[kind] += 1
+        self.ordered[unit.tag] = (kind, now)
         self.ready_tags.discard(unit.tag)

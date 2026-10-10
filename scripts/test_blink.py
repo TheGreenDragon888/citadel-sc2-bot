@@ -109,7 +109,7 @@ class StagedCitadel(CitadelBot):
                 await self.client.debug_upgrade()
                 await self.client.debug_upgrade()
                 if not self.with_blink:
-                    self.army.blink.refresh = lambda stalkers: None  # the micro never sees a ready Stalker
+                    self.army.blink.refresh = lambda stalkers, now: None  # the micro never sees a ready Stalker
                 self.mark, self.phase = iteration, "upgrade"
             return
         if self.phase == "upgrade":

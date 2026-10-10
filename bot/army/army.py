@@ -860,7 +860,7 @@ class Army:
                 [e for tag in group if (e := get(tag)) is not None and not e.is_memory]
                 for group in self.counter.goals
             ]
-        self.blink.refresh([u for u in units if u.type_id == UnitTypeId.STALKER])
+        self.blink.refresh([u for u in units if u.type_id == UnitTypeId.STALKER], bot.time)
         templar: list[tuple[Unit, list[Unit], Point2, bool]] = []
         for unit, near in zip(units, near_lists):
             mode, point = self.intents.get(unit.tag, (HOLD, self.anchor))

@@ -26,7 +26,7 @@ from sc2.ids.upgrade_id import UpgradeId  # noqa: E402
 from sc2.position import Point2  # noqa: E402
 
 from bot.army.army import Army, home_engages  # noqa: E402
-from bot.army.blink import blink_back, blink_finish, blink_in_points, wave_allows  # noqa: E402
+from bot.army.blink import BlinkState, blink_back, blink_finish, blink_in_points, wave_allows  # noqa: E402
 from bot.army.engagement import FightInputs, composition_text, value_level  # noqa: E402
 from bot.army.micro import retreat_may_shoot  # noqa: E402
 from bot.army.ranges import (  # noqa: E402
@@ -278,10 +278,11 @@ case("blink in: every spot within BLINK_RANGE",
      lambda: all(Point2((0, 0)).distance_to(p) <= BLINK_RANGE for p in blink_in_points(Point2((0, 0)), Point2((12, 0)), 6.5)), expected=True)
 case("blink in: too far for one blink", lambda: list(blink_in_points(Point2((0, 0)), Point2((20, 0)), 6.5)), expected=[])
 case("blink in: already near (gain < 2)", lambda: list(blink_in_points(Point2((0, 0)), Point2((7, 0)), 6.5)), expected=[])
-case("blink finish: one volley kills, safe, won", blink_finish, 20.0, 26.0, True, 8, 7, expected=True)
-case("blink finish: not enough damage", blink_finish, 40.0, 26.0, True, 8, 7, expected=False)
-case("blink finish: fight not won", blink_finish, 20.0, 26.0, True, 6, 7, expected=False)
-case("blink finish: unsafe landing", blink_finish, 20.0, 26.0, False, 8, 7, expected=False)
+case("blink finish: one volley kills, safe, won", blink_finish, 20.0, 26.0, True, 8, 4.0, 7, 3.0, expected=True)
+case("blink finish: not enough damage", blink_finish, 40.0, 26.0, True, 8, 4.0, 7, 3.0, expected=False)
+case("blink finish: fight not won", blink_finish, 20.0, 26.0, True, 6, 4.0, 7, 3.0, expected=False)
+case("blink finish: unsafe landing", blink_finish, 20.0, 26.0, False, 8, 4.0, 7, 3.0, expected=False)
+case("blink finish: a short hop isn't worth the Blink", blink_finish, 20.0, 26.0, True, 8, 2.0, 7, 3.0, expected=False)
 case("wave: a new one with enough Stalkers", wave_allows, 10.0, None, BLINK_IN_MIN_STALKERS, expected=(True, True))
 case("wave: not alone", wave_allows, 10.0, None, BLINK_IN_MIN_STALKERS - 1, expected=(False, False))
 case("wave: join within the wave window", wave_allows, 10.0 + BLINK_IN_WAVE_S, 10.0, 0, expected=(True, False))
@@ -379,6 +380,32 @@ case("morph: vs Z spent plus the excess", morph_pairs,
      expected=[(1, 2)])
 case("behind: toward home", lambda: behind(Point2((10, 0)), Point2((0, 0)), 2.0), expected=Point2((8, 0)))
 case("behind: home is nearer than the distance", lambda: behind(Point2((1, 0)), Point2((0, 0)), 2.0), expected=Point2((1, 0)))
+
+
+
+def _blink_counts(steps):  # noqa: E302
+    """BlinkState: orders, then refreshes with which Stalkers still have Blink ready."""
+    from sc2.ids.ability_id import AbilityId
+    state = BlinkState()
+    stalker = lambda tag, ready: SimpleNamespace(  # noqa: E731
+        tag=tag, type_id=UnitTypeId.STALKER, position=Point2((0, 0)),
+        abilities={AbilityId.EFFECT_BLINK_STALKER} if ready else set(), __call__=None,
+    )
+    for now, order, ready in steps:
+        if order is not None:
+            state.ordered[order[0]] = (order[1], now)  # what BlinkState.blink records
+        state.refresh([stalker(tag, r) for tag, r in ready.items()], now)
+    return state.counts
+
+
+case("blink count: on cooldown after the order", _blink_counts, [(10.0, (1, "finish"), {1: True}), (10.1, None, {1: False})],
+     expected={"back": 0, "in": 0, "finish": 1})
+case("blink count: still ready after BLINK_CONFIRM_S: not a blink", _blink_counts,
+     [(10.0, (1, "finish"), {1: True}), (10.5, None, {1: True}), (11.2, None, {1: True}), (12.0, None, {1: False})],
+     expected={"back": 0, "in": 0, "finish": 0})
+case("blink count: re-ordered and then it went off counts once", _blink_counts,
+     [(10.0, (1, "in"), {1: True}), (10.1, (1, "in"), {1: True}), (10.2, None, {1: False})],
+     expected={"back": 0, "in": 1, "finish": 0})
 
 
 def main() -> int:

@@ -928,6 +928,10 @@ BLINK_IN_MIN_STALKERS: int = 3  # ... and which starts only with this many ready
 BLINK_GROUP_RADIUS: float = 8.0
 BLINK_IN_MIN_GAIN: float = 2.0  # blink in only if it saves at least this much walking
 BLINK_FINISH_LEVEL: int = 7  # blink to finish only while the local fight's level is at least this
+# ... and only if the blink saves at least this much walking (in a VeryHard Zerg game most finish
+# blinks were 1-4 hops onto units just out of reach, and many never went off)
+BLINK_FINISH_MIN_GAIN: float = 3.0
+BLINK_CONFIRM_S: float = 1.0  # a blink counts once the Stalker's Blink goes on cooldown within this long
 # K3 High Templar and Archons (§4.5.1, §4.5.3). Vs Z the mix has Storm casters next to the spec's
 # Archon share (ARMY_COMPOSITION_PCT); Archons come only from Templar that Citadel morphs
 # (army/templar.py), never from ares's SpawnController (it merges any two idle Templar)

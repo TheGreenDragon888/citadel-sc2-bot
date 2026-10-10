@@ -39,6 +39,7 @@ from bot.army.ranges import (  # noqa: F401 (re-exported)
     weapon_range,
 )
 from bot.constants import (
+    BLINK_FINISH_MIN_GAIN,
     COUNTER_BASE_RADIUS,
     BLINK_GROUP_RADIUS,
     BLINK_RANGE,
@@ -121,7 +122,7 @@ def try_blink_back(bot: "AresBot", unit: Unit, enemies: Sequence[Unit], blink: O
     )
     if spot.distance_to(unit) < 2.0 or not landing_ok(bot, spot):
         return False
-    blink.blink(unit, spot, "back")
+    blink.blink(unit, spot, "back", bot.time)
     return True
 
 
@@ -142,7 +143,7 @@ def _try_blink_in(bot: "AresBot", unit: Unit, targets: Sequence[Unit], blink: Bl
         if landing_ok(bot, point):
             if new_wave:
                 blink.waves[target.tag] = now
-            blink.blink(unit, point, "in")
+            blink.blink(unit, point, "in", bot.time)
             return True
     return False
 
@@ -163,8 +164,9 @@ def _try_blink_finish(bot: "AresBot", unit: Unit, targets: Sequence[Unit], blink
         if unit.distance_to(point) > BLINK_RANGE:
             continue
         volley = unit.calculate_damage_vs_target(e)[0]
-        if blink_finish(e.health + e.shield, volley, landing_ok(bot, point), level):
-            blink.blink(unit, point, "finish")
+        gain = unit.distance_to(point)
+        if blink_finish(e.health + e.shield, volley, gain >= BLINK_FINISH_MIN_GAIN and landing_ok(bot, point), level, gain):
+            blink.blink(unit, point, "finish", bot.time)
             return True
     return False
 
@@ -251,7 +253,7 @@ def blink_away(bot: "AresBot", unit: Unit, enemies: Sequence[Unit], home: Point2
         return False
     for point in (unit.position.towards(home, BLINK_RANGE), unit.position.towards(home, BLINK_RANGE / 2)):
         if landing_ok(bot, point):
-            blink.blink(unit, point, "back")
+            blink.blink(unit, point, "back", bot.time)
             return True
     return False
 
