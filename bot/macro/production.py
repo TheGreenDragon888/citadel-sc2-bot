@@ -120,6 +120,14 @@ def templar_floor(
     return casters
 
 
+def gas_starved(minerals: float, vespene: float, wanted_gas: list[float], bank: float = MINERAL_FLOAT_BANK) -> bool:
+    """M7 E1 (§4.5.1 economy; pulled into Phase 3 by user decision D28): a mineral bank of at least
+    `bank` while the gas bank can't pay for the most gas-hungry thing production wants this tick
+    (`wanted_gas`: game-data gas costs of the buildable mix's units, the upgrades due and a Templar
+    still missing from the floor) (pure)."""
+    return minerals >= bank and bool(wanted_gas) and vespene < max(wanted_gas)
+
+
 @dataclass
 class ReserveForUnit:
     """Holds the rest of a MacroPlan (structures, probes) while fewer than `wanted` Gateway units
@@ -160,6 +168,7 @@ class Production:
         self.bot = bot
         self._power_ordered: dict[int, float] = {}  # Gateway tag -> time a Pylon was ordered for it
         self.mix = EnemyMixTracker(bot)  # M7 K3: updated each intel tick (main.py)
+        self.starved = False  # M7 E1: last tick's gas_starved, for the log line on each change
 
     def gateway_upkeep(self) -> None:
         """Once Warp Gate is researched, ares's SpawnController makes nothing while any ready,
@@ -245,19 +254,14 @@ class Production:
         others = sum(count(unit_type_id=u) for u in shares if u not in (UnitTypeId.ARCHON, UnitTypeId.HIGHTEMPLAR))
         return shares, others, count(unit_type_id=UnitTypeId.ARCHON)
 
-    def templar_behavior(self) -> Optional["Behavior"]:
-        """M7 K3: Templar up to `templar_floor`, before the mix's SpawnController (as Observers are)."""
+    def templar_missing(self) -> int:
+        """M7 K3: Templar short of `templar_floor` (0 without the Templar Archives)."""
         bot = self.bot
         if not bot.tech_ready_for_unit(UnitTypeId.HIGHTEMPLAR):
-            return None
+            return 0
         shares, others, archons = self._mix_counts()
         have = bot.mediator.get_own_unit_count(unit_type_id=UnitTypeId.HIGHTEMPLAR)
-        missing = templar_floor(shares, others, archons, have) - have
-        if missing <= 0:
-            return None
-        return SpawnController(
-            {UnitTypeId.HIGHTEMPLAR: {"proportion": 1.0, "priority": 0}}, freeflow_mode=True, maximum=missing
-        )
+        return max(0, templar_floor(shares, others, archons, have) - have)
 
     def gateway_mix(self, comp: dict[UnitTypeId, dict[str, float]]) -> dict[UnitTypeId, dict[str, float]]:
         """The mix's Gateway units for freeflow spending (defense, a mineral float), without High
@@ -303,12 +307,14 @@ class Production:
         comp = self.composition()  # full mix: ProductionController techs toward all of it
         buildable = self.composition(tech_ready_only=True)
         out: list["Behavior"] = []
+        upgrades: list[UpgradeId] = []
         if not plan.hold_tech and bot.time >= UPGRADES_START_S:
             # M7 K1: each research building works through its own chain; with auto tech-up off an
             # upgrade never starts a building (given a whole list, UpgradeController once started
             # Forge, Twilight and Robo Bay at 5:00 in a Hard-Zerg loss). The buildings come from
             # their timed steps (constants.TECH_STEPS) or the unit mix
-            for upgrade in self._next_upgrades(plan.allow_forge):
+            upgrades = self._next_upgrades(plan.allow_forge)
+            for upgrade in upgrades:
                 out.append(UpgradeController([upgrade], base_location=bot.start_location, auto_tech_up_enabled=False))
         observers = len(bot.mediator.get_own_army_dict[UnitTypeId.OBSERVER]) + bot.unit_pending(
             UnitTypeId.OBSERVER
@@ -321,15 +327,31 @@ class Production:
                     maximum=OBSERVER_COUNT - observers,
                 )
             )
-        if (templar := self.templar_behavior()) is not None:
-            out.append(templar)
+        templar = self.templar_missing()
+        if templar > 0:
+            # M7 K3: Templar up to the floor, before the mix's SpawnController (as Observers are)
+            out.append(
+                SpawnController(
+                    {UnitTypeId.HIGHTEMPLAR: {"proportion": 1.0, "priority": 0}}, freeflow_mode=True, maximum=templar
+                )
+            )
         out.append(SpawnController(buildable))
         # ares's SpawnController stops at the first unit it can't afford (ares-sc2
         # behaviors/macro/spawn_controller.py), so while it saves gas for a Colossus or Immortal no
         # Gateway unit is made. Spend a mineral float on the Gateway share of the mix meanwhile.
+        # M7 E1 (D28): while gas-starved, on Zealots only, so the gas bank can grow (the float's
+        # Stalkers took every 50 gas, and Templar, Storm and Blink waited for gas until 200 supply)
+        wanted_gas = [bot.calculate_cost(u).vespene for u in buildable] + [bot.calculate_cost(u).vespene for u in upgrades]
+        if templar > 0:
+            wanted_gas.append(bot.calculate_cost(UnitTypeId.HIGHTEMPLAR).vespene)
+        starved = gas_starved(bot.minerals, bot.vespene, [g for g in wanted_gas if g > 0])
+        if starved != self.starved:
+            self.starved = starved
+            logger.info(f"PRODUCTION {bot.time_formatted} gas-starved {'on: the float makes Zealots' if starved else 'off'} ({bot.minerals} minerals, {bot.vespene} gas)")
         if bot.minerals >= MINERAL_FLOAT_BANK:
-            gateway_mix = self.gateway_mix(buildable)
-            if gateway_mix:
+            if starved:
+                out.append(SpawnController({UnitTypeId.ZEALOT: {"proportion": 1.0, "priority": 0}}, freeflow_mode=True))
+            elif gateway_mix := self.gateway_mix(buildable):
                 out.append(SpawnController(gateway_mix, freeflow_mode=True))
         if (schedule_finished or bot.time >= PRODUCTION_CONTROLLER_START_S) and not plan.hold_tech:
             out.append(

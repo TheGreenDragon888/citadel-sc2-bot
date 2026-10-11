@@ -338,7 +338,7 @@ ARMY_PRIORITY: dict[UnitTypeId, int] = {
 }
 OBSERVER_COUNT: int = 2  # §4.5.1 "Observer 2 fixed"
 # At this many banked minerals, also warp in Gateway units without waiting on higher-priority
-# units that are short of gas
+# units that are short of gas; M7 E1 (D28): only Zealots while gas-starved (production.gas_starved)
 MINERAL_FLOAT_BANK: int = 700
 # An unpowered idle Gateway blocks ares's SpawnController after Warp Gate: a Pylon within this
 # many tiles of it, re-ordered at most this often
