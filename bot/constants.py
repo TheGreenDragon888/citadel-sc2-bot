@@ -343,14 +343,18 @@ ARMY_COMPOSITION_PCT: dict[str, dict[UnitTypeId, float]] = {
 # the enemy air share at AIR_SWITCH_SHARE: the Stalker share rises by AIR_SWITCH_STALKER_PCT, nothing
 # else) -> capital air (CAPITAL_AIR ACTIVE: the Colossus share drops to CAPITAL_AIR_COLOSSUS_PCT, the
 # (Blink) Stalker share rises by CAPITAL_AIR_STALKER_PLUS_PCT and CAPITAL_AIR_ADD_PCT is added; vs P
-# with Carriers seen, Tempests too). TUNE: provisional, from §4.5.1's expectations until E0 sets them
+# with Carriers seen, more Tempests). The air units are E0's (VERIFY_NOTES "E0"): equal-value groups,
+# 5 runs each, wins of 5. TUNE
 AIR_SWITCH_STALKER_PCT: float = 30.0
 CAPITAL_AIR_COLOSSUS_PCT: float = 5.0
 CAPITAL_AIR_STALKER_PLUS_PCT: float = 15.0
 CAPITAL_AIR_ADD_PCT: dict[str, dict[UnitTypeId, float]] = {
-    "Protoss": {UnitTypeId.VOIDRAY: 25.0},  # vs Tempests, Void Rays first (§4.5.1)
-    "Terran": {UnitTypeId.TEMPEST: 25.0},  # vs Battlecruisers, Tempests
-    "Zerg": {UnitTypeId.TEMPEST: 25.0},  # vs Brood Lords, Tempests
+    # vs kiting Tempests: Stalkers + Tempests 5/5, Tempests 3/5, Void Rays 0/5 (not §4.5.1's Void Rays)
+    "Protoss": {UnitTypeId.TEMPEST: 25.0},
+    # vs Battlecruisers: Tempests 5/5 without a loss
+    "Terran": {UnitTypeId.TEMPEST: 25.0},
+    # vs Brood Lords + Corruptors: Void Rays 5/5 without a loss in 11 s (Tempests too, in 38 s)
+    "Zerg": {UnitTypeId.VOIDRAY: 25.0},
 }
 CAPITAL_VS_CARRIER_TEMPEST_PCT: float = 15.0
 # ares SpawnController priority (0 = highest)

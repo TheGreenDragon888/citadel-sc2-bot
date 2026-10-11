@@ -2583,3 +2583,25 @@ No crashes and no caught errors; every `ROW` has `log=ok`, `err=0` and `raa=0`.
 - The air switch turned on in Zerg Air games (15 times in the batch). Zealots per launch went from 17.9 to 14.7 (Phase 2: 9.6). The float still makes Zealots while the enemy army isn't air-heavy (early, and between air waves).
 - Forced B went from 8/10 to 7/10; the run-to-run spread on the same code is about ±2 wins.
 - VeryHard Zerg's loss is game 3 (Ley Lines), as on every commit since M5.
+
+### E0: equal-value groups against capital ships (staged, run 2026-10-11)
+
+`scripts/test_air_counters.py` on `233d4ac`, PylonAIE_v4, 5 runs per pair (game seeds 1001-1005), both sides with every upgrade. The enemy (scripted) comes at our defensive position: 6 Tempests that kite (step back while reloading), 4 Battlecruisers, 4 Brood Lords + 4 Corruptors, or 8 Void Rays. Our candidate group gets the same game-data value (whole units), and after every army step FIGHT intent toward the enemy group's centre, so it chases and fights with Citadel's micro (kiting, Blink, E3's Tempest / Void Ray targeting and Prismatic Alignment). The mass-Void-Ray lane was killed for memory after 23 games (one test process grew to 1.8 GB); its last 7 games ran in fresh processes.
+
+Wins of 5, then mean value traded (killed / lost; 99 = nothing lost):
+
+| Candidate | vs Tempests (kiting) | vs Battlecruisers | vs Brood Lords + Corruptors | vs mass Void Rays |
+|---|---|---|---|---|
+| Void Rays | **0/5**, 0.25 | 4/5, 1.67 | **5/5, 99** (11 s) | 5/5, 2.26 |
+| Tempests | 3/5, 2.10 | **5/5, 99** | **5/5, 99** (38 s) | **0/5**, 0.51 |
+| Stalkers (no Blink) | 0/5, 0.59 | 5/5, 1.61 | 0/5, 0.40 | 5/5, 2.21 |
+| Blink Stalkers | 2/5, 1.28 | 5/5, 5.60 | 3/5, 2.05 | **5/5, about 83** (lost 0-1 Stalker) |
+| Stalkers + Void Rays | 3/5, 1.70 | 5/5, 6.93 | 5/5, 32.6 | 5/5, 2.40 |
+| Stalkers + Tempests | **5/5, 2.25** | 5/5, 4.00 | 5/5, 3.30 | 5/5, 1.86 |
+
+What it sets (E3, `constants.CAPITAL_AIR_ADD_PCT`):
+- **Vs Protoss (Tempests): Tempests, not §4.5.1's expected Void Rays.** Void Rays lost every game to kiting Tempests; Stalkers + Tempests won every game. With the mix's Stalkers that is the Stalkers + Tempests group.
+- **Vs Terran (Battlecruisers): Tempests**: no loss in any game.
+- **Vs Zerg (Brood Lords + Corruptors): Void Rays**: no loss, and done in 11 s against the Tempests' 38 s. Corruptors' bonus is against massive units, which Tempests are and Void Rays aren't.
+- **Mass Void Rays (D13, a user decision):** Blink Stalkers beat them with at most one loss; Tempests lost every game. So the numbers say Void Ray masses should not trigger the Tempest / Void Ray response: the air switch's Stalker share is the better answer. Left as it is (Void Rays aren't capital ships, so they only raise the Stalker share); for the user to confirm.
+- Not tested: Carriers (not an E0 case); vs P with a Carrier seen the mix adds more Tempests, per §4.5.1.
