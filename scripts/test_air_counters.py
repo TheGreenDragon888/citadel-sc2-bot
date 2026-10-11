@@ -18,9 +18,11 @@ Our candidates get the enemy group's game-data value (minerals + gas), whole uni
 `voidray`, `tempest`, `stalker` (Blink micro off), `blink_stalker`, `stalker_voidray` and
 `stalker_tempest` (half the value each). No Archons (D10).
 
-The test measures the fight, not the decision to take it: home defense is forced to engage
-(`army.home_engages` patched to True), so our units fight with Citadel's micro (kiting, Blink, the
-E3 Tempest / Void Ray targeting). Each game is watched WATCH_S or until one side has nothing left.
+The test measures the fight, not the decision to take it: after every army step our candidate units
+get FIGHT intent toward the enemy group's centre (what a launched attack gives them), and home
+defense is forced to engage (`army.home_engages` patched to True), so they chase and fight with
+Citadel's micro (kiting, Blink, the E3 Tempest / Void Ray targeting). Without it, kiting Tempests
+left the home-threat radius and our units walked back to their hold point. Each game is watched WATCH_S or until one side has nothing left.
 Per game: the winner (the side with units left; at the time limit, the side that lost the smaller
 share of its value), value killed and lost. The summary per case ranks the candidates by wins, then
 by value traded (killed / lost). Results go to VERIFY_NOTES and set the E3 capital-air shares.
@@ -45,6 +47,7 @@ from sc2.player import Bot  # noqa: E402
 from sc2.position import Point2  # noqa: E402
 
 import bot.army.army as army_module  # noqa: E402
+from bot.army.army import FIGHT  # noqa: E402
 from bot.main import CitadelBot  # noqa: E402
 from scripts.run_matches import run_bot_game  # noqa: E402
 
@@ -154,7 +157,23 @@ class StagedCitadel(CitadelBot):
                 self.enemy_bot.attack_point = self.army.anchor
                 self.watch_from = self.time
                 self.phase = "watch"
+                step = self.army.step
+
+                def committed_step(iteration: int, guarded: bool = False) -> None:
+                    step(iteration, guarded)
+                    left = [u for u in self.enemy_bot.units if u.tag in self.theirs]
+                    if left:
+                        target = Point2.center([u.position for u in left])
+                        for tag in self.ours:
+                            self.army.intents[tag] = (FIGHT, target)
+
+                self.army.step = committed_step
             return
+        if os.environ.get("E0_DEBUG") and iteration % 22 == 0:
+            for u in self.units:
+                if u.tag in self.ours:
+                    near = min((e.position.distance_to(u.position) for e in self.enemy_bot.units if e.tag in self.theirs), default=-1)
+                    print(f"E0DBG {self.time_formatted} {u.type_id.name} hp={u.health + u.shield:.0f} orders={[ (o.ability.id.name, str(o.target)[:12]) for o in u.orders[:1]]} cd={u.weapon_cooldown:.1f} near={near:.1f} intent={self.army.intents.get(u.tag)}", flush=True)
         alive_own = {u.tag for u in self.units}
         alive_enemy = {u.tag for u in self.enemy_bot.units}
         own_left = [t for t in self.ours if t in alive_own]
