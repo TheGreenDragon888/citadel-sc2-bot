@@ -1664,6 +1664,15 @@ API checks and Citadel's choices for M7 (`docs/M7_PLAN.md`). Checked before the 
   - Staged tests with Zerglings must spawn them after 3:00. ares raises its ling-rush flag before 2:30 with 3 Zerglings near our main, before 3:00 with 8 anywhere, and before 1:30 with 5 (`intel_manager.py:409-435`). Citadel's own early-ling flag runs to 2:20 (`EARLY_LINGS_UNTIL_S`). The 12-pool plan then pulled the army back to the main ramp, and the first `storm` run had no fight.
   - **Blink counting** (found in the first VeryHard Zerg smoke game, 330 "finish" blinks): most finish blinks were 1-4 tile hops onto units just out of reach, and many never went off, because the next step's attack order replaced them. Counted per order, every retry counted again. Now a blink counts only when the Stalker's Blink goes on cooldown within `BLINK_CONFIRM_S` of the order, and a finish blink needs a gain of at least `BLINK_FINISH_MIN_GAIN` (3).
 
+- **Phase 4 VERIFY items** (ares `8730865`; one-off debug games on PylonAIE_v4, Citadel against a scripted Zerg):
+  - **Weapons in game data** (`game_data.units[...]._proto.weapons`):
+    - No weapon entries: Carrier, Battlecruiser, Void Ray. So E2 needs an explicit capital list, as planned.
+    - Tempest: air range 13, damage 30; ground range 10, damage 40.
+    - Brood Lord: one ground weapon, range 10. Mothership: one weapon, range 6.5.
+  - **Prismatic Alignment** is `AbilityId.EFFECT_VOIDRAYPRISMATICALIGNMENT` (2393). It is in a Void Ray's `abilities`. Cast, it puts `BuffId.VOIDRAYSWARMDAMAGEBOOST` on the Void Ray and drops out of `abilities` while on cooldown: a membership test, as for Blink and Storm.
+  - **`BROODLORDCOCOON` in ares's cache:** two Corruptors ordered `MORPHTOBROODLORD_BROODLORD` showed as `BROODLORDCOCOON` in `mediator.get_cached_enemy_army` (and as visible enemy units) for about 20 s, then as `BROODLORD`. Brood Lord attacks then add `BROODLING` units to the cache. The morph needs a ready Greater Spire, 150/150 and 2 free supply each; the first try failed for supply.
+  - **ares ProductionController** (`behaviors/macro/production_controller.py:86-235`): for each unit in the mix, highest priority first, it runs `TechUp(unit)`. `TechUp` builds the requirements in `dicts/unit_tech_requirement.py`: Stargate + Fleet Beacon for the Tempest (l.172-176), a Stargate for the Void Ray, and the Templar Archives for the High Templar (l.72-76). Then it adds the unit's production building while that unit is under its share. The cap is `max_production_structures` (Citadel passes `MAX_PRODUCTION_STRUCTURES`, 12), per building type. So a Void Ray or Tempest share alone gets Stargates and, for Tempests, the Fleet Beacon.
+
 ## M7 baseline
 
 Bot code `8036973` (M6, unchanged by the M7 kickoff), run on 2026-10-06 in the cloud container:
