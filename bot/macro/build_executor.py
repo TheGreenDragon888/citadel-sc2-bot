@@ -29,6 +29,7 @@ from bot.constants import (
     NATURAL_RADIUS,
     OPENER_ESSENTIALS,
     OPENER_SCHEDULES,
+    TECH_MIN_BASES,
     TECH_STEPS,
     ScheduleItem,
 )
@@ -96,6 +97,21 @@ TECH_ITEMS: frozenset = frozenset(
         UnitTypeId.TEMPLARARCHIVE,
     }
 )
+# M7 D29: research buildings that wait for TECH_MIN_BASES finished Nexuses (outside an opener)
+TECH_WAIT_BUILDINGS: frozenset = frozenset({UnitTypeId.TWILIGHTCOUNCIL, UnitTypeId.TEMPLARARCHIVE})
+
+
+def tech_waits(building: UnitTypeId, bases: int, part_of_opener: bool = False, min_bases: int = TECH_MIN_BASES) -> bool:
+    """M7 D29: a Twilight Council or Templar Archives (its timed step, the tech-up toward Templar,
+    or research there) waits while fewer than `min_bases` of our Nexuses are finished; an opener's
+    own items don't (pure)."""
+    return building in TECH_WAIT_BUILDINGS and not part_of_opener and bases < min_bases
+
+
+def bases_ready(bot: "AresBot") -> int:
+    return len(bot.townhalls.ready)
+
+
 # structures and upgrades that need a Forge; §4.2 one-base delays the Forge
 NEEDS_FORGE: frozenset = frozenset(
     {
@@ -189,6 +205,8 @@ class BuildExecutor:
         if item.type_id in NEEDS_FORGE and not plan.allow_forge:
             return False
         if item.type_id in TECH_ITEMS and plan.hold_tech:
+            return False
+        if tech_waits(item.type_id, bases_ready(bot), item.part_of_opener):
             return False
         if item.where == "nat" and plan.hold_wall_gap:
             return False  # the probe couldn't get past our own gap holder

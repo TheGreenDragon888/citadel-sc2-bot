@@ -40,7 +40,7 @@ from bot.constants import (
 )
 from bot.geometry import in_map
 from bot.intel.enemy_mix import EnemyMixTracker
-from bot.macro.build_executor import race_key
+from bot.macro.build_executor import bases_ready, race_key, tech_waits
 
 if TYPE_CHECKING:
     from ares import AresBot
@@ -270,11 +270,14 @@ class Production:
 
     def _next_upgrades(self, allow_forge: bool) -> list[UpgradeId]:
         """M7 K1: one upgrade per research building that stands ready (the Forge's only while the
-        DefensePlan allows the Forge, §4.2 one-base)."""
+        DefensePlan allows the Forge, §4.2 one-base; the Twilight's and Templar Archives' only on
+        TECH_MIN_BASES, D29)."""
         bot = self.bot
         chains = dict(UPGRADE_CHAINS[race_key(bot)])
         if not allow_forge:
             chains.pop(UnitTypeId.FORGE, None)
+        bases = bases_ready(bot)
+        chains = {b: chain for b, chain in chains.items() if not tech_waits(b, bases)}  # M7 D29
         ready = {b for b in chains if any(s.is_ready for s in bot.mediator.get_own_structures_dict[b])}
         progress = {u: bot.already_pending_upgrade(u) for chain in chains.values() for u in chain}
         return next_upgrades(chains, ready, progress)
@@ -305,6 +308,11 @@ class Production:
         while the DefensePlan delays the Forge (§4.2 one-base)."""
         bot = self.bot
         comp = self.composition()  # full mix: ProductionController techs toward all of it
+        if UnitTypeId.HIGHTEMPLAR in comp and tech_waits(UnitTypeId.TEMPLARARCHIVE, bases_ready(bot)):
+            # M7 D29: on one base no tech-up toward Templar (it adds a Twilight and Templar Archives)
+            rest = {u: info for u, info in comp.items() if u != UnitTypeId.HIGHTEMPLAR}
+            total = sum(info["proportion"] for info in rest.values()) or 1.0
+            comp = {u: {**info, "proportion": info["proportion"] / total} for u, info in rest.items()}
         buildable = self.composition(tech_ready_only=True)
         out: list["Behavior"] = []
         upgrades: list[UpgradeId] = []

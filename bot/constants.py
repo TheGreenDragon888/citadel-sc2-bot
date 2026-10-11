@@ -382,6 +382,11 @@ UPGRADE_CHAINS: dict[str, dict[UnitTypeId, Tuple[UpgradeId, ...]]] = {
 FORGE_AT_S: float = 300.0
 TWILIGHT_AT_S: dict[str, float] = {"Terran": 330.0, "Protoss": 330.0, "Zerg": 330.0}
 TEMPLAR_ARCHIVES_AT_S: float = 480.0
+# M7 D29 (user decision): the timed Twilight Council / Templar Archives steps, ProductionController's
+# tech-up toward Templar and the research at those buildings wait while fewer than TECH_MIN_BASES of
+# our Nexuses are finished: on one base the units need the minerals (VERIFY_NOTES "Phase 3": Terran
+# game 3 and the cannon-rush losses)
+TECH_MIN_BASES: int = 2
 TECH_STEPS: Tuple[ScheduleItem, ...] = (
     ScheduleItem(FORGE_AT_S, "structure", UnitTypeId.FORGE, part_of_opener=False),
     *(

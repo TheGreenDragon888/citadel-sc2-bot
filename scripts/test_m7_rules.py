@@ -61,6 +61,7 @@ from bot.intel.detectors import (  # noqa: E402
     proxy_production_check,
 )
 from bot.intel.scout_planner import main_rescout_due, observer_trip_ok, trip_seconds  # noqa: E402
+from bot.macro.build_executor import tech_waits  # noqa: E402
 from bot.macro.production import gas_starved, next_upgrades, templar_floor, unit_proportions  # noqa: E402
 from bot.army.templar import TemplarInfo, behind, morph_pairs  # noqa: E402
 from bot.intel.enemy_mix import EnemyMix, MixEntry, fade, measure, switch  # noqa: E402
@@ -366,6 +367,12 @@ case("floor: vs Z, Archons enough: no partner", templar_floor, _Z, 40, 10, 5, 4,
 case("floor: vs P, no Archon share: none", templar_floor, _P, 20, 0, 1, 4, expected=0)
 case("floor: vs P with the Zealot switch, an unpaired Templar gets a partner", templar_floor, {**_P, UnitTypeId.ARCHON: 10}, 20, 0, 1, 4,
      expected=2)
+case("one-base wait: Twilight on one base waits", tech_waits, UnitTypeId.TWILIGHTCOUNCIL, 1, False, 2, expected=True)
+case("one-base wait: Templar Archives on one base waits", tech_waits, UnitTypeId.TEMPLARARCHIVE, 1, False, 2, expected=True)
+case("one-base wait: Twilight on two bases goes", tech_waits, UnitTypeId.TWILIGHTCOUNCIL, 2, False, 2, expected=False)
+case("one-base wait: an opener's own Twilight goes", tech_waits, UnitTypeId.TWILIGHTCOUNCIL, 1, True, 2, expected=False)
+case("one-base wait: the Forge goes on one base", tech_waits, UnitTypeId.FORGE, 1, False, 2, expected=False)
+case("one-base wait: the Robotics Bay goes on one base", tech_waits, UnitTypeId.ROBOTICSBAY, 1, False, 2, expected=False)
 case("gas-starved: a bank and no gas for a Colossus", gas_starved, 3000, 120, [50.0, 100.0, 200.0], 700, expected=True)
 case("gas-starved: enough gas for everything wanted", gas_starved, 3000, 250, [50.0, 100.0, 200.0], 700, expected=False)
 case("gas-starved: no mineral bank", gas_starved, 500, 0, [50.0, 200.0], 700, expected=False)
