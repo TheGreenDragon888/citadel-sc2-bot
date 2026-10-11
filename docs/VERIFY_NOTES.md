@@ -2520,3 +2520,40 @@ The rerun loss (11:51) shows what the Phase 3 code does on one base. The natural
 **D28 (gas-starved float):** every batch logs `PRODUCTION … gas-starved on/off`. Vs Z the float now leaves gas for Templar, Storm and Blink (Storm 6:55-9:11; before D28: 6:59-13:01, and in a smoke game not before 12:36). Minerals still bank (4,000-7,000 by 10:00 in long Zerg games): production capacity, not gas, is the limit there (E1's 4th base and sink are Phase 4).
 
 No crashes and no caught errors; every `ROW` has `log=ok`, `err=0` and `raa=0`.
+
+### Phase 3 re-run with D29 (user decision 2026-10-11), run 2026-10-11
+
+**Code under test:** `f2084c6` (`26d98a4` plus D29: the timed Twilight Council / Templar Archives, the tech-up toward Templar and research at those buildings wait for 2 finished Nexuses). Same batches, seeds and 4-at-a-time load as the `26d98a4` run, from a worktree pinned at `f2084c6`; replays in `replays/m7-p3d-*`. A container restart at about 07:10 stopped four batches part-way. They were resumed with `--start` and the same seeds and opponent ids: paired A from game 4, Zerg Air from 9, 12 pool from 4, VeryHard Protoss from game 1 (no game had finished).
+
+**Summary**
+
+| Criterion | Result |
+|---|---|
+| Blink by its schedule time in every P/T game; Charge then Blink vs Z | **PASS**: vs T Blink 6:11-6:50 in all 10; vs P 6:07-6:45 in all 10; vs Z Charge then Blink in all 9 won VeryHard games. On one base the Twilight now waits: VeryHard Zerg game 5 placed it at 7:54 (Blink 10:40) |
+| Storms cast in VeryHard Zerg games | **PASS**: 2-21 Storms in each of the 9 won games. Zerg Air: Storms in 9 of 10 |
+| Archons vs bio-heavy Terran and Zealot-heavy Protoss; none from the air switch | **PASS**: VeryHard Terran 2-6 in all 10; VeryHard Protoss 1-6 in 7 of 10 (the air switch isn't built, E3) |
+| VeryHard Terran and Protoss × 10 at 10/10 | **PASS: 10/10 and 10/10.** Terran game 3 (Ley Lines; lost on both earlier Phase 3 runs) won at 11:31; Protoss game 8 (Magannatha; lost on Phase 2's code and both earlier runs) won at 11:37 |
+| Air batches (same seeds) better than Phase 2 | **Protoss and Terran Air: PASS. Zerg Air: NOT MET** (9/10 at 0.58, Phase 2 10/10 at 0.25; below) |
+| VeryHard Zerg × 10 at least 9/10 | **PASS**: 9/10 (game 3, Ley Lines, lost on every commit since M5) |
+| M1 Hard × 10 | **PASS**: 10/10 |
+| M2/M3 cheese × 10 | **PASS**: proxy rax 10/10, cannon rush 8/10, 12 pool 10/10, worker rush 10/10. Correct flag 40/40; no scout lost before 4:00 in 9-10 of each |
+| M5 staged counterattack 7/7 | **PASS** |
+
+**Air:**
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Phase 2, Protoss free / A / B | 7 / 9 / 7 | 0.93 / 0.64 / 0.89 | 13 / 15 / 14 | 5 / 5 / 5 | 44 (21) / 13 (6) / 42 (14) | 48 / 22 / 70 | 663 / 474 / 626 |
+| **D29, Protoss free / A / B** | **9 / 9 / 8** | **0.46 / 0.51 / 0.58** | 11 / 14 / 14 | 2 / 4 / 6 | 32 (11) / 18 (5) / 23 (6) | 9 / 49 / 42 | 265 / 413 / 399 |
+| Terran Air, Phase 2 / D29 | 10 / 10 | 0.47 / **0.25** | 10 / 10 | 0 / 0 | 0 / 2 (0) | 0 / 0 | 180 / 117 |
+| Zerg Air, Phase 2 / D29 | 10 / **9** | 0.25 / **0.58** | 11 / 15 | 0 / 2 | 0 / 16 (3) | 0 / 38 | 101 / 309 |
+
+**Zerg Air, why it is worse.** The loss is game 2 (Ultralove, 26:35) to Brood Lords, Corruptors, Hydralisks and Roaches: two retreats (15:22, 17:47), then the army was caught away from home at 20:37. Zealots, which can't hit air, averaged 17.9 per launch in this batch against 9.6 in Phase 2's. D28's float makes Zealots while gas-starved (logged "gas-starved on" 32 times in that game). The `26d98a4` run, which already had D28, was at 10/10 with ratio 0.39. The air switch that shifts the mix toward Stalkers against air (E3) is Phase 4.
+
+**Offline tests:** `test_m7_rules` 176/176 (adds D29's `tech_waits`), `test_attack_decision` 23/23, `test_threat_flags` 20/20, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38. `check_game_log.py`: `RESULT PASS`, 200 records, 0 malformed, `./data` 516 KB.
+
+**Staged tests** (`f2084c6`): `test_outranged.py` 3/3 PASS, `test_engagement.py` PASS, `test_counterattack.py` 7/7, `test_templar.py` 5/5 PASS (storm: 3 Storms, none on our units, 5 enemy units inside them). `test_blink.py` PASS: Tempests 15 blink-ins, though this run traded the same as without Blink (1 lost, 2 of 3 Tempests killed, both games); Stalkers 19 blink-backs, 0 lost (4 without).
+
+**Cannon rush:** games 2 (Ultralove, natural variant, 11:35) and 9 (Ultralove, main variant, 8:04) lost, both new (`26d98a4` lost games 1 and 8). Correct flag in both.
+
+No crashes and no caught errors; every `ROW` has `log=ok`, `err=0` and `raa=0`.
