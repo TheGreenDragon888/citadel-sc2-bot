@@ -357,7 +357,8 @@ class Production:
             self.starved = starved
             logger.info(f"PRODUCTION {bot.time_formatted} gas-starved {'on: the float makes Zealots' if starved else 'off'} ({bot.minerals} minerals, {bot.vespene} gas)")
         if bot.minerals >= MINERAL_FLOAT_BANK:
-            if starved:
+            # M7 D30: not vs an air army (Zealots can't hit air); the mix's Gateway units then, as before D28
+            if starved and not self.mix.air.on:
                 out.append(SpawnController({UnitTypeId.ZEALOT: {"proportion": 1.0, "priority": 0}}, freeflow_mode=True))
             elif gateway_mix := self.gateway_mix(buildable):
                 out.append(SpawnController(gateway_mix, freeflow_mode=True))

@@ -962,3 +962,8 @@ ARCHON_VS_ZEALOT_PCT: float = 10.0
 ZEALOT_SHARE_FOR_ARCHONS: float = 0.3
 MIX_SWITCH_HOLD_S: float = 60.0
 MIX_FRESH_S: float = 60.0
+# §4.5.1 air switch threshold: enemy air supply share of their army, and its hold time (TUNE). M7
+# D30 uses it ahead of E3: while on, the gas-starved float makes the mix's Gateway units, not only
+# Zealots (Zealots can't hit air; Zerg Air on f2084c6 went 9/10 at value ratio 0.58)
+AIR_SWITCH_SHARE: float = 0.30
+AIR_SWITCH_HOLD_S: float = 60.0

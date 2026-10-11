@@ -64,7 +64,7 @@ from bot.intel.scout_planner import main_rescout_due, observer_trip_ok, trip_sec
 from bot.macro.build_executor import tech_waits  # noqa: E402
 from bot.macro.production import gas_starved, next_upgrades, templar_floor, unit_proportions  # noqa: E402
 from bot.army.templar import TemplarInfo, behind, morph_pairs  # noqa: E402
-from bot.intel.enemy_mix import EnemyMix, MixEntry, fade, measure, switch  # noqa: E402
+from bot.intel.enemy_mix import EnemyMix, MixEntry, ShareSwitch, fade, measure, switch  # noqa: E402
 
 # (name, function, args, kwargs, expected)
 CASES: list[tuple[str, Callable, tuple, dict, Any]] = []
@@ -326,6 +326,20 @@ case("mix: 8 Zealots + 4 Stalkers", _mix, ("ZEALOT", 16.0, True, True, 0.0), ("S
      expected=EnemyMix(24.0, 16 / 24, 16 / 24))
 case("mix: old Zealots fade to half", _mix, ("ZEALOT", 16.0, True, True, 90.0), ("STALKER", 8.0, False, True, 0.0),
      expected=EnemyMix(16.0, 0.5, 0.5))
+case("mix: air share by supply (Brood Lords + Corruptors over Hydras)", _mix,
+     ("BROODLORD", 16.0, True, True, 0.0, True), ("CORRUPTOR", 8.0, True, True, 0.0, True), ("HYDRALISK", 8.0, True, True, 0.0, False),
+     expected=EnemyMix(32.0, 1.0, 0.0, 24 / 32))
+case("mix: Overlords can't attack: no air share", _mix, ("OVERLORD", 0.0, True, False, 0.0, True), ("ZERGLING", 4.0, True, True, 0.0, False),
+     expected=EnemyMix(4.0, 1.0, 0.0, 0.0))
+
+
+def _air_switch(steps):  # noqa: E302
+    sw = ShareSwitch(0.30, 60.0)
+    return [sw.update(share, now) for share, now in steps]
+
+
+case("air switch: on at 30%, held 60 s below, then off", _air_switch,
+     [(0.35, 100.0), (0.10, 110.0), (0.10, 169.0), (0.10, 170.0)], expected=[True, True, True, False])
 case("switch: on at the threshold", switch, False, 0.5, 0.5, None, 100.0, 60.0, expected=(True, None))
 case("switch: stays off below", switch, False, 0.4, 0.5, None, 100.0, 60.0, expected=(False, None))
 case("switch: below, the hold starts", switch, True, 0.4, 0.5, None, 100.0, 60.0, expected=(True, 100.0))
