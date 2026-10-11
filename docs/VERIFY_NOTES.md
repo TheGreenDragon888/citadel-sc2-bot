@@ -2566,3 +2566,20 @@ No crashes and no caught errors; every `ROW` has `log=ok`, `err=0` and `raa=0`.
 **Cannon rush:** games 2 (Ultralove, natural variant, 11:35) and 9 (Ultralove, main variant, 8:04) lost, both new (`26d98a4` lost games 1 and 8). Correct flag in both.
 
 No crashes and no caught errors; every `ROW` has `log=ok`, `err=0` and `raa=0`.
+
+### D30 (no Zealot-only float against an air army), Air batches re-run 2026-10-11
+
+**Code under test:** `7c6d8dc` (`f2084c6` plus D30). Same seeds and openers, 4 at a time; replays in `replays/m7-d30-*`.
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Zerg Air: Phase 2 / `f2084c6` / **D30** | 10 / 9 / **10** | 0.25 / 0.58 / **0.28** | 11 / 15 / 12 | 0 / 2 / 0 | 0 / 16 (3) / 0 | 0 / 38 / 2 | 101 / 309 / 180 |
+| Protoss Air free: `f2084c6` / **D30** | 9 / **10** | 0.46 / **0.42** | 11 / 19 | 2 / 7 | 32 (11) / 5 (0) | 9 / 31 | 265 / 329 |
+| Protoss Air forced A | 9 / **10** | 0.51 / **0.35** | 14 / 14 | 4 / 4 | 18 (5) / 2 (0) | 49 / 12 | 413 / 267 |
+| Protoss Air forced B | 8 / **7** | 0.58 / **0.62** | 14 / 17 | 6 / 8 | 23 (6) / 28 (8) | 42 / 85 | 399 / 421 |
+| Terran Air | 10 / **10** | 0.25 / **0.21** | 10 / 10 | 0 / 0 | 2 (0) / 2 (0) | 0 / 0 | 117 / 103 |
+| VeryHard Zerg | 9 / **9** | | | | | | |
+
+- The air switch turned on in Zerg Air games (15 times in the batch). Zealots per launch went from 17.9 to 14.7 (Phase 2: 9.6). The float still makes Zealots while the enemy army isn't air-heavy (early, and between air waves).
+- Forced B went from 8/10 to 7/10; the run-to-run spread on the same code is about ±2 wins.
+- VeryHard Zerg's loss is game 3 (Ley Lines), as on every commit since M5.
