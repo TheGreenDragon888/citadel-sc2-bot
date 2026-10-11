@@ -21,6 +21,8 @@ Plans (§4.2):
   main; hold the ramp top; Adepts/Zealots (Stalkers vs Reapers); chrono Gateways.
 - ONE_BASE_ALLIN: Batteries at the natural (main if none); all Gateways producing; no 3rd Nexus,
   no Forge; hold the natural; Immortals first vs Roaches.
+- AIR_HARASS (M7 E2): the Forge now, then a Pylon, Cannon and Battery at every mineral line
+  (static_defense.py); satisfied, so no more forced builds, while every line has a finished Cannon.
 - UNKNOWN_AGGRO (§4.4 row 15, M3): one more Battery at the natural (main if none), no 3rd Nexus;
   the scout planner re-scouts with the first Adept/Stalker.
 - CANNON_RUSH from §4.4 row 3's Forge-first flag alone (M3): `FORGE_FIRST_BANK` minerals stay
@@ -35,9 +37,12 @@ from ares.dicts.structure_to_building_size import STRUCTURE_TO_BUILDING_SIZE
 from loguru import logger
 from sc2.ids.unit_typeid import UnitTypeId
 from sc2.position import Point2
+from sc2.unit import Unit
 
 from bot.constants import (
     ARMY_HOLD_LEASH,
+    MINERAL_LINE_RADIUS,
+    MINERAL_LINE_SEARCH,
     CANNON_COVER_EXTRA,
     CANNON_RUSH_RADIUS,
     CANNON_SIEGE_RESERVE_UNITS,
@@ -78,6 +83,7 @@ PLAN_ORDER: tuple[Threat, ...] = (
     Threat.POOL_12,
     Threat.PROXY,
     Threat.ONE_BASE_ALLIN,
+    Threat.AIR_HARASS,  # M7 E2
     Threat.UNKNOWN_AGGRO,  # last: its Battery is one more than the others ask for
 )
 # units that count toward "N units out" (§4.2); Observers and Oracles don't hold a ramp
@@ -116,6 +122,16 @@ def safe_hold_point(
     return best
 
 
+def mineral_lines(bot: "AresBot") -> list[tuple[Unit, Point2]]:
+    """M7 E2: each ready Nexus with minerals within MINERAL_LINE_RADIUS, and those minerals' centre."""
+    out = []
+    for th in bot.townhalls.ready:
+        minerals = [m.position for m in bot.mineral_field if m.distance_to(th) <= MINERAL_LINE_RADIUS]
+        if minerals:
+            out.append((th, Point2.center(minerals)))
+    return out
+
+
 @dataclass
 class DefensePlan:
     active: set[Threat] = field(default_factory=set)
@@ -144,6 +160,9 @@ class DefensePlan:
     # first priority unit can be made but not yet afforded
     reserve_units: int = 0
     bank_minerals: int = 0  # after the opener, army production waits until this much is banked
+    # M7 E2 (§4.2 air/cloak): the Forge now, and a Pylon, Cannon and Battery at every mineral line
+    forge_now: bool = False
+    line_defense: bool = False
 
     def summary(self) -> str:
         if not self.active:
@@ -174,6 +193,8 @@ class DefensePlan:
             parts.append("tech waits")
         if self.bank_minerals:
             parts.append(f"bank={self.bank_minerals}")
+        if self.line_defense:
+            parts.append("mineral-line defense")
         return " ".join(parts)
 
 
@@ -418,6 +439,22 @@ class DefensePlanner:
             plan.army_leash = ARMY_HOLD_LEASH
         elif plan.army_hold_point is None:
             plan.army_hold_point = self._natural_hold()
+
+    def _plan_air_harass(self, plan: DefensePlan, army: list) -> None:
+        """M7 E2 (§4.2 air/cloak): the Forge now, then a Cannon and a Battery at every mineral
+        line; satisfied (no more forced builds) while every mineral line has a finished Cannon."""
+        bot = self.bot
+        lines = mineral_lines(bot)
+        detected = [any(c.is_ready and c.distance_to(centre) <= MINERAL_LINE_SEARCH + 2 for c in bot.structures(UnitTypeId.PHOTONCANNON)) for _, centre in lines]
+        satisfied = bool(lines) and all(detected)
+        self.flags.set_satisfied(
+            Threat.AIR_HARASS, satisfied, bot.time,
+            f"a finished Cannon at {sum(detected)} of {len(lines)} mineral lines",
+        )
+        if satisfied:
+            return
+        plan.forge_now = True
+        plan.line_defense = True
 
     def _plan_one_base_allin(self, plan: DefensePlan, army: list) -> None:
         if (

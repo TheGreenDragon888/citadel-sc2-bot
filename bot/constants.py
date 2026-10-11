@@ -455,6 +455,7 @@ UNIT_TTL_S: dict[str, float] = {
     "CANNON_RUSH": 20.0,  # raised by an enemy probe in our main (Citadel)
     "PROXY": 45.0,  # raised by units, e.g. ares's marine-rush or reaper flags (Citadel)
     "ONE_BASE_ALLIN": 45.0,  # raised by units, e.g. ares's roach flag (Citadel)
+    "CAPITAL_AIR": 60.0,  # M7 E2 CAPITAL_AIR_UNIT_TTL: ACTIVE stays this long after the value drops
 }
 UNIT_TTL_DEFAULT_S: float = 45.0
 MIN_PLAN_DURATION_S: float = 20.0  # no flag expires sooner, except by rule (a)
@@ -880,6 +881,29 @@ CAPITAL_AIR_TYPES: frozenset[UnitTypeId] = frozenset(
         UnitTypeId.BROODLORD, UnitTypeId.BROODLORDCOCOON,
     }
 )
+# M7 E2 (§4.2 capital air): WARNING when one of these is seen ...
+CAPITAL_AIR_TECH: frozenset[UnitTypeId] = frozenset(
+    {UnitTypeId.FLEETBEACON, UnitTypeId.FUSIONCORE, UnitTypeId.GREATERSPIRE}
+)
+# ... ACTIVE while the remembered capital ships (CAPITAL_AIR_TYPES; Carriers have no weapon in game
+# data, so the list is explicit) are worth at least this (TUNE, about one capital ship), their
+# sightings fading out after CAPITAL_AIR_FRESH_S like the enemy mix's
+CAPITAL_AIR_MIN_VALUE: float = 400.0
+CAPITAL_AIR_FRESH_S: float = 60.0
+# a cocoon counts as the Brood Lord it becomes
+CAPITAL_AIR_VALUE_AS: dict[UnitTypeId, UnitTypeId] = {UnitTypeId.BROODLORDCOCOON: UnitTypeId.BROODLORD}
+# M7 E2 (§4.2 air/cloak, §4.4 rows 9, 13): AIR_HARASS when one of these enemy structures is seen
+AIR_HARASS_TECH: frozenset[UnitTypeId] = frozenset(
+    {UnitTypeId.STARGATE, UnitTypeId.SPIRE, UnitTypeId.GREATERSPIRE, UnitTypeId.STARPORTTECHLAB}
+)
+# its plan: the Forge now, then a Pylon, 1 Photon Cannon and 1 Shield Battery at every mineral line
+# (minerals within MINERAL_LINE_RADIUS of a ready Nexus), placed within MINERAL_LINE_SEARCH of the
+# minerals' centre, clear of the probes' paths to them (MINING_PATH_CLEARANCE) and at least
+# LINE_DEFENSE_NEXUS_CLEARANCE from the Nexus; one order per base per DEFENSE_ORDER_RETRY_S
+MINERAL_LINE_RADIUS: float = 10.0
+MINERAL_LINE_SEARCH: int = 6
+MINING_PATH_CLEARANCE: float = 1.0
+LINE_DEFENSE_NEXUS_CLEARANCE: float = 4.0
 # M7 B6 (§4.4 rows 7/10, user decision): the missing-Barracks/Gateway test counts their natural as
 # looked at once it was in vision at or after PROXY_NATURAL_SEEN_FROM_S (an expansion-first townhall
 # is down by ~1:05-1:20 in the baseline replays), and waits for that until PROXY_NATURAL_WAIT_UNTIL_S

@@ -21,6 +21,14 @@ including the §5 phase rules.
 
 M7 (§8): `first_seen` records the first sighting of each enemy structure type and each capital
 ship type (CAPITAL_AIR_TYPES), logged as `INTEL first seen ...` and kept for the game record.
+
+M7 E2 (§4.2, §4.4 rows 9, 13, 18):
+- AIR_HARASS (STRUCTURE): an enemy Stargate, Spire / Greater Spire or Starport Tech Lab
+  (`AIR_HARASS_TECH`). Its plan stops forcing builds once satisfied (defense_planner.py).
+- CAPITAL_AIR WARNING (STRUCTURE, `CAPITAL_AIR_TECH_SOURCE`): a Fleet Beacon, Fusion Core or Greater
+  Spire. ACTIVE (UNIT, `CAPITAL_AIR_UNITS_SOURCE`): raised and re-confirmed while the remembered
+  capital ships (`EnemyMix.capital_value`, enemy_mix.py) are worth at least `CAPITAL_AIR_MIN_VALUE`;
+  it expires `UNIT_TTL_S["CAPITAL_AIR"]` after the last confirmation. Each logs `INTEL capital air`.
 """
 
 import math
@@ -35,6 +43,9 @@ from sc2.unit import Unit
 
 from bot.constants import (
     BRIDGE_HOME_RADIUS,
+    AIR_HARASS_TECH,
+    CAPITAL_AIR_MIN_VALUE,
+    CAPITAL_AIR_TECH,
     CAPITAL_AIR_TYPES,
     CANNON_PROBE_FROM_S,
     CANNON_PROBE_LINGER_S,
@@ -81,10 +92,19 @@ from bot.constants import (
     WORKER_RUSH_UNTIL_S,
 )
 from bot.geometry import in_map
-from bot.intel.threat_flags import Evidence, ExpiryContext, FlagStore, Threat
+from bot.intel.threat_flags import (
+    CAPITAL_AIR_TECH_SOURCE,
+    CAPITAL_AIR_UNITS_SOURCE,
+    Evidence,
+    ExpiryContext,
+    FlagStore,
+    Threat,
+)
 
 if TYPE_CHECKING:
     from ares import AresBot
+
+    from bot.intel.enemy_mix import EnemyMixTracker
 
 WORKERS: frozenset[UnitTypeId] = WORKER_TYPES
 CANNON_RUSH_TYPES: frozenset[UnitTypeId] = frozenset(
@@ -172,6 +192,7 @@ class Detectors:
         self.unknown_aggro_at: Optional[float] = None
         # M7 §8: enemy structure / capital ship type name -> game second it was first seen
         self.first_seen: dict[str, float] = {}
+        self.mix: Optional["EnemyMixTracker"] = None  # M7 E2: main.py hands in Production.mix
 
     # -- helpers -------------------------------------------------------------------------------
 
@@ -228,6 +249,8 @@ class Detectors:
         self._early_pool()
         self._proxy()
         self._no_natural()
+        self._air_harass()
+        self._capital_air()
 
     def _track_first_seen(self) -> None:
         """M7 §8: the first sighting of each enemy structure type and each capital ship type
@@ -568,6 +591,45 @@ class Detectors:
                     Threat.PROXY, Evidence.STRUCTURE, "proxy_structure",
                     f"enemy {names} > {PROXY_FAR_FROM_MAIN:g} from the enemy main", **evidence,
                 )
+
+    def _structure_flag(self, threat: Threat, source: str, types: frozenset, reason: str) -> list[Unit]:
+        """Raise or re-confirm a STRUCTURE flag from the enemy structures of `types` seen (snapshots
+        count: they were seen there). Returns them."""
+        seen = [s for s in self.bot.enemy_structures if s.type_id in types]
+        if not seen:
+            return []
+        evidence = {"tags": [s.tag for s in seen], "positions": [s.position for s in seen]}
+        if self.flags.get(threat, source) is not None:
+            self.flags.confirm(threat, source, self.bot.time, **evidence)
+        else:
+            names = ", ".join(sorted({s.type_id.name for s in seen}))
+            self._raise(threat, Evidence.STRUCTURE, source, f"{reason}: {names}", **evidence)
+        return seen
+
+    def _air_harass(self) -> None:
+        """M7 E2 (§4.4 rows 9, 13): AIR_HARASS from an air production / tech structure."""
+        self._structure_flag(Threat.AIR_HARASS, "air_tech", AIR_HARASS_TECH, "enemy air tech seen")
+
+    def _capital_air(self) -> None:
+        """M7 E2 (§4.2 capital air): WARNING from the tech, ACTIVE from the capital ships' value."""
+        bot = self.bot
+        warned = self.flags.get(Threat.CAPITAL_AIR, CAPITAL_AIR_TECH_SOURCE) is not None
+        if self._structure_flag(Threat.CAPITAL_AIR, CAPITAL_AIR_TECH_SOURCE, CAPITAL_AIR_TECH, "capital-ship tech seen") and not warned:
+            logger.info(f"INTEL capital air WARNING at {bot.time_formatted}")
+        if self.mix is None:
+            return
+        value = self.mix.mix.capital_value
+        if value < CAPITAL_AIR_MIN_VALUE:
+            return
+        if self.flags.get(Threat.CAPITAL_AIR, CAPITAL_AIR_UNITS_SOURCE) is not None:
+            self.flags.confirm(Threat.CAPITAL_AIR, CAPITAL_AIR_UNITS_SOURCE, bot.time)
+            return
+        ships = sorted({u.type_id.name for u in bot.mediator.get_cached_enemy_army if u.type_id in CAPITAL_AIR_TYPES})
+        self._raise(
+            Threat.CAPITAL_AIR, Evidence.UNIT, CAPITAL_AIR_UNITS_SOURCE,
+            f"capital ships worth {value:.0f} (>= {CAPITAL_AIR_MIN_VALUE:.0f}): {', '.join(ships)}",
+        )
+        logger.info(f"INTEL capital air ACTIVE at {bot.time_formatted}: value {value:.0f}, {', '.join(ships)}")
 
     def far_production(self) -> list[Unit]:
         bot = self.bot

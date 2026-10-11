@@ -119,6 +119,7 @@ class CitadelBot(AresBot):
         self.executor = BuildExecutor(self, self.opener, self.planner)
         self.production = Production(self)
         self.executor.gas_starved_for = self.production.starved_for  # M7 E1: the 4th base
+        self.detectors.mix = self.production.mix  # M7 E2: CAPITAL_AIR ACTIVE from the capital ships' value
         self.army = Army(self, self.endgame, self.flags)
         self._load_memory()
         # §6: keep on_start under 5 s and log its duration
@@ -195,14 +196,14 @@ class CitadelBot(AresBot):
         if iteration % INTEL_EVERY_STEPS == 0:
             with guard("ares bridge"):
                 self.bridge.update()
+            with guard("enemy mix"):
+                self.production.mix.update()  # M7 K3: the Archon and air switches; E2: capital value
             with guard("detectors"):
                 self.detectors.update()
             with guard("flag expiry"):
                 self.flags.expire(self.time, self.detectors.expiry_context(self.supply_army))
             with guard("defense planner"):
                 self.planner.update()
-            with guard("enemy mix"):
-                self.production.mix.update()  # M7 K3: the Archon switches
         marks.append(("intel", time.perf_counter()))
         plan = self.planner.plan
         if iteration % MACRO_EVERY_STEPS == 0 and not guarded:

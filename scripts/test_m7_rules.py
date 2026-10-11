@@ -62,6 +62,7 @@ from bot.intel.detectors import (  # noqa: E402
 )
 from bot.intel.scout_planner import main_rescout_due, observer_trip_ok, trip_seconds  # noqa: E402
 from bot.macro.build_executor import bases_cap, tech_waits  # noqa: E402
+from bot.defense.static_defense import line_next  # noqa: E402
 from bot.macro.production import gas_starved, next_upgrades, starved_seconds, templar_floor, unit_proportions  # noqa: E402
 from bot.army.templar import TemplarInfo, behind, morph_pairs  # noqa: E402
 from bot.intel.enemy_mix import EnemyMix, MixEntry, ShareSwitch, fade, measure, switch  # noqa: E402
@@ -340,6 +341,12 @@ def _air_switch(steps):  # noqa: E302
 
 case("air switch: on at 30%, held 60 s below, then off", _air_switch,
      [(0.35, 100.0), (0.10, 110.0), (0.10, 169.0), (0.10, 170.0)], expected=[True, True, True, False])
+case("mix: capital value counts Carriers (no weapon), fades old sightings", _mix,
+     ("CARRIER", 6.0, False, False, 0.0, True, 600.0), ("TEMPEST", 5.0, False, True, 90.0, True, 425.0),
+     ("STALKER", 2.0, False, True, 0.0, False, 175.0),
+     expected=EnemyMix(4.5, 0.0, 0.0, 2.5 / 4.5, 600.0 + 425.0 * 0.5))
+case("mix: capital value with no army that can attack", _mix, ("CARRIER", 6.0, False, False, 0.0, True, 600.0),
+     expected=EnemyMix(capital_value=600.0))
 case("switch: on at the threshold", switch, False, 0.5, 0.5, None, 100.0, 60.0, expected=(True, None))
 case("switch: stays off below", switch, False, 0.4, 0.5, None, 100.0, 60.0, expected=(False, None))
 case("switch: below, the hold starts", switch, True, 0.4, 0.5, None, 100.0, 60.0, expected=(True, 100.0))
@@ -390,6 +397,12 @@ case("one-base wait: the Robotics Bay goes on one base", tech_waits, UnitTypeId.
 case("starved seconds: flips add up", starved_seconds, [(0.0, True), (20.0, False), (30.0, True), (70.0, False)], 100.0, expected=60.0)
 case("starved seconds: the last sample runs to now", starved_seconds, [(0.0, False), (50.0, True)], 80.0, expected=30.0)
 case("starved seconds: empty", starved_seconds, [], 10.0, expected=0.0)
+case("line defense: a Pylon first", line_next, False, False, False, True, True, expected=UnitTypeId.PYLON)
+case("line defense: then the Cannon", line_next, True, False, False, True, True, expected=UnitTypeId.PHOTONCANNON)
+case("line defense: the Battery while the Forge builds", line_next, True, False, False, False, True, expected=UnitTypeId.SHIELDBATTERY)
+case("line defense: the Battery after the Cannon", line_next, True, True, False, True, True, expected=UnitTypeId.SHIELDBATTERY)
+case("line defense: done", line_next, True, True, True, True, True, expected=None)
+case("line defense: nothing to place without the Forge or Battery tech", line_next, True, False, False, False, False, expected=None)
 case("bases cap: 3 normally", bases_cap, 3000, 0.0, True, True, False, 1500, 60, expected=3)
 case("bases cap: 4 when starved long enough with a bank and saturated", bases_cap, 3000, 61.0, True, True, False, 1500, 60, expected=4)
 case("bases cap: not before the starved time", bases_cap, 3000, 59.0, True, True, False, 1500, 60, expected=3)

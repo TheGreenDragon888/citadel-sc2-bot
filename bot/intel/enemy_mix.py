@@ -3,7 +3,10 @@
 `measure` (pure) turns ares's army cache into shares by supply, as §4.5.1's air switch is:
 - `bio_share`: biological units (the game-data attribute; python-sc2 `Unit.is_biological`);
 - `zealot_share`: Zealots;
-- `air_share`: flying units (D30, ahead of E2: it pauses the gas-starved Zealot float).
+- `air_share`: flying units (D30, ahead of E2: it pauses the gas-starved Zealot float);
+- `capital_value` (M7 E2): the game-data value of the capital ships (`CAPITAL_AIR_TYPES`, an explicit
+  list since Carriers have no weapon; a cocoon counts as its Brood Lord), fading after
+  `CAPITAL_AIR_FRESH_S`. The shares count only units with a weapon; `capital_value` counts all.
 
 Only units with a weapon (`ranges.has_weapon`) count. Sightings older than `MIX_FRESH_S` fade
 linearly to nothing over another `MIX_FRESH_S`. `ArchonSwitch` turns an Archon share on at its
@@ -23,6 +26,9 @@ from bot.constants import (
     AIR_SWITCH_HOLD_S,
     AIR_SWITCH_SHARE,
     BIO_SHARE_FOR_ARCHONS,
+    CAPITAL_AIR_FRESH_S,
+    CAPITAL_AIR_TYPES,
+    CAPITAL_AIR_VALUE_AS,
     MIX_FRESH_S,
     MIX_SWITCH_HOLD_S,
     ZEALOT_SHARE_FOR_ARCHONS,
@@ -39,6 +45,7 @@ class MixEntry(NamedTuple):
     can_attack: bool
     age: float  # seconds since last seen
     flying: bool = False
+    value: float = 0.0  # game-data minerals + gas
 
 
 @dataclass
@@ -47,6 +54,7 @@ class EnemyMix:
     bio_share: float = 0.0
     zealot_share: float = 0.0
     air_share: float = 0.0
+    capital_value: float = 0.0
 
 
 def fade(age: float, fresh_s: float = MIX_FRESH_S) -> float:
@@ -57,9 +65,16 @@ def fade(age: float, fresh_s: float = MIX_FRESH_S) -> float:
     return max(0.0, 1.0 - (age - fresh_s) / fresh_s)
 
 
-def measure(entries: Sequence[MixEntry], fresh_s: float = MIX_FRESH_S) -> EnemyMix:
-    """Supply-weighted shares of the remembered enemy army (pure)."""
+CAPITAL_NAMES: frozenset[str] = frozenset(t.name for t in CAPITAL_AIR_TYPES)
+
+
+def measure(
+    entries: Sequence[MixEntry], fresh_s: float = MIX_FRESH_S, capital_fresh_s: float = CAPITAL_AIR_FRESH_S,
+    capital: frozenset[str] = CAPITAL_NAMES,
+) -> EnemyMix:
+    """Supply-weighted shares of the remembered enemy army, and its capital ships' value (pure)."""
     army = bio = zealot = air = 0.0
+    capital_value = sum(fade(e.age, capital_fresh_s) * e.value for e in entries if e.type_name in capital)
     for e in entries:
         if not e.can_attack:
             continue
@@ -72,8 +87,8 @@ def measure(entries: Sequence[MixEntry], fresh_s: float = MIX_FRESH_S) -> EnemyM
         if e.flying:
             air += w
     if army <= 0:
-        return EnemyMix()
-    return EnemyMix(army, bio / army, zealot / army, air / army)
+        return EnemyMix(capital_value=capital_value)
+    return EnemyMix(army, bio / army, zealot / army, air / army, capital_value)
 
 
 def switch(on: bool, share: float, threshold: float, below_since: Optional[float], now: float, hold_s: float = MIX_SWITCH_HOLD_S) -> tuple[bool, Optional[float]]:
@@ -111,12 +126,19 @@ class EnemyMixTracker:
         self.vs_zealots = ShareSwitch(ZEALOT_SHARE_FOR_ARCHONS)
         self.air = ShareSwitch(AIR_SWITCH_SHARE, AIR_SWITCH_HOLD_S)
 
+    def _value(self, type_id) -> float:
+        cost = self.bot.calculate_unit_value(CAPITAL_AIR_VALUE_AS.get(type_id, type_id))
+        return float(cost.minerals + cost.vespene)
+
     def update(self) -> None:
         bot = self.bot
         entries = [
-            MixEntry(u.type_id.name, bot.calculate_supply_cost(u.type_id), u.is_biological, has_weapon(u), u.age, u.is_flying)
+            MixEntry(
+                u.type_id.name, bot.calculate_supply_cost(u.type_id), u.is_biological, has_weapon(u), u.age,
+                u.is_flying, self._value(u.type_id),
+            )
             for u in bot.mediator.get_cached_enemy_army
-            if is_fighter(u)
+            if is_fighter(u) or u.type_id in CAPITAL_AIR_TYPES
         ]
         self.mix = measure(entries)
         now = bot.time
