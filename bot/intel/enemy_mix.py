@@ -125,6 +125,7 @@ class EnemyMixTracker:
         self.vs_bio = ShareSwitch(BIO_SHARE_FOR_ARCHONS)
         self.vs_zealots = ShareSwitch(ZEALOT_SHARE_FOR_ARCHONS)
         self.air = ShareSwitch(AIR_SWITCH_SHARE, AIR_SWITCH_HOLD_S)
+        self.peak_capital: float = 0.0  # M7 E3 (§8): the highest capital_value seen this game
 
     def _value(self, type_id) -> float:
         cost = self.bot.calculate_unit_value(CAPITAL_AIR_VALUE_AS.get(type_id, type_id))
@@ -141,6 +142,7 @@ class EnemyMixTracker:
             if is_fighter(u) or u.type_id in CAPITAL_AIR_TYPES
         ]
         self.mix = measure(entries)
+        self.peak_capital = max(self.peak_capital, self.mix.capital_value)
         now = bot.time
         self.vs_bio.update(self.mix.bio_share, now)
         self.vs_zealots.update(self.mix.zealot_share, now)

@@ -63,7 +63,9 @@ from bot.intel.detectors import (  # noqa: E402
 from bot.intel.scout_planner import main_rescout_due, observer_trip_ok, trip_seconds  # noqa: E402
 from bot.macro.build_executor import bases_cap, tech_waits  # noqa: E402
 from bot.defense.static_defense import line_next  # noqa: E402
-from bot.macro.production import gas_starved, next_upgrades, starved_seconds, templar_floor, unit_proportions  # noqa: E402
+from bot.macro.production import (  # noqa: E402
+    gas_starved, mix_mode, mode_shares, next_upgrades, starved_seconds, templar_floor, unit_proportions,
+)
 from bot.army.templar import TemplarInfo, behind, morph_pairs  # noqa: E402
 from bot.intel.enemy_mix import EnemyMix, MixEntry, ShareSwitch, fade, measure, switch  # noqa: E402
 
@@ -406,6 +408,25 @@ case("target: Stalkers have no preference here", preferred_target, UnitTypeId.ST
 case("align: 3 armored in reach", align_now, True, 3, 3, expected=True)
 case("align: 2 armored", align_now, True, 2, 3, expected=False)
 case("align: on cooldown", align_now, False, 5, 3, expected=False)
+case("mix mode: normal", mix_mode, False, True, False, expected="normal")
+case("mix mode: air share alone is not the air switch", mix_mode, False, True, False, expected="normal")
+case("mix mode: AIR_HARASS and air share: air switch", mix_mode, True, True, False, expected="air switch")
+case("mix mode: AIR_HARASS without air share: normal", mix_mode, True, False, False, expected="normal")
+case("mix mode: CAPITAL_AIR ACTIVE wins", mix_mode, True, True, True, expected="capital air")
+
+
+def _shares(base, mode, race, carriers):  # noqa: E302
+    return {u.name: v for u, v in sorted(mode_shares(base, mode, race, carriers).items(), key=lambda kv: kv[0].name)}
+
+
+case("mix shares: air switch raises only Stalkers", _shares, _P, "air switch", "Protoss", False,
+     expected={"COLOSSUS": 25, "IMMORTAL": 25, "STALKER": 70.0, "ZEALOT": 10})
+case("mix shares: capital air vs P: Colossi down, Stalkers up, Void Rays", _shares, _P, "capital air", "Protoss", False,
+     expected={"COLOSSUS": 5.0, "IMMORTAL": 25, "STALKER": 55.0, "VOIDRAY": 25.0, "ZEALOT": 10})
+case("mix shares: capital air vs P with Carriers: Tempests too", _shares, _P, "capital air", "Protoss", True,
+     expected={"COLOSSUS": 5.0, "IMMORTAL": 25, "STALKER": 55.0, "TEMPEST": 15.0, "VOIDRAY": 25.0, "ZEALOT": 10})
+case("mix shares: capital air vs Z keeps the Templar and Archon shares", lambda: sorted(u.name for u in mode_shares(_Z, "capital air", "Zerg", False)),
+     expected=["ARCHON", "COLOSSUS", "HIGHTEMPLAR", "IMMORTAL", "STALKER", "TEMPEST", "ZEALOT"])
 case("line defense: a Pylon first", line_next, False, False, False, True, True, expected=UnitTypeId.PYLON)
 case("line defense: then the Cannon", line_next, True, False, False, True, True, expected=UnitTypeId.PHOTONCANNON)
 case("line defense: the Battery while the Forge builds", line_next, True, False, False, False, True, expected=UnitTypeId.SHIELDBATTERY)

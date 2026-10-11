@@ -339,8 +339,23 @@ ARMY_COMPOSITION_PCT: dict[str, dict[UnitTypeId, float]] = {
         UnitTypeId.ZEALOT: 10,
     },
 }
+# M7 E3 (§4.5.1) mix selection: normal (with K3's Archon shares) -> air switch (AIR_HARASS active and
+# the enemy air share at AIR_SWITCH_SHARE: the Stalker share rises by AIR_SWITCH_STALKER_PCT, nothing
+# else) -> capital air (CAPITAL_AIR ACTIVE: the Colossus share drops to CAPITAL_AIR_COLOSSUS_PCT, the
+# (Blink) Stalker share rises by CAPITAL_AIR_STALKER_PLUS_PCT and CAPITAL_AIR_ADD_PCT is added; vs P
+# with Carriers seen, Tempests too). TUNE: provisional, from §4.5.1's expectations until E0 sets them
+AIR_SWITCH_STALKER_PCT: float = 30.0
+CAPITAL_AIR_COLOSSUS_PCT: float = 5.0
+CAPITAL_AIR_STALKER_PLUS_PCT: float = 15.0
+CAPITAL_AIR_ADD_PCT: dict[str, dict[UnitTypeId, float]] = {
+    "Protoss": {UnitTypeId.VOIDRAY: 25.0},  # vs Tempests, Void Rays first (§4.5.1)
+    "Terran": {UnitTypeId.TEMPEST: 25.0},  # vs Battlecruisers, Tempests
+    "Zerg": {UnitTypeId.TEMPEST: 25.0},  # vs Brood Lords, Tempests
+}
+CAPITAL_VS_CARRIER_TEMPEST_PCT: float = 15.0
 # ares SpawnController priority (0 = highest)
 ARMY_PRIORITY: dict[UnitTypeId, int] = {
+    UnitTypeId.VOIDRAY: 0, UnitTypeId.TEMPEST: 0,
     UnitTypeId.COLOSSUS: 0, UnitTypeId.IMMORTAL: 1, UnitTypeId.STALKER: 2,
     UnitTypeId.ZEALOT: 3, UnitTypeId.SENTRY: 4, UnitTypeId.HIGHTEMPLAR: 1,
 }

@@ -156,6 +156,7 @@ class BuildExecutor:
         # M7 E1: seconds production has been gas-starved (main.py hands in Production.starved_for)
         self.gas_starved_for: Callable[[], float] = lambda: 0.0
         self.fourth_base_wanted: bool = False
+        self.fourth_base_at: Optional[float] = None  # game second it was first wanted (§8)
 
     @property
     def items(self) -> tuple[ScheduleItem, ...]:
@@ -188,6 +189,7 @@ class BuildExecutor:
         )
         if cap > MAX_BASES and not self.fourth_base_wanted:
             self.fourth_base_wanted = True
+            self.fourth_base_at = round(bot.time, 1)
             logger.info(
                 f"ECONOMY {bot.time_formatted} base {cap} wanted: {bot.minerals} minerals, gas-starved for "
                 f"{self.gas_starved_for():.0f} s, mineral lines saturated"

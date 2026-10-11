@@ -289,6 +289,13 @@ def m7_cell(telemetry, army=None) -> Optional[str]:
     if army is not None and hasattr(army, "templar"):
         t = army.templar.counts
         cell += f" storms={t['storms']} archon={t['archons']}"  # M7 K3
+    bot = getattr(army, "bot", None) if army is not None else None
+    production = getattr(bot, "production", None)
+    if production is not None and hasattr(production, "mode_changes"):
+        # M7 Phase 4: mix modes reached (n/a/c: normal, air switch, capital air), 4th base time
+        modes = "".join(sorted({m[0] for _, m in production.mode_changes})) or "-"
+        fourth = getattr(getattr(bot, "executor", None), "fourth_base_at", None)
+        cell += f" mix={modes} base4={'-' if fourth is None else int(fourth)}"
     return cell
 
 

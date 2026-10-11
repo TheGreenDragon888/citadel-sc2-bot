@@ -332,7 +332,7 @@ class Telemetry:
 
         counter = army.counter if army is not None else None
         return {
-            "version": 6,  # 3: M7 Phase 0 fields; 4: M7 Phase 1 fields; 5, 6: M7 Phase 3 fields (K2, K3)
+            "version": 7,  # 3: M7 Phase 0 fields; 4: M7 Phase 1 fields; 5, 6: M7 Phase 3 fields (K2, K3); 7: Phase 4
             "game_id": self.game_id,
             "date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "result": result,
@@ -395,11 +395,31 @@ class Telemetry:
             "blinks": dict(army.blink.counts) if army is not None and hasattr(army, "blink") else {},
             "storms": army.templar.counts["storms"] if army is not None and hasattr(army, "templar") else 0,
             "archons": army.templar.counts["archons"] if army is not None and hasattr(army, "templar") else 0,
+            # M7 E3 §8: capital air (first WARNING / ACTIVE, peak value), the mix selection's changes
+            # and when a 4th base was first wanted (E1)
+            "capital_air": self._capital_air(flags),
+            "mix_changes": capped([{"t": t, "mode": m} for t, m in getattr(getattr(self.bot, "production", None), "mode_changes", [])]),
+            "fourth_base_at": getattr(getattr(self.bot, "executor", None), "fourth_base_at", None),
             # M7 §8: enemy structure and capital ship types, first seen (game seconds)
             "tech_seen": capped([
                 {"type": name, "t": round(t, 1)}
                 for name, t in sorted((detectors.first_seen if detectors is not None else {}).items(), key=lambda kv: kv[1])
             ]),
+        }
+
+    def _capital_air(self, flags) -> dict[str, Any]:
+        """M7 E3 §8: the enemy race, the first CAPITAL_AIR WARNING and ACTIVE (game seconds) and the
+        peak remembered capital-ship value."""
+        def first(source: str) -> Optional[float]:
+            times = [r.raised_at for r in (flags.history if flags is not None else []) if r.threat.name == "CAPITAL_AIR" and r.source == source]
+            return round(min(times), 1) if times else None
+
+        production = getattr(self.bot, "production", None)
+        return {
+            "race": self.bot.enemy_race.name,
+            "warning": first("capital_air_tech"),
+            "active": first("capital_air_units"),
+            "peak_value": round(production.mix.peak_capital) if production is not None else 0,
         }
 
     def write_game_record(self, record: dict[str, Any]) -> bool:

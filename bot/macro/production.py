@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
 from ares.behaviors.macro import (
+    BuildStructure,
     ProductionController,
     SpawnController,
     UpgradeController,
@@ -24,10 +25,15 @@ from sc2.ids.upgrade_id import UpgradeId
 from sc2.position import Point2
 
 from bot.constants import (
+    AIR_SWITCH_STALKER_PCT,
     ARCHON_VS_BIO_PCT,
     ARCHON_VS_ZEALOT_PCT,
     ARMY_COMPOSITION_PCT,
     ARMY_PRIORITY,
+    CAPITAL_AIR_ADD_PCT,
+    CAPITAL_AIR_COLOSSUS_PCT,
+    CAPITAL_AIR_STALKER_PLUS_PCT,
+    CAPITAL_VS_CARRIER_TEMPEST_PCT,
     FOURTH_BASE_WINDOW_S,
     GATEWAY_POWER_RETRY_S,
     GATEWAY_POWER_SEARCH,
@@ -42,6 +48,7 @@ from bot.constants import (
 )
 from bot.geometry import in_map
 from bot.intel.enemy_mix import EnemyMixTracker
+from bot.intel.threat_flags import Threat
 from bot.macro.build_executor import bases_ready, race_key, tech_waits
 
 if TYPE_CHECKING:
@@ -130,6 +137,36 @@ def gas_starved(minerals: float, vespene: float, wanted_gas: list[float], bank: 
     return minerals >= bank and bool(wanted_gas) and vespene < max(wanted_gas)
 
 
+NORMAL, AIR_SWITCH, CAPITAL = "normal", "air switch", "capital air"
+
+
+def mix_mode(air_harass: bool, air_on: bool, capital_active: bool) -> str:
+    """M7 E3 (§4.5.1): capital air while CAPITAL_AIR is ACTIVE, else the air switch while AIR_HARASS
+    is active and the enemy air share is at the threshold (its hysteresis is the air ShareSwitch's),
+    else normal (pure)."""
+    if capital_active:
+        return CAPITAL
+    if air_harass and air_on:
+        return AIR_SWITCH
+    return NORMAL
+
+
+def mode_shares(base: dict[UnitTypeId, float], mode: str, race: str, carriers_seen: bool) -> dict[UnitTypeId, float]:
+    """M7 E3: the mix in percent for `mode` from the normal one (`base`, K3 shares included) (pure)."""
+    shares = dict(base)
+    if mode == AIR_SWITCH:
+        shares[UnitTypeId.STALKER] = shares.get(UnitTypeId.STALKER, 0.0) + AIR_SWITCH_STALKER_PCT
+    elif mode == CAPITAL:
+        if UnitTypeId.COLOSSUS in shares:
+            shares[UnitTypeId.COLOSSUS] = min(shares[UnitTypeId.COLOSSUS], CAPITAL_AIR_COLOSSUS_PCT)
+        shares[UnitTypeId.STALKER] = shares.get(UnitTypeId.STALKER, 0.0) + CAPITAL_AIR_STALKER_PLUS_PCT
+        for unit, pct in CAPITAL_AIR_ADD_PCT.get(race, {}).items():
+            shares[unit] = shares.get(unit, 0.0) + pct
+        if race == "Protoss" and carriers_seen:
+            shares[UnitTypeId.TEMPEST] = shares.get(UnitTypeId.TEMPEST, 0.0) + CAPITAL_VS_CARRIER_TEMPEST_PCT
+    return shares
+
+
 def starved_seconds(log: list[tuple[float, bool]], now: float) -> float:
     """M7 E1: seconds of `log` ((time, starved) samples, oldest first) spent starved: each starved
     sample counts until the next one, the last until `now` (pure)."""
@@ -182,6 +219,8 @@ class Production:
         self.mix = EnemyMixTracker(bot)  # M7 K3: updated each intel tick (main.py)
         self.starved = False  # M7 E1: last tick's gas_starved, for the log line on each change
         self.starved_log: deque[tuple[float, bool]] = deque()  # (time, starved) per macro tick, E1's window
+        self.mode: str = NORMAL  # M7 E3: the mix selection, and its changes (game seconds, mode)
+        self.mode_changes: list[tuple[float, str]] = []
 
     def gateway_upkeep(self) -> None:
         """Once Warp Gate is researched, ares's SpawnController makes nothing while any ready,
@@ -254,7 +293,8 @@ class Production:
     def _mix_counts(self) -> tuple[dict[UnitTypeId, float], int, int]:
         """This tick's mix in percent (with the K3 Archon switches), our units of its types other
         than Archons and Templar, and our Archons (in production too)."""
-        race = race_key(self.bot)
+        bot = self.bot
+        race = race_key(bot)
         shares = dict(ARMY_COMPOSITION_PCT[race])
         extra = 0.0
         if race == "Terran" and self.mix.vs_bio.on:
@@ -263,7 +303,20 @@ class Production:
             extra = ARCHON_VS_ZEALOT_PCT
         if extra:
             shares[UnitTypeId.ARCHON] = shares.get(UnitTypeId.ARCHON, 0.0) + extra
-        count = self.bot.mediator.get_own_unit_count
+        # M7 E3: the air switch / capital-air mix
+        flags = getattr(bot, "flags", None)
+        mode = mix_mode(
+            flags is not None and flags.is_active(Threat.AIR_HARASS), self.mix.air.on,
+            flags is not None and flags.capital_air() == "ACTIVE",
+        )
+        if mode != self.mode:
+            logger.info(f"MIX {bot.time_formatted} {self.mode} -> {mode}")
+            self.mode_changes.append((round(bot.time, 1), mode))
+            self.mode = mode
+        detectors = getattr(bot, "detectors", None)
+        carriers = detectors is not None and "CARRIER" in detectors.first_seen
+        shares = mode_shares(shares, mode, race, carriers)
+        count = bot.mediator.get_own_unit_count
         others = sum(count(unit_type_id=u) for u in shares if u not in (UnitTypeId.ARCHON, UnitTypeId.HIGHTEMPLAR))
         return shares, others, count(unit_type_id=UnitTypeId.ARCHON)
 
@@ -293,6 +346,12 @@ class Production:
         chains = dict(UPGRADE_CHAINS[race_key(bot)])
         if not allow_forge:
             chains.pop(UnitTypeId.FORGE, None)
+        flags = getattr(bot, "flags", None)
+        if flags is not None and flags.capital_air() is not None and UnitTypeId.TWILIGHTCOUNCIL in chains:
+            # M7 E3 (§4.2 capital air WARNING): Blink moves up the Twilight chain
+            chain = chains[UnitTypeId.TWILIGHTCOUNCIL]
+            if UpgradeId.BLINKTECH in chain:
+                chains[UnitTypeId.TWILIGHTCOUNCIL] = (UpgradeId.BLINKTECH,) + tuple(u for u in chain if u != UpgradeId.BLINKTECH)
         bases = bases_ready(bot)
         chains = {b: chain for b, chain in chains.items() if not tech_waits(b, bases)}  # M7 D29
         ready = {b for b in chains if any(s.is_ready for s in bot.mediator.get_own_structures_dict[b])}
@@ -352,6 +411,14 @@ class Production:
                     maximum=OBSERVER_COUNT - observers,
                 )
             )
+        flags = getattr(bot, "flags", None)
+        if (
+            flags is not None and flags.capital_air() is not None
+            and not (bot.structures(UnitTypeId.STARGATE) or bot.mediator.get_building_counter[UnitTypeId.STARGATE])
+            and bot.can_afford(UnitTypeId.STARGATE)
+        ):
+            # M7 E3 (§4.2 capital air WARNING): one Stargate goes down early
+            out.append(BuildStructure(bot.start_location, UnitTypeId.STARGATE))
         templar = self.templar_missing()
         if templar > 0:
             # M7 K3: Templar up to the floor, before the mix's SpawnController (as Observers are)
