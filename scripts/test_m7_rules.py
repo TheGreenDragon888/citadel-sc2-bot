@@ -28,7 +28,7 @@ from sc2.position import Point2  # noqa: E402
 from bot.army.army import Army, home_engages  # noqa: E402
 from bot.army.blink import BlinkState, blink_back, blink_finish, blink_in_points, wave_allows  # noqa: E402
 from bot.army.engagement import FightInputs, composition_text, value_level  # noqa: E402
-from bot.army.micro import retreat_may_shoot  # noqa: E402
+from bot.army.micro import align_now, preferred_target, retreat_may_shoot  # noqa: E402
 from bot.army.ranges import (  # noqa: E402
     can_hit,
     has_weapon,
@@ -397,6 +397,15 @@ case("one-base wait: the Robotics Bay goes on one base", tech_waits, UnitTypeId.
 case("starved seconds: flips add up", starved_seconds, [(0.0, True), (20.0, False), (30.0, True), (70.0, False)], 100.0, expected=60.0)
 case("starved seconds: the last sample runs to now", starved_seconds, [(0.0, False), (50.0, True)], 80.0, expected=30.0)
 case("starved seconds: empty", starved_seconds, [], 10.0, expected=0.0)
+case("target: Tempest prefers massive", preferred_target, UnitTypeId.TEMPEST, True, True, False, expected=True)
+case("target: Tempest prefers capital (a Carrier)", preferred_target, UnitTypeId.TEMPEST, True, False, True, expected=True)
+case("target: Tempest not an armored non-massive", preferred_target, UnitTypeId.TEMPEST, True, False, False, expected=False)
+case("target: Void Ray prefers armored", preferred_target, UnitTypeId.VOIDRAY, True, False, False, expected=True)
+case("target: Void Ray not a light unit", preferred_target, UnitTypeId.VOIDRAY, False, False, False, expected=False)
+case("target: Stalkers have no preference here", preferred_target, UnitTypeId.STALKER, True, True, True, expected=False)
+case("align: 3 armored in reach", align_now, True, 3, 3, expected=True)
+case("align: 2 armored", align_now, True, 2, 3, expected=False)
+case("align: on cooldown", align_now, False, 5, 3, expected=False)
 case("line defense: a Pylon first", line_next, False, False, False, True, True, expected=UnitTypeId.PYLON)
 case("line defense: then the Cannon", line_next, True, False, False, True, True, expected=UnitTypeId.PHOTONCANNON)
 case("line defense: the Battery while the Forge builds", line_next, True, False, False, False, True, expected=UnitTypeId.SHIELDBATTERY)

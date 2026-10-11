@@ -22,6 +22,7 @@ from ares.behaviors.combat.individual import (
     PathUnitToTarget,
     ShootTargetInRange,
 )
+from sc2.ids.ability_id import AbilityId
 from sc2.ids.unit_typeid import UnitTypeId
 from sc2.position import Point2
 from sc2.unit import Unit
@@ -40,6 +41,8 @@ from bot.army.ranges import (  # noqa: F401 (re-exported)
 )
 from bot.constants import (
     BLINK_FINISH_MIN_GAIN,
+    CAPITAL_AIR_TYPES,
+    VOIDRAY_ALIGN_MIN_ARMORED,
     COUNTER_BASE_RADIUS,
     BLINK_GROUP_RADIUS,
     BLINK_RANGE,
@@ -53,13 +56,14 @@ if TYPE_CHECKING:
     from ares import AresBot
 
 # Units that step back between shots when they out-range the closest threat (§3 micro.py "stalker
-# kite"); Blink is cut from v1 (§7)
+# kite"); M7 E3 adds the Tempest (§4.5.3)
 KITERS: frozenset[UnitTypeId] = frozenset(
     {
         UnitTypeId.STALKER, UnitTypeId.ADEPT, UnitTypeId.IMMORTAL, UnitTypeId.COLOSSUS,
-        UnitTypeId.SENTRY, UnitTypeId.PHOENIX, UnitTypeId.VOIDRAY, UnitTypeId.ORACLE,
+        UnitTypeId.SENTRY, UnitTypeId.PHOENIX, UnitTypeId.VOIDRAY, UnitTypeId.ORACLE, UnitTypeId.TEMPEST,
     }
 )
+ALIGN = AbilityId.EFFECT_VOIDRAYPRISMATICALIGNMENT
 
 
 _range_vs = range_vs
@@ -171,6 +175,43 @@ def _try_blink_finish(bot: "AresBot", unit: Unit, targets: Sequence[Unit], blink
     return False
 
 
+def preferred_target(unit_type: UnitTypeId, armored: bool, massive: bool, capital: bool) -> bool:
+    """M7 E3 (§4.5.3): Tempests shoot massive or capital units first, Void Rays armored or capital
+    units (pure)."""
+    if unit_type == UnitTypeId.TEMPEST:
+        return massive or capital
+    if unit_type == UnitTypeId.VOIDRAY:
+        return armored or capital
+    return False
+
+
+def align_now(ready: bool, armored_in_reach: int, min_armored: int = VOIDRAY_ALIGN_MIN_ARMORED) -> bool:
+    """M7 E3: Prismatic Alignment when ready with at least `min_armored` armored enemies in reach (pure)."""
+    return ready and armored_in_reach >= min_armored
+
+
+def _air_capital_shot(unit: Unit, targets: Sequence[Unit]) -> bool:
+    """M7 E3: a Tempest (weapon ready) or Void Ray attacks the lowest-life preferred target in its
+    reach; a Void Ray first aligns when enough armored enemies are in reach. Direct orders: a Void
+    Ray has no weapon in game data (VERIFY_NOTES), so ares's ShootTargetInRange never fires for it."""
+    in_reach = [e for e in targets if (r := reach(unit, e)) is not None and e.distance_to(unit) <= r]
+    if not in_reach:
+        return False
+    if unit.type_id == UnitTypeId.VOIDRAY and align_now(ALIGN in unit.abilities, sum(1 for e in in_reach if e.is_armored)):
+        unit(ALIGN)
+        return True
+    if unit.type_id == UnitTypeId.TEMPEST and unit.weapon_cooldown > 0:
+        return False
+    best = [e for e in in_reach if preferred_target(unit.type_id, e.is_armored, e.is_massive, e.type_id in CAPITAL_AIR_TYPES)]
+    if not best:
+        return False
+    target = min(best, key=lambda e: e.health + e.shield)
+    if unit.orders and unit.order_target == target.tag:
+        return True
+    unit.attack(target)
+    return True
+
+
 def fight(
     bot: "AresBot", unit: Unit, enemies: Sequence[Unit], fallback: Point2,
     blink: Optional[BlinkState] = None, committed: bool = False, level: int = -1,
@@ -191,6 +232,8 @@ def fight(
     # what can fight back (units, and finished static defense) before workers and other structures
     # (§4.6 priorities are M5's)
     fighters = [e for e in targets if _fights_back(e)]
+    if unit.type_id in (UnitTypeId.TEMPEST, UnitTypeId.VOIDRAY) and _air_capital_shot(unit, fighters or targets):
+        return
     for group in (fighters, targets):
         if group and ShootTargetInRange(unit=unit, targets=group).execute(bot, bot.config, bot.mediator):
             return

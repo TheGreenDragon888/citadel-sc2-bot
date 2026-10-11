@@ -881,6 +881,8 @@ CAPITAL_AIR_TYPES: frozenset[UnitTypeId] = frozenset(
         UnitTypeId.BROODLORD, UnitTypeId.BROODLORDCOCOON,
     }
 )
+# M7 E3 (§4.5.3): a Void Ray uses Prismatic Alignment with at least this many armored enemies in reach
+VOIDRAY_ALIGN_MIN_ARMORED: int = 3
 # M7 E2 (§4.2 capital air): WARNING when one of these is seen ...
 CAPITAL_AIR_TECH: frozenset[UnitTypeId] = frozenset(
     {UnitTypeId.FLEETBEACON, UnitTypeId.FUSIONCORE, UnitTypeId.GREATERSPIRE}
