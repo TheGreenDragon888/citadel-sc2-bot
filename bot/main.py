@@ -118,6 +118,7 @@ class CitadelBot(AresBot):
         self.economy = Economy(self)
         self.executor = BuildExecutor(self, self.opener, self.planner)
         self.production = Production(self)
+        self.executor.gas_starved_for = self.production.starved_for  # M7 E1: the 4th base
         self.army = Army(self, self.endgame, self.flags)
         self._load_memory()
         # §6: keep on_start under 5 s and log its duration
@@ -313,7 +314,9 @@ class CitadelBot(AresBot):
         plan.add(supply_behavior(self, other_bases=not self.planner.plan.hold_wall_gap))
         for behavior in defense:
             plan.add(behavior)
-        plan.add(self.economy.worker_behavior(expansion_allowed=self.planner.plan.allow_expand))
+        plan.add(
+            self.economy.worker_behavior(expansion_allowed=self.planner.plan.allow_expand, bases_cap=executor.bases_cap())
+        )
         plan.add(ReserveForPending(UnitTypeId.NEXUS))  # a probe waiting at an expansion
         for behavior in executor.behaviors():
             plan.add(behavior)

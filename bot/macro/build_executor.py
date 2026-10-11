@@ -24,6 +24,8 @@ from sc2.dicts.upgrade_researched_from import UPGRADE_RESEARCHED_FROM
 from sc2.position import Point2
 
 from bot.constants import (
+    FOURTH_BASE_BANK,
+    FOURTH_BASE_GAS_STARVED_S,
     GAS_PER_BASE_AFTER_SCHEDULE,
     MAX_BASES,
     NATURAL_RADIUS,
@@ -112,6 +114,24 @@ def bases_ready(bot: "AresBot") -> int:
     return len(bot.townhalls.ready)
 
 
+def bases_cap(
+    minerals: float, starved_for: float, saturated: bool, allow_expand: bool, wanted_before: bool,
+    bank: float = FOURTH_BASE_BANK, starved_s: float = FOURTH_BASE_GAS_STARVED_S,
+) -> int:
+    """M7 E1: MAX_BASES, or one more once minerals are at least `bank`, production has been
+    gas-starved for `starved_s`, our bases' mineral lines are saturated and the DefensePlan allows
+    expanding; once wanted (`wanted_before`) it stays (pure)."""
+    if wanted_before or (allow_expand and saturated and minerals >= bank and starved_for >= starved_s):
+        return MAX_BASES + 1
+    return MAX_BASES
+
+
+def lines_saturated(bot: "AresBot") -> bool:
+    """MAX_BASES ready Nexuses whose mineral lines have together at least their ideal probes."""
+    ready = bot.townhalls.ready
+    return len(ready) >= MAX_BASES and sum(t.assigned_harvesters for t in ready) >= sum(t.ideal_harvesters for t in ready)
+
+
 # structures and upgrades that need a Forge; §4.2 one-base delays the Forge
 NEEDS_FORGE: frozenset = frozenset(
     {
@@ -133,6 +153,9 @@ class BuildExecutor:
         self.schedule: tuple[ScheduleItem, ...] = schedule
         self._reached: set[ScheduleItem] = set()  # items whose count was reached once
         self.waiting_for_money: bool = False
+        # M7 E1: seconds production has been gas-starved (main.py hands in Production.starved_for)
+        self.gas_starved_for: Callable[[], float] = lambda: 0.0
+        self.fourth_base_wanted: bool = False
 
     @property
     def items(self) -> tuple[ScheduleItem, ...]:
@@ -156,12 +179,27 @@ class BuildExecutor:
         counts = [item.count for item in self.items if item.kind == "gas" and self._active(item)]
         return max(counts, default=len(bot.gas_buildings))
 
+    def bases_cap(self) -> int:
+        """M7 E1: MAX_BASES, or one more once gas-starved with a bank (`bases_cap`)."""
+        bot = self.bot
+        cap = bases_cap(
+            bot.minerals, self.gas_starved_for(), lines_saturated(bot), self.planner.plan.allow_expand,
+            self.fourth_base_wanted,
+        )
+        if cap > MAX_BASES and not self.fourth_base_wanted:
+            self.fourth_base_wanted = True
+            logger.info(
+                f"ECONOMY {bot.time_formatted} base {cap} wanted: {bot.minerals} minerals, gas-starved for "
+                f"{self.gas_starved_for():.0f} s, mineral lines saturated"
+            )
+        return cap
+
     def bases_target(self) -> int:
         """Bases wanted now, after the DefensePlan: no new base while `allow_expand` is off
         (a Nexus already started stays), at most 2 while `allow_third` is off."""
         townhalls = len(self.bot.townhalls)
         if self.finished:
-            target = MAX_BASES
+            target = self.bases_cap()
         else:
             counts = [item.count for item in self.items if item.kind == "bases" and self._active(item)]
             target = max(counts, default=townhalls)

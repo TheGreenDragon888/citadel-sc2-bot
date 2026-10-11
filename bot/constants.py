@@ -136,6 +136,14 @@ ARES_INTEL: dict[str, AresIntelFlag] = {
 # protoss_builds.yml, which covers the opener (checked at start-up).
 PROBE_TARGET: int = 66
 MAX_BASES: int = 3  # M1 deliverable: 3 bases
+# M7 E1 (§4.5.1 economy): a 4th base once minerals are at least FOURTH_BASE_BANK and production has
+# been gas-starved (production.gas_starved) for FOURTH_BASE_GAS_STARVED_S, with the 3 bases'
+# mineral lines saturated and DefensePlan.allow_expand (TUNE). Once wanted, it stays wanted (a lost
+# 4th is rebuilt); probes then go to PROBE_TARGET + FOURTH_BASE_EXTRA_PROBES (its two gases and spares)
+FOURTH_BASE_BANK: int = 1500
+FOURTH_BASE_GAS_STARVED_S: float = 60.0  # ... of gas-starved time within the last FOURTH_BASE_WINDOW_S
+FOURTH_BASE_WINDOW_S: float = 120.0  # (gas-starved flips often: 37 times in a 23-min game, 75% of it on)
+FOURTH_BASE_EXTRA_PROBES: int = 8
 # While a threat plan forbids expanding (M2): probes to this many per ready base, plus a spare
 # few for the next base (16 on minerals + 6 on gas saturate one base)
 PROBES_PER_HELD_BASE: int = 22

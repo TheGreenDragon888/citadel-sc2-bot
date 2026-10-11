@@ -7,6 +7,7 @@ the combat-sim checks of the mix come later.
 """
 
 import math
+from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
@@ -27,6 +28,7 @@ from bot.constants import (
     ARCHON_VS_ZEALOT_PCT,
     ARMY_COMPOSITION_PCT,
     ARMY_PRIORITY,
+    FOURTH_BASE_WINDOW_S,
     GATEWAY_POWER_RETRY_S,
     GATEWAY_POWER_SEARCH,
     MAX_PRODUCTION_STRUCTURES,
@@ -128,6 +130,16 @@ def gas_starved(minerals: float, vespene: float, wanted_gas: list[float], bank: 
     return minerals >= bank and bool(wanted_gas) and vespene < max(wanted_gas)
 
 
+def starved_seconds(log: list[tuple[float, bool]], now: float) -> float:
+    """M7 E1: seconds of `log` ((time, starved) samples, oldest first) spent starved: each starved
+    sample counts until the next one, the last until `now` (pure)."""
+    total = 0.0
+    for (t, starved), nxt in zip(log, [t for t, _ in log[1:]] + [now]):
+        if starved:
+            total += nxt - t
+    return total
+
+
 @dataclass
 class ReserveForUnit:
     """Holds the rest of a MacroPlan (structures, probes) while fewer than `wanted` Gateway units
@@ -169,6 +181,7 @@ class Production:
         self._power_ordered: dict[int, float] = {}  # Gateway tag -> time a Pylon was ordered for it
         self.mix = EnemyMixTracker(bot)  # M7 K3: updated each intel tick (main.py)
         self.starved = False  # M7 E1: last tick's gas_starved, for the log line on each change
+        self.starved_log: deque[tuple[float, bool]] = deque()  # (time, starved) per macro tick, E1's window
 
     def gateway_upkeep(self) -> None:
         """Once Warp Gate is researched, ares's SpawnController makes nothing while any ready,
@@ -253,6 +266,10 @@ class Production:
         count = self.bot.mediator.get_own_unit_count
         others = sum(count(unit_type_id=u) for u in shares if u not in (UnitTypeId.ARCHON, UnitTypeId.HIGHTEMPLAR))
         return shares, others, count(unit_type_id=UnitTypeId.ARCHON)
+
+    def starved_for(self) -> float:
+        """M7 E1: gas-starved seconds within the last FOURTH_BASE_WINDOW_S (`starved_seconds`)."""
+        return starved_seconds(list(self.starved_log), self.bot.time)
 
     def templar_missing(self) -> int:
         """M7 K3: Templar short of `templar_floor` (0 without the Templar Archives)."""
@@ -353,6 +370,9 @@ class Production:
         if templar > 0:
             wanted_gas.append(bot.calculate_cost(UnitTypeId.HIGHTEMPLAR).vespene)
         starved = gas_starved(bot.minerals, bot.vespene, [g for g in wanted_gas if g > 0])
+        self.starved_log.append((bot.time, starved))
+        while self.starved_log and bot.time - self.starved_log[0][0] > FOURTH_BASE_WINDOW_S:
+            self.starved_log.popleft()
         if starved != self.starved:
             self.starved = starved
             logger.info(f"PRODUCTION {bot.time_formatted} gas-starved {'on: the float makes Zealots' if starved else 'off'} ({bot.minerals} minerals, {bot.vespene} gas)")
