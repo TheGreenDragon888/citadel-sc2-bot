@@ -2462,3 +2462,61 @@ No crashes and no caught errors; every `ROW` has `log=ok`, `err=0` and `raa=0`.
   - Far HOLD deaths fell in two batches (4 and 10), partly because units dying on the way back now count as RETREAT deaths. In the free batch they rose to 49, 30 of them in game 5.
 - M1 Hard × 10 on `f7aed30`: 10/10 (4 disengages). VeryHard Protoss, VeryHard Zerg and cannon rush were stopped part-way once the Air batches showed the regression.
 - **Reverted** to `f2bab76`'s behaviour (the revert commit leaves `bot/` and `scripts/` identical to `f2bab76`; `test_m7_rules` 96/96). D26 is recorded in M7_PLAN as tried and reverted. The `f2bab76` evidence above stands for Phase 2.
+
+### Phase 3 (K1-K3, user decision D28), run 2026-10-11
+
+**Code under test:** `26d98a4`: K1 upgrade chains and timed Twilight / Templar Archives, K2 Blink (with the `ace729d` counting fix), K3 High Templar / Storm / Archons with the Templar floor (`71c50ef`), and D28 (E1's float rule: Zealots only while gas-starved). Every batch ran from a `git worktree` pinned there, 4 games at a time. Logs are kept outside the repo; replays are in `replays/m7-p3c-*`, not in git. A first full run on `ace729d` was stopped part-way once it showed no Templar in 6 of 10 VeryHard Zerg games (details under "K3 build findings" and D28).
+
+**Summary**
+
+| Criterion | Result |
+|---|---|
+| Blink researched by its schedule time in every P/T game; Charge then Blink vs Z | **PASS** in every game that reached the Twilight. Vs T: Blink started 6:10-6:22 (Twilight 5:30). Vs P: 5:00-6:35. Vs Z: Charge 5:33-6:38, then Blink 7:13-8:25. The games that didn't research it ended first: VeryHard Terran game 3 at 7:49 and VeryHard Protoss game 8 at 11:26 (Twilight placed, no research before the loss) |
+| Storms cast in VeryHard Zerg games | **PASS**: 3-26 Storms in each of the 9 won games, 89 in all. Storm started 6:55-9:11. Zerg Air: 3-7 in every game |
+| Archons vs bio-heavy built-in Terran and Zealot-heavy built-in Protoss; none from the air switch | **PASS**: VeryHard Terran 2-10 Archons in all 9 games that reached 6:00; VeryHard Protoss 1-4 in 5 of 10. The air switch isn't built yet (E3). A few Archons came in Air games from the same bio and Zealot switches: Terran Air 1 game, Protoss Air 1-2 games per batch |
+| VeryHard Terran and Protoss × 10 stay at 10/10 | **Not met: 9/10 and 9/10.** Protoss game 8 (Magannatha) was also lost on Phase 2's code. Terran game 3 (Ley Lines, one-base all-in at 3:27) was lost on both Phase 3 commits and won on Phase 2's. In controlled reruns of that game (same opener, fresh opponent id, same load) Phase 2's code won 3/3 and `26d98a4` won 2/3 (details below) |
+| Air batches (same seeds) better than Phase 2 | **PASS for Protoss and Terran Air; Zerg Air ratio worse.** Protoss Air 10/10, 9/10, 10/10 (Phase 2: 7, 9, 7) at value lost/killed 0.42, 0.49, 0.43 (0.93, 0.64, 0.89). Terran Air 10/10 at 0.17 (0.47). Zerg Air 10/10 at 0.39 (0.25) |
+| VeryHard Zerg × 10 at least 9/10 | **PASS**: 9/10. Game 3 (Ley Lines) has been lost on every commit since M5 |
+| M1 Hard × 10 | **PASS**: 10/10 |
+| M2/M3 cheese × 10 (≥ 8/10, correct flag, no scout lost before 4:00 in ≥ 7) | **PASS**: proxy rax 10/10, cannon rush 8/10, 12 pool 10/10, worker rush 10/10. Correct flag 40/40; scout criterion 9-10/10 in each |
+| M5 staged counterattack 7/7 | **PASS** |
+
+**Offline tests:** `test_m7_rules` 170/170 (adds the K1-K3 and D28 rules: `next_upgrades`, Blink rules and counting, enemy mix and the Archon switches, `unit_proportions`, `templar_floor`, `morph_pairs`, `gas_starved`), `test_attack_decision` 23/23, `test_threat_flags` 20/20, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38. `check_game_log.py` on the batch worktree: `RESULT PASS`, 200 records (the cap), 0 malformed, `./data` 511 KB.
+
+**Staged tests** (`26d98a4`, one game each): `test_outranged.py` idle_hold, hold_vs_tempest and committed PASS (as in Phase 2); `test_engagement.py` PASS; `test_counterattack.py` 7/7; `test_blink.py` PASS (Tempests: 14 blink-ins; Stalkers: 17 blink-backs); `test_templar.py` 5/5 PASS (storm, own_units, morph_spent, morph_excess, morph_all). Earlier runs of the last two on the same rules: without Blink, the Tempest case lost 2 Stalkers (0 with Blink) and the Stalker case 4 (0 with); the storm case cast 2-4 Storms with no unit of ours inside, which caught 2-12 enemy units in all.
+
+**VeryHard** (`--map all --total 10 --game-seed 3000`):
+
+| Race | Wins | Losses | Storms / Archons |
+|---|---|---|---|
+| Zerg | 9/10 | game 3 (Ley Lines, 9:23) | Storms 3-26 per won game; Archons 1-11 |
+| Terran | 9/10 | game 3 (Ley Lines, 7:49) | Archons 2-10 |
+| Protoss | 9/10 | game 8 (Magannatha, 11:26) | Archons in 5 games |
+
+**Terran game 3.** The Terran's marine-marauder push at 4:08 meets 3 Stalkers, an Adept and a Zealot. Up to 4:15 both codes play the same game step for step (same build, same losses). On Phase 2's code the Batteries and Stalkers then killed the rest of the push; on Phase 3's the Stalkers died, the natural fell and the game was lost on one base. Reruns of the game, 4 at a time:
+
+| Code | Runs | Won |
+|---|---|---|
+| `f2bab76` (Phase 2) | batch + 3 reruns | 4/4 |
+| `ace729d`, `26d98a4` (Phase 3) | 2 batches + 3 reruns | 2/5 |
+
+The rerun loss (11:51) shows what the Phase 3 code does on one base. The natural fell to the all-in at 5:30. The timed Twilight Council went down at 6:43 and Blink started at 8:17, while 65 probes on one base kept minerals near 0 and 500-750 gas banked. Army supply was 6 at 6:00 and 34 at 9:00; a 3,500-value push at 9:24 killed it. Phase 2 had no timed Twilight. The two cannon-rush losses look the same: on one base under the cannon plan, the Forge (5:00), Twilight (5:30) and Blink or +1 research went ahead, and army supply fell from 14 to 2 and from 18 to 12 between 5:00 and 8:00 (Phase 2 in the same games: 12 to 18, 12 to 32). In 2 reruns each of that cannon game, both codes won 2/2. The timed tech steps wait only for `DefensePlan.hold_tech`, which the cannon plan never sets (the Robo is needed vs Cannons) and the one-base all-in plan lifts at `DEFENSE_TECH_AFTER_SUPPLY`. **Open for a user decision (not changed):** whether the K1 timed steps (Twilight, Templar Archives) and their research should also wait while we hold fewer than 2 bases.
+
+**Cannon rush:** game 1 (Magannatha, natural variant) lost at 10:00. Game 8 (same map and variant) is recorded as a tie at 59:59, but everything was gone by 16:30 except one 2-supply unit. Both had the timed tech above. Phase 2 won both (12:54, 12:49).
+
+**Air** (Protoss: `--build Air --map all --game-seed 7000`, free openers, and twice with Phase 1's openers forced; Terran 7100, Zerg 7200):
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Phase 2, free / A / B | 7 / 9 / 7 | 0.93 / 0.64 / 0.89 | 13 / 15 / 14 | 5 / 5 / 5 | 44 (21) / 13 (6) / 42 (14) | 48 / 22 / 70 | 663 / 474 / 626 |
+| **Phase 3, free** | **10/10** | **0.42** | 14 | 3 | 2 (0) | 19 | 299 |
+| **Phase 3, forced A** | **9/10** | **0.49** | 17 | 6 | 33 (13) | 48 | 433 |
+| **Phase 3, forced B** | **10/10** | **0.43** | 13 | 1 | 10 (7) | 18 | 361 |
+| Terran Air (Phase 2 / 3) | 10 / 10 | 0.47 / **0.17** | 10 / 10 | 0 / 0 | 0 / 0 | 0 / 0 | 180 / 92 |
+| Zerg Air (Phase 2 / 3) | 10 / 10 | 0.25 / **0.39** | 11 / 13 | 0 / 1 | 0 / 2 | 0 / 2 | 101 / 241 |
+
+**Blinks** (confirmed, by kind back/in/finish): VeryHard Zerg 0-24 / 0-12 / 21-155 per game; Protoss Air up to 235 back and 427 finish in a 20:52 game, and 61 in in another. Most are finish blinks in won fights: before the `ace729d` fix the count was 235-330 per game, most of it orders that never went off.
+
+**D28 (gas-starved float):** every batch logs `PRODUCTION … gas-starved on/off`. Vs Z the float now leaves gas for Templar, Storm and Blink (Storm 6:55-9:11; before D28: 6:59-13:01, and in a smoke game not before 12:36). Minerals still bank (4,000-7,000 by 10:00 in long Zerg games): production capacity, not gas, is the limit there (E1's 4th base and sink are Phase 4).
+
+No crashes and no caught errors; every `ROW` has `log=ok`, `err=0` and `raa=0`.
