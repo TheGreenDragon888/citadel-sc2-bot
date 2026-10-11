@@ -61,7 +61,7 @@ from bot.intel.detectors import (  # noqa: E402
     proxy_production_check,
 )
 from bot.intel.scout_planner import main_rescout_due, observer_trip_ok, trip_seconds  # noqa: E402
-from bot.macro.production import next_upgrades, unit_proportions  # noqa: E402
+from bot.macro.production import next_upgrades, templar_floor, unit_proportions  # noqa: E402
 from bot.army.templar import TemplarInfo, behind, morph_pairs  # noqa: E402
 from bot.intel.enemy_mix import EnemyMix, MixEntry, fade, measure, switch  # noqa: E402
 
@@ -357,6 +357,16 @@ case("proportions: Archons enough and no casters: no Templar", _props, {**_P, Un
 case("proportions: the Templar share is capped", _props, {**_P, UnitTypeId.ARCHON: 100}, 20, 0, 0.5,
      expected={"STALKER": 0.2, "IMMORTAL": 0.125, "COLOSSUS": 0.125, "ZEALOT": 0.05, "HIGHTEMPLAR": 0.5})
 case("proportions: sum to 1", lambda: round(sum(unit_proportions(_Z, 40, 3).values()), 9), expected=1.0)
+case("floor: vs Z, small army: one caster", templar_floor, _Z, 10, 0, 0, 4, expected=1)
+case("floor: vs Z, 40 units: casters up to the cap", templar_floor, _Z, 40, 0, 0, 4, expected=4)
+case("floor: vs Z, casters there: nothing more", templar_floor, _Z, 40, 0, 4, 4, expected=4)
+case("floor: vs Z, an unpaired Templar beyond the casters gets a partner", templar_floor, _Z, 40, 0, 5, 4, expected=6)
+case("floor: vs Z, a pair beyond the casters: nothing more", templar_floor, _Z, 40, 0, 6, 4, expected=4)
+case("floor: vs Z, Archons enough: no partner", templar_floor, _Z, 40, 10, 5, 4, expected=4)
+case("floor: vs P, no Archon share: none", templar_floor, _P, 20, 0, 1, 4, expected=0)
+case("floor: vs P with the Zealot switch, an unpaired Templar gets a partner", templar_floor, {**_P, UnitTypeId.ARCHON: 10}, 20, 0, 1, 4,
+     expected=2)
+case("floor: vs P with the switch, a pair: nothing more", templar_floor, {**_P, UnitTypeId.ARCHON: 10}, 20, 0, 2, 4, expected=0)
 
 # K3: Archon morph pairs (army/templar.py)
 def _ht(tag, x, energy, uncastable_for=0.0):  # noqa: E302

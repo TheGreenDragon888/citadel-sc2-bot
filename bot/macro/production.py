@@ -6,6 +6,7 @@ mix needs), plus the §4.5.1 upgrade order through ares's UpgradeController. The
 the combat-sim checks of the mix come later.
 """
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
@@ -32,6 +33,7 @@ from bot.constants import (
     MINERAL_FLOAT_BANK,
     OBSERVER_COUNT,
     PRODUCTION_CONTROLLER_START_S,
+    TEMPLAR_MAX_CASTERS,
     TEMPLAR_SHARE_MAX,
     UPGRADE_CHAINS,
     UPGRADES_START_S,
@@ -94,6 +96,28 @@ def unit_proportions(
     if share > 0:
         out[UnitTypeId.HIGHTEMPLAR] = share
     return out
+
+
+def templar_floor(
+    shares: dict[UnitTypeId, float], others: int, archons: int, templar: int, max_casters: int = TEMPLAR_MAX_CASTERS
+) -> int:
+    """M7 K3: the Templar count to make at once, ahead of the mix (pure). ares's SpawnController
+    stops at the first unit it can't afford, so while it saves gas for a Colossus or Immortal no
+    Templar is made (no Templar in 6 of 10 VeryHard Zerg games on `ace729d`, and an unpaired one
+    waited out a whole Terran game). The floor is the casters (the HIGHTEMPLAR percent of the army
+    `unit_proportions` implies, rounded up, at most `max_casters`), and one more for an unpaired
+    Templar beyond them while Archons are still wanted (`templar`: ours now, in production too)."""
+    archon_pct = shares.get(UnitTypeId.ARCHON, 0.0)
+    ht_pct = shares.get(UnitTypeId.HIGHTEMPLAR, 0.0)
+    rest_pct = sum(pct for u, pct in shares.items() if u not in (UnitTypeId.ARCHON, UnitTypeId.HIGHTEMPLAR))
+    if rest_pct <= 0 or archon_pct + ht_pct <= 0:
+        return 0
+    per_pct = max(others, 1) / rest_pct
+    casters = min(max_casters, math.ceil(per_pct * ht_pct)) if ht_pct > 0 else 0
+    archons_missing = per_pct * archon_pct - archons
+    if templar > casters and archons_missing > 0 and (templar - casters) % 2 == 1:
+        return templar + 1
+    return casters
 
 
 @dataclass
@@ -193,18 +217,8 @@ class Production:
         production idle once the buildable units reach their shares.
         """
         bot = self.bot
-        race = race_key(bot)
-        shares = dict(ARMY_COMPOSITION_PCT[race])
-        extra = 0.0
-        if race == "Terran" and self.mix.vs_bio.on:
-            extra = ARCHON_VS_BIO_PCT
-        elif race == "Protoss" and self.mix.vs_zealots.on:
-            extra = ARCHON_VS_ZEALOT_PCT
-        if extra:
-            shares[UnitTypeId.ARCHON] = shares.get(UnitTypeId.ARCHON, 0.0) + extra
-        count = bot.mediator.get_own_unit_count
-        others = sum(count(unit_type_id=u) for u in shares if u not in (UnitTypeId.ARCHON, UnitTypeId.HIGHTEMPLAR))
-        proportions = unit_proportions(shares, others, count(unit_type_id=UnitTypeId.ARCHON))
+        shares, others, archons = self._mix_counts()
+        proportions = unit_proportions(shares, others, archons)
         if tech_ready_only:
             ready = {u: p for u, p in proportions.items() if bot.tech_ready_for_unit(u)}
             if ready:
@@ -214,6 +228,36 @@ class Production:
             unit: {"proportion": p / total, "priority": ARMY_PRIORITY[unit]}
             for unit, p in proportions.items()
         }
+
+    def _mix_counts(self) -> tuple[dict[UnitTypeId, float], int, int]:
+        """This tick's mix in percent (with the K3 Archon switches), our units of its types other
+        than Archons and Templar, and our Archons (in production too)."""
+        race = race_key(self.bot)
+        shares = dict(ARMY_COMPOSITION_PCT[race])
+        extra = 0.0
+        if race == "Terran" and self.mix.vs_bio.on:
+            extra = ARCHON_VS_BIO_PCT
+        elif race == "Protoss" and self.mix.vs_zealots.on:
+            extra = ARCHON_VS_ZEALOT_PCT
+        if extra:
+            shares[UnitTypeId.ARCHON] = shares.get(UnitTypeId.ARCHON, 0.0) + extra
+        count = self.bot.mediator.get_own_unit_count
+        others = sum(count(unit_type_id=u) for u in shares if u not in (UnitTypeId.ARCHON, UnitTypeId.HIGHTEMPLAR))
+        return shares, others, count(unit_type_id=UnitTypeId.ARCHON)
+
+    def templar_behavior(self) -> Optional["Behavior"]:
+        """M7 K3: Templar up to `templar_floor`, before the mix's SpawnController (as Observers are)."""
+        bot = self.bot
+        if not bot.tech_ready_for_unit(UnitTypeId.HIGHTEMPLAR):
+            return None
+        shares, others, archons = self._mix_counts()
+        have = bot.mediator.get_own_unit_count(unit_type_id=UnitTypeId.HIGHTEMPLAR)
+        missing = templar_floor(shares, others, archons, have) - have
+        if missing <= 0:
+            return None
+        return SpawnController(
+            {UnitTypeId.HIGHTEMPLAR: {"proportion": 1.0, "priority": 0}}, freeflow_mode=True, maximum=missing
+        )
 
     def gateway_mix(self, comp: dict[UnitTypeId, dict[str, float]]) -> dict[UnitTypeId, dict[str, float]]:
         """The mix's Gateway units for freeflow spending (defense, a mineral float), without High
@@ -277,6 +321,8 @@ class Production:
                     maximum=OBSERVER_COUNT - observers,
                 )
             )
+        if (templar := self.templar_behavior()) is not None:
+            out.append(templar)
         out.append(SpawnController(buildable))
         # ares's SpawnController stops at the first unit it can't afford (ares-sc2
         # behaviors/macro/spawn_controller.py), so while it saves gas for a Colossus or Immortal no
