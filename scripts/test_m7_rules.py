@@ -64,7 +64,8 @@ from bot.intel.scout_planner import main_rescout_due, observer_trip_ok, trip_sec
 from bot.macro.build_executor import bases_cap, tech_waits  # noqa: E402
 from bot.defense.static_defense import line_next  # noqa: E402
 from bot.macro.production import (  # noqa: E402
-    gas_starved, mix_mode, mode_shares, next_upgrades, starved_seconds, templar_floor, unit_proportions,
+    air_zerg_shares, extra_gateway, gas_starved, mix_mode, mode_shares, next_upgrades, starved_seconds, templar_floor,
+    unit_proportions,
 )
 from bot.army.templar import TemplarInfo, behind, morph_pairs  # noqa: E402
 from bot.intel.enemy_mix import EnemyMix, MixEntry, ShareSwitch, fade, measure, switch  # noqa: E402
@@ -427,6 +428,15 @@ case("mix shares: capital air vs P with Carriers: more Tempests", _shares, _P, "
      expected={"COLOSSUS": 5.0, "IMMORTAL": 25, "STALKER": 55.0, "TEMPEST": 40.0, "ZEALOT": 10})
 case("mix shares: capital air vs Z keeps the Templar and Archon shares, adds Void Rays (E0)", lambda: sorted(u.name for u in mode_shares(_Z, "capital air", "Zerg", False)),
      expected=["ARCHON", "COLOSSUS", "HIGHTEMPLAR", "IMMORTAL", "STALKER", "VOIDRAY", "ZEALOT"])
+case("air Zerg: Archon and Templar shares go to Stalkers", lambda: {u.name: v for u, v in air_zerg_shares(_Z, "Zerg", True).items()},
+     expected={"ZEALOT": 25, "STALKER": 48.0, "IMMORTAL": 25, "COLOSSUS": 10})
+case("air Zerg: unchanged while the air switch is off", lambda: air_zerg_shares(_Z, "Zerg", False) == _Z, expected=True)
+case("air Zerg: unchanged vs Protoss", lambda: air_zerg_shares({**_P, UnitTypeId.ARCHON: 10}, "Protoss", True) == {**_P, UnitTypeId.ARCHON: 10}, expected=True)
+case("extra Gateway: a bank held long enough", extra_gateway, 1500, 25.0, 10, False, 1000, 20.0, 20, expected=True)
+case("extra Gateway: not before the hold", extra_gateway, 1500, 10.0, 10, False, 1000, 20.0, 20, expected=False)
+case("extra Gateway: not while one is building", extra_gateway, 1500, 25.0, 10, True, 1000, 20.0, 20, expected=False)
+case("extra Gateway: not at the cap", extra_gateway, 1500, 25.0, 20, False, 1000, 20.0, 20, expected=False)
+case("extra Gateway: not without the bank", extra_gateway, 900, 25.0, 10, False, 1000, 20.0, 20, expected=False)
 case("line defense: a Pylon first", line_next, False, False, False, True, True, expected=UnitTypeId.PYLON)
 case("line defense: then the Cannon", line_next, True, False, False, True, True, expected=UnitTypeId.PHOTONCANNON)
 case("line defense: the Battery while the Forge builds", line_next, True, False, False, False, True, expected=UnitTypeId.SHIELDBATTERY)

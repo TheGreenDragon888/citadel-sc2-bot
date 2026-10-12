@@ -34,9 +34,12 @@ from bot.constants import (
     CAPITAL_AIR_COLOSSUS_PCT,
     CAPITAL_AIR_STALKER_PLUS_PCT,
     CAPITAL_VS_CARRIER_TEMPEST_PCT,
+    EXTRA_GATEWAY_BANK,
+    EXTRA_GATEWAY_HOLD_S,
     FOURTH_BASE_WINDOW_S,
     GATEWAY_POWER_RETRY_S,
     GATEWAY_POWER_SEARCH,
+    MAX_GATEWAYS,
     MAX_PRODUCTION_STRUCTURES,
     MINERAL_FLOAT_BANK,
     OBSERVER_COUNT,
@@ -151,6 +154,26 @@ def mix_mode(air_harass: bool, air_on: bool, capital_active: bool) -> str:
     return NORMAL
 
 
+def air_zerg_shares(shares: dict[UnitTypeId, float], race: str, air_on: bool) -> dict[UnitTypeId, float]:
+    """M7 D32 (user decision): vs an air-heavy Zerg (the air ShareSwitch on), the Archon and Templar
+    shares go to Stalkers: Archons aren't an anti-air tool (D10), and on `f2084c6` CheatInsane Zerg
+    Air went 0/10 with about 2 Stalkers per fight (pure)."""
+    if race != "Zerg" or not air_on:
+        return dict(shares)
+    out = dict(shares)
+    moved = out.pop(UnitTypeId.ARCHON, 0.0) + out.pop(UnitTypeId.HIGHTEMPLAR, 0.0)
+    if moved:
+        out[UnitTypeId.STALKER] = out.get(UnitTypeId.STALKER, 0.0) + moved
+    return out
+
+
+def extra_gateway(minerals: float, banked_for: float, gateways: int, building: bool,
+                  bank: float = EXTRA_GATEWAY_BANK, hold_s: float = EXTRA_GATEWAY_HOLD_S, max_gateways: int = MAX_GATEWAYS) -> bool:
+    """M7 D34: one more Gateway while minerals have stayed at least `bank` for `hold_s`, with none
+    under construction and fewer than `max_gateways` (Gateways + Warp Gates) (pure)."""
+    return minerals >= bank and banked_for >= hold_s and not building and gateways < max_gateways
+
+
 def mode_shares(base: dict[UnitTypeId, float], mode: str, race: str, carriers_seen: bool) -> dict[UnitTypeId, float]:
     """M7 E3: the mix in percent for `mode` from the normal one (`base`, K3 shares included) (pure)."""
     shares = dict(base)
@@ -220,6 +243,8 @@ class Production:
         self.starved = False  # M7 E1: last tick's gas_starved, for the log line on each change
         self.starved_log: deque[tuple[float, bool]] = deque()  # (time, starved) per macro tick, E1's window
         self.mode: str = NORMAL  # M7 E3: the mix selection, and its changes (game seconds, mode)
+        self.bank_since: Optional[float] = None  # M7 D34: since when minerals have been >= EXTRA_GATEWAY_BANK
+        self.extra_gateways: int = 0
         self.mode_changes: list[tuple[float, str]] = []
 
     def gateway_upkeep(self) -> None:
@@ -315,7 +340,7 @@ class Production:
             self.mode = mode
         detectors = getattr(bot, "detectors", None)
         carriers = detectors is not None and "CARRIER" in detectors.first_seen
-        shares = mode_shares(shares, mode, race, carriers)
+        shares = mode_shares(air_zerg_shares(shares, race, self.mix.air.on), mode, race, carriers)
         count = bot.mediator.get_own_unit_count
         others = sum(count(unit_type_id=u) for u in shares if u not in (UnitTypeId.ARCHON, UnitTypeId.HIGHTEMPLAR))
         return shares, others, count(unit_type_id=UnitTypeId.ARCHON)
@@ -449,6 +474,22 @@ class Production:
                 out.append(SpawnController({UnitTypeId.ZEALOT: {"proportion": 1.0, "priority": 0}}, freeflow_mode=True))
             elif gateway_mix := self.gateway_mix(buildable):
                 out.append(SpawnController(gateway_mix, freeflow_mode=True))
+        # M7 D34: a Gateway more while a mineral bank stays (after the opener; not while tech waits)
+        if bot.minerals >= EXTRA_GATEWAY_BANK:
+            self.bank_since = bot.time if self.bank_since is None else self.bank_since
+        else:
+            self.bank_since = None
+        structures = bot.mediator.get_own_structures_dict
+        gateways = len(structures[UnitTypeId.GATEWAY]) + len(structures[UnitTypeId.WARPGATE])
+        building = bool(bot.mediator.get_building_counter[UnitTypeId.GATEWAY]) or any(
+            not g.is_ready for g in structures[UnitTypeId.GATEWAY]
+        )
+        banked_for = 0.0 if self.bank_since is None else bot.time - self.bank_since
+        if schedule_finished and not plan.hold_tech and extra_gateway(bot.minerals, banked_for, gateways, building):
+            out.append(BuildStructure(bot.start_location, UnitTypeId.GATEWAY))
+            self.extra_gateways += 1
+            self.bank_since = bot.time  # the next one only after another EXTRA_GATEWAY_HOLD_S of bank
+            logger.info(f"PRODUCTION {bot.time_formatted} extra Gateway ({gateways + 1}): {bot.minerals} minerals banked for {banked_for:.0f} s")
         if (schedule_finished or bot.time >= PRODUCTION_CONTROLLER_START_S) and not plan.hold_tech:
             out.append(
                 ProductionController(

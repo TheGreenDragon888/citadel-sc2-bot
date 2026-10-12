@@ -375,6 +375,13 @@ GATEWAY_POWER_RETRY_S: float = 30.0
 # timed schedule is finished, or at this time at the latest
 PRODUCTION_CONTROLLER_START_S: float = 330.0
 MAX_PRODUCTION_STRUCTURES: int = 12
+# M7 D34 (user decision): a mineral sink. ares's ProductionController adds production for a bank only
+# with 400 gas banked too, which a gas-starved bot never has; so while minerals have stayed at
+# least EXTRA_GATEWAY_BANK for EXTRA_GATEWAY_HOLD_S, one more Gateway (none under construction), up to
+# MAX_GATEWAYS Gateways + Warp Gates in all (TUNE)
+EXTRA_GATEWAY_BANK: int = 1000
+EXTRA_GATEWAY_HOLD_S: float = 20.0
+MAX_GATEWAYS: int = 20
 # §4.5.1 upgrades (M7 K1, user decisions): each research building works through its own list in
 # parallel, one upgrade at a time per building, and an upgrade never starts the building it needs
 # (UpgradeController with auto tech-up off). Forge weapons first, then armour; Twilight Blink then
