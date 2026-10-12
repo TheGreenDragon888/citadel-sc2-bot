@@ -2653,3 +2653,72 @@ Phase 4 features in the batches: AIR_HARASS raised from a Starport Tech Lab, Sta
 - D30 and Phase 4 got some of it back (14.7 Stalkers per fight, 63 army supply), not enough: 1/10 and 2/10. Phase 4's own changes are not the cause (D30 1/10, Phase 4 2/10).
 
 **Cannon rush:** 7/10. Games 5 (Pylon) and 9 (Ultralove) are the main variant: the rush Cannons killed the main Nexus by about 3:30 while single Zealots were sent at a Cannon one at a time (game 5 was lost in 4 of 7 runs before M7; game 9 was also lost on `f2084c6`). Game 8 (Magannatha, natural variant) was lost at 14:31. No Phase 3 or 4 code acts before 5:00 in these games (the timed tech starts at 5:00; the new flags need air tech, which this opponent doesn't build). The cannon batches since Phase 3 went 8, 8, 7. **Second batch** (same code, seeds and order, a fresh opponent id; a container restart after game 1, resumed with `--start 2`): **9/10**, losing only game 5 (Pylon, main variant) again; correct flag 10/10, no scout lost before 4:00 in 10/10. Together 16/20.
+
+### D32-D34 re-run (user decisions 2026-10-12), run 2026-10-12
+
+**Code under test:** `ce4c719` (`df54f97` plus D32: vs an air-heavy Zerg the Templar / Archon shares go to Stalkers, and the Templar Archives step and Storm research wait; D33: Void Ray masses stay out of capital air; D34: extra Gateways as a mineral sink, also after `PRODUCTION_CONTROLLER_START_S`). The full Phase 4 set, same seeds and openers, from a worktree pinned at `ce4c719`, 4 at a time; replays in `replays/m7-p4b-*`.
+
+**Summary (M7's acceptance, M7_PLAN Phase 4)**
+
+| Criterion | Phase 4 (`df54f97`) | D32-D34 (`ce4c719`) |
+|---|---|---|
+| VeryHard Air: Protoss ≥ 7, Terran ≥ 9 with no loss to Battlecruisers, Zerg ≥ 9 | 10 (forced 9, 10) / 10 / 9 | **PASS**: 10 (forced 10, 10) / 10 (no loss) / **10** |
+| CheatInsane Air: Terran ≥ 7/10 | 9/10 | **PASS: 8/10**. Both losses (games 6 and 9, 32:04 and 32:52) were against Battlecruisers (peak 2,100 and 4,200 value) after we had killed more than we lost (58k / 37k, 60k / 35k) |
+| CheatInsane Air: Zerg ≥ 9/10 | 2/10 | **NOT MET: 3/10** (below) |
+| Unspent minerals at 10:00 below the postmortem's 2,670 | three batches above (2,832-3,760) | **PASS**: every batch below (means 94-2,471; below) |
+| M1 Hard × 10 | 10/10 | **PASS**: 10/10 |
+| M2/M3 cheese × 10 (≥ 8/10, correct flag, scout criterion) | 10 / 7, then 9 / 10 / 10 | **PASS**: proxy rax 10/10, cannon rush 9/10 + 1 tie, 12 pool 10/10, worker rush 10/10. Correct flag 40/40; no scout lost before 4:00 in 10, 10, 10 and 9 of 10 |
+| M4 VeryHard × 10 (≥ 7 each) | 9 / 9 / 10 | **PASS**: Zerg 9/10, Terran 10/10, Protoss 10/10 |
+| M5 staged counterattack 7/7 | PASS | **PASS** |
+
+**Offline tests:** `test_m7_rules` 223/223 (adds D32's `air_zerg_shares` / `templar_tech_wanted` and D34's `extra_gateway`), `test_attack_decision` 23/23, `test_threat_flags` 31/31, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38. `check_game_log.py` (in the worktree): `RESULT PASS`, 200 records, 0 malformed, `./data` 662 KB.
+
+**Staged tests** (`ce4c719`): outranged 3/3 PASS, engagement PASS, counterattack 7/7, Blink PASS (Tempests: 14 blink-ins, 0 lost against 2 lost without Blink; Stalkers: 18 blink-backs, 0 lost against 5), Templar 5/5 PASS (storm: 2 Storms, none on our units, 5 enemy units inside them).
+
+**Air:**
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Protoss Air free / A / B, Phase 4 | 10 / 9 / 10 | 0.35 / 0.43 / 0.40 | 13 / 11 / 16 | 2 / 1 / 2 | 1 (0) / 11 (6) / 2 (0) | 15 / 23 / 20 | 256 / 345 / 283 |
+| **Protoss Air free / A / B, D32-D34** | **10 / 10 / 10** | **0.28 / 0.32 / 0.38** | 13 / 16 / 14 | 2 / 5 / 3 | 1 (0) / 0 / 0 | 10 / 17 / 23 | 169 / 251 / 279 |
+| Terran Air, Phase 4 / D32-D34 | 10 / 10 | 0.16 / 0.22 | 11 / 13 | 1 / 0 | 0 / 0 | 2 / 0 | 75 / 130 |
+| Zerg Air, Phase 4 / D32-D34 | 9 / **10** | 0.57 / **0.28** | 20 / 11 | 7 / 0 | 14 (1) / 0 | 56 / 6 | 418 / 153 |
+| CheatInsane Terran Air, Phase 4 / D32-D34 | 9 / 8 | 0.37 / 0.42 | 17 / 28 | 6 / 16 | 29 (12) / 27 (10) | 34 / 62 | 447 / 727 |
+| CheatInsane Zerg Air, Phase 4 / D32-D34 | 2 / **3** | 0.66 / 0.76 | 18 / 21 | 13 / 13 | 80 (18) / 97 (25) | 233 / 257 | 878 / 1,094 |
+
+**D32 in the games.** The air switch turned on vs Zerg in VeryHard Zerg (4 times), Zerg Air (12) and CheatInsane Zerg Air (25). While it is on, no Templar Archives step and no Storm: the Archives went down when it turned off (CheatInsane Zerg game 3: switch off 9:05, Archives 9:10; game 7: off 14:19, Archives 14:19). Zerg Air went from 9/10 at 0.57 to 10/10 at 0.28, back to Phase 2's 0.25.
+
+**D33 in the games.** No `INTEL capital air ACTIVE` line names a Void Ray, though enemy Void Rays were in fights in 8 of 10 Protoss Air games and 8 of 10 paired A games, up to 12 at once. The ACTIVE lines name Battlecruisers (29), Tempests (23), Brood Lords (16), Brood Lord cocoons (10) and Carriers (2).
+
+**D34 (unspent minerals at 10:00, mean / median / max; Phase 4 mean in brackets):**
+
+| Batch | Unspent | Extra-Gateway orders (first at) |
+|---|---|---|
+| VeryHard Zerg / Terran / Protoss | 1,719 [2,090] / 1,976 [2,832] / 1,389 [1,271] | 62 / 43 / 33 (5:30-11:11) |
+| Protoss / Terran / Zerg Air | 1,622 [1,821] / 965 [1,406] / 2,116 [3,452] | 39 / 28 / 41 |
+| CheatInsane Terran / Zerg Air | 1,039 [1,086] / 2,471 [3,760] (median 3,036, max 4,235) | 127 / 140 |
+| Paired A / B, M1 Hard | 1,023 [1,042] / 885 [1,093] / 1,778 [1,664] | 45 / 50 / 38 |
+| Proxy rax / cannon rush / 12 pool / worker rush | 94 / 1,254 / 265 / 1,633 | |
+
+- **Not every order builds a Gateway.** An order that comes with the same Gateway count as the one before means the last order didn't start a Gateway (or a Gateway died in between): 72 of 140 orders in CheatInsane Zerg Air, 39 of 127 in CheatInsane Terran Air, 13 of 41 in Zerg Air, 0-12 in the rest. In CheatInsane Zerg game 6 (a win) the bank reached 10,330 at 25:31 with orders every 20 s at 14 Gateways. ares's `BuildStructure` returns without building when `request_building_placement` finds no placement (for Protoss it asks for one inside Pylon power) or no worker. Which of the two happens here is not checked; D34 adds no Pylon for new Gateways. The criterion (at 10:00) is met, but after about 15:00 the sink stops in long games.
+
+**CheatInsane Zerg Air, 3/10** (wins: games 4, 6, 7). At 10:00 (mean): supply 150, army supply 79, 2.6 bases, minerals 2,466, gas 182 (Phase 4: 134 / 63 / 2.6 / 3,760). About 14 Stalkers per fight from 9:00 to 11:00 (Phase 4: 14.7; Phase 2: 21.3). The bigger army is mostly minerals; gas stays the limit on Stalkers. The fights are as Phase 2's: 21 launches, 13 retreated within 60 s, 97 HOLD deaths (25 far), 257 RETREAT deaths.
+
+The air switch (one share threshold for on and off, `AIR_SWITCH_SHARE` 0.30, `AIR_SWITCH_HOLD_S` 60) turned off when the enemy's air share went just below 0.30 (logged at 0.24-0.29 in 8 of the 25 offs). Time with the switch on, per game:
+
+| Game | Result | Length | Switch on |
+|---|---|---|---|
+| 1 | Defeat | 15:48 | 528 s (56 %) |
+| 2 | Defeat | 29:56 | 472 s (26 %) |
+| 3 | Defeat | 15:30 | 269 s (29 %) |
+| 4 | **Victory** | 23:45 | 737 s (52 %) |
+| 5 | Defeat | 13:13 | 96 s (12 %) |
+| 6 | **Victory** | 26:12 | 745 s (47 %) |
+| 7 | **Victory** | 23:04 | 896 s (65 %) |
+| 8 | Defeat | 22:04 | 451 s (34 %) |
+| 9 | Defeat | 17:34 | 489 s (46 %) |
+| 10 | Defeat | 16:11 | 347 s (36 %) |
+
+The three wins had the switch on for 47-65 % of the game, the losses 12-56 %; with 10 games that is a correlation, not a cause.
+
+No crashes and no caught bot errors; every `ROW` has `log=ok`, `err=0` and `raa=0` (150 games). The `Connection already closed` lines in some logs come at game end after `kill_switch` (also in the Phase 4 run).
