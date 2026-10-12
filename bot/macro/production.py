@@ -345,6 +345,11 @@ class Production:
         others = sum(count(unit_type_id=u) for u in shares if u not in (UnitTypeId.ARCHON, UnitTypeId.HIGHTEMPLAR))
         return shares, others, count(unit_type_id=UnitTypeId.ARCHON)
 
+    def templar_tech_wanted(self) -> bool:
+        """M7 D32: False vs an air-heavy Zerg (the air ShareSwitch on), when the mix has no Templar:
+        the Templar Archives' timed step and Storm research wait too."""
+        return not (race_key(self.bot) == "Zerg" and self.mix.air.on)
+
     def starved_for(self) -> float:
         """M7 E1: gas-starved seconds within the last FOURTH_BASE_WINDOW_S (`starved_seconds`)."""
         return starved_seconds(list(self.starved_log), self.bot.time)
@@ -379,6 +384,8 @@ class Production:
                 chains[UnitTypeId.TWILIGHTCOUNCIL] = (UpgradeId.BLINKTECH,) + tuple(u for u in chain if u != UpgradeId.BLINKTECH)
         bases = bases_ready(bot)
         chains = {b: chain for b, chain in chains.items() if not tech_waits(b, bases)}  # M7 D29
+        if not self.templar_tech_wanted():
+            chains.pop(UnitTypeId.TEMPLARARCHIVE, None)  # M7 D32: no Storm while no Templar are wanted
         ready = {b for b in chains if any(s.is_ready for s in bot.mediator.get_own_structures_dict[b])}
         progress = {u: bot.already_pending_upgrade(u) for chain in chains.values() for u in chain}
         return next_upgrades(chains, ready, progress)
@@ -485,7 +492,8 @@ class Production:
             not g.is_ready for g in structures[UnitTypeId.GATEWAY]
         )
         banked_for = 0.0 if self.bank_since is None else bot.time - self.bank_since
-        if schedule_finished and not plan.hold_tech and extra_gateway(bot.minerals, banked_for, gateways, building):
+        after_opener = schedule_finished or bot.time >= PRODUCTION_CONTROLLER_START_S
+        if after_opener and not plan.hold_tech and extra_gateway(bot.minerals, banked_for, gateways, building):
             out.append(BuildStructure(bot.start_location, UnitTypeId.GATEWAY))
             self.extra_gateways += 1
             self.bank_since = bot.time  # the next one only after another EXTRA_GATEWAY_HOLD_S of bank

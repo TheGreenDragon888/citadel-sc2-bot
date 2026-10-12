@@ -248,6 +248,9 @@ class BuildExecutor:
             return False
         if tech_waits(item.type_id, bases_ready(bot), item.part_of_opener):
             return False
+        production = getattr(bot, "production", None)
+        if item.type_id == UnitTypeId.TEMPLARARCHIVE and not item.part_of_opener and production is not None and not production.templar_tech_wanted():
+            return False  # M7 D32: vs an air-heavy Zerg the mix has no Templar
         if item.where == "nat" and plan.hold_wall_gap:
             return False  # the probe couldn't get past our own gap holder
         if item.where == "nat" and not self._have_natural():
