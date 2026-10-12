@@ -2605,3 +2605,51 @@ What it sets (E3, `constants.CAPITAL_AIR_ADD_PCT`):
 - **Vs Zerg (Brood Lords + Corruptors): Void Rays**: no loss, and done in 11 s against the Tempests' 38 s. Corruptors' bonus is against massive units, which Tempests are and Void Rays aren't.
 - **Mass Void Rays (D13, a user decision):** Blink Stalkers beat them with at most one loss; Tempests lost every game. So the numbers say Void Ray masses should not trigger the Tempest / Void Ray response: the air switch's Stalker share is the better answer. Left as it is (Void Rays aren't capital ships, so they only raise the Stalker share); for the user to confirm.
 - Not tested: Carriers (not an E0 case); vs P with a Carrier seen the mix adds more Tempests, per §4.5.1.
+
+### Phase 4 (E0-E3), run 2026-10-11/12
+
+**Code under test:** `df54f97` (E1 4th base, E2 AIR_HARASS / CAPITAL_AIR detection and the mineral-line plan, E3 mix selection and Tempest / Void Ray micro, E0's shares), on top of Phase 3 + D30. Every batch from a worktree pinned there, 4 at a time; replays in `replays/m7-p4-*`.
+
+**Summary (M7's acceptance, M7_PLAN Phase 4)**
+
+| Criterion | Result |
+|---|---|
+| VeryHard Air (same seeds): Protoss ≥ 7, Terran ≥ 9 with no loss to Battlecruisers, Zerg ≥ 9 | **PASS**: Protoss 10/10 (forced openers 9/10 and 10/10), Terran 10/10 (no loss), Zerg 9/10 |
+| CheatInsane Air: Terran ≥ 7/10, Zerg ≥ 9/10 | **Terran PASS: 9/10** (baseline 2/10). **Zerg NOT MET: 2/10** (baseline 8/10); bisected below: it started before Phase 4 |
+| Unspent minerals at 10:00 well below the postmortem's 2,670 | **NOT MET in three batches** (means): Zerg Air 3,452, CheatInsane Zerg 3,760, VeryHard Terran 2,832. Below in the rest (754-2,090). The 4th base was wanted at 7:30-10:00 in most long games, but the bank didn't fall (Phase 2: VeryHard Terran 1,644, Zerg Air 2,702) |
+| M1 Hard × 10 | **PASS**: 10/10 |
+| M2/M3 cheese × 10 (≥ 8/10, correct flag, scout criterion) | proxy rax 10/10, 12 pool 10/10, worker rush 10/10: **PASS**. **Cannon rush 7/10: NOT MET** (second batch below). Correct flag 40/40 |
+| M4 VeryHard × 10 (≥ 7 each) | **PASS**: Zerg 9/10, Terran 9/10, Protoss 10/10 |
+| M5 staged counterattack 7/7 | **PASS** |
+
+**Offline tests:** `test_m7_rules` 215/215, `test_attack_decision` 23/23, `test_threat_flags` 31/31 (adds CAPITAL_AIR WARNING / ACTIVE expiry and AIR_HARASS satisfied), `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38. `check_game_log.py`: `RESULT PASS` (record version 7), 200 records, 0 malformed, `./data` 635 KB.
+
+**Staged tests** (`df54f97`): outranged 3/3, engagement PASS, counterattack 7/7, Blink PASS, Templar 5/5. E0 above.
+
+**Air:**
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Protoss Air free / A / B | 10 / 9 / 10 | 0.35 / 0.43 / 0.40 | 13 / 11 / 16 | 2 / 1 / 2 | 1 (0) / 11 (6) / 2 (0) | 15 / 23 / 20 | 256 / 345 / 283 |
+| Terran Air | 10/10 | 0.16 | 11 | 1 | 0 | 2 | 75 |
+| Zerg Air | 9/10 | 0.57 | 20 | 7 | 14 (1) | 56 | 418 |
+| CheatInsane Terran Air | 9/10 | 0.37 | 17 | 6 | 29 (12) | 34 | 447 |
+| CheatInsane Zerg Air | **2/10** | 0.66 | 18 | 13 | 80 (18) | 233 | 878 |
+
+Phase 4 features in the batches: AIR_HARASS raised from a Starport Tech Lab, Stargate or Spire, with a Pylon, Cannon and Battery placed at each mineral line and "satisfied" logged; CAPITAL_AIR WARNING from a Fusion Core / Greater Spire / Fleet Beacon and ACTIVE from Battlecruisers (700) and Brood Lords (550-1,100); the mix went normal → air switch → capital air and back; a 4th base in most long games. Smoke games (one each, before the batches): VeryHard Zerg, Protoss and Terran Air and CheatInsane Terran Air all won, the last at 16:46 against Battlecruisers.
+
+**CheatInsane Zerg Air, bisected** (seed 7400, all 10 maps, same load):
+
+| Code | Wins | Value lost / killed | At 10:00 (mean): supply / army supply / bases / unspent minerals |
+|---|---|---|---|
+| Baseline M6 (`8036973`) | 8/10 | 0.50 | 168 / 101 / 2.9 / 1,858 |
+| Phase 2 (`f2bab76`) | 4/10 | 0.81 | 169 / 101 / 3.0 / 2,122 |
+| Phase 3 (`f2084c6`) | 0/10 | 1.22 | 108 / 44 / 2.1 / 2,047 |
+| D30 (`7c6d8dc`) | 1/10 | 0.71 | (not computed) |
+| Phase 4 (`df54f97`) | 2/10 | 0.66 | 134 / 63 / 2.6 / 3,760 |
+
+- **Phase 2 (8 → 4) changed the fights, not the economy:** at 10:00 its army was as big as the baseline's (101 supply). The baseline won with one launch at 13-15 minutes; Phase 2's armies fought more at home (21 launches, 13 retreated within 60 s, 66 HOLD deaths).
+- **Phase 3 (4 → 0) changed production:** at 10:00 the army was 44 supply on 2.1 bases. Our units in fights from 9:00 to 11:00 averaged 2.4 Stalkers per fight (Phase 2: 21.3). The Zerg mix gained Templar (casters and the Archon share) and Zealots (the D28 float while gas-starved); against Mutalisks and Corruptors those don't stop the air, and gas went to Templar and Storm before Stalkers.
+- D30 and Phase 4 got some of it back (14.7 Stalkers per fight, 63 army supply), not enough: 1/10 and 2/10. Phase 4's own changes are not the cause (D30 1/10, Phase 4 2/10).
+
+**Cannon rush:** 7/10. Games 5 (Pylon) and 9 (Ultralove) are the main variant: the rush Cannons killed the main Nexus by about 3:30 while single Zealots were sent at a Cannon one at a time (game 5 was lost in 4 of 7 runs before M7; game 9 was also lost on `f2084c6`). Game 8 (Magannatha, natural variant) was lost at 14:31. No Phase 3 or 4 code acts before 5:00 in these games (the timed tech starts at 5:00; the new flags need air tech, which this opponent doesn't build). The cannon batches since Phase 3 went 8, 8, 7.
