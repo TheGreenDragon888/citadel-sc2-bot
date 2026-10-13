@@ -2733,3 +2733,22 @@ No crashes and no caught bot errors; every `ROW` has `log=ok`, `err=0` and `raa=
 - `on_building_started` marks a placement unavailable only when the structure's position equals it, so a Pylon placed through `BuildStructure` (a placement point) is booked.
 - **`MacroPlan.execute`** (`behaviors/macro/macro_plan.py`) is `return any(macro.execute(ai, config, mediator) for macro in self.macros)`: it stops at the first behavior that returns True. Citadel's plan (`main._register_macro_plan`) puts production last, and D34's `BuildStructure` came after the unit spenders, for one step. In the staged test (`scripts/test_gateway_space.py`, before the fix) 8 orders gave 4 Gateways with powered spots free (the order count repeated at 4, 5 and 7 Gateways); that is most of the "72 of 140" in CheatInsane Zerg Air.
 - `BuildingManager.build_with_specific_worker` adds the worker to `building_tracker` and `building_counter[type] += 1` (`managers/building_manager.py:671-681`); the counter goes down when the structure has started or the worker died. So `get_building_counter[GATEWAY]` plus unfinished Gateways covers an order from worker assignment to completion, and `BuildStructure` given every step makes no second order meanwhile (`max_on_route` 1 via `not_started_but_in_building_tracker`).
+
+**D35/D36 staged and offline tests** (`dcf32bc`): `test_m7_rules` 234/234 (adds `gateway_space` and the air switch's off share), `test_attack_decision` 23/23, `test_threat_flags` 31/31, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38. `scripts/test_gateway_space.py` (PersephoneAIE_v4, invulnerable idle Zerg, fast build and +5,000 minerals for Citadel from 5:00, its army units removed every 20 s):
+- Before the persistence fix, 8 extra-Gateway orders gave 4 Gateways with powered spots free (the order count repeated at 4, 5 and 7 Gateways).
+- `plain`: **PASS**, 20 Gateways + Warp Gates at 13:19 from 17 orders, every order one Gateway; no Pylon for space was needed (the supply Pylons powered enough spots).
+- `no_power` (the first 8 free powered spots filled with debug Gateways at 5:00; cap raised to 30 for the test): **PASS**, 11 Gateways after the fill, 9 Pylons for Gateway space, each spot that had its 2 tries passed over ((72, 39) → (69, 41) → (66, 55), then Gateways again). Filling every powered spot (16-17 at the top spawn) left a free powered spot where a worker never managed to build, in 3 of 3 runs; that is why the fill stops at 8 (the bottom spawn's 8-9 worked in 4 of 4).
+
+**D37, round 1** (CheatInsane Zerg Air, seed 7400, all 10 maps, 4 at a time; worktrees `~/wt_d37_*`; the switched-back code is `scratchpad/d37/switch_back.py`'s edits, saved as patches next to the logs, never committed):
+
+| Code | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths | RETREAT deaths | At 10:00: supply / army / bases / minerals / gas |
+|---|---|---|---|---|---|---|---|
+| Phase 1's end (`2307de5`) | **8/10** | 0.56 | 21 | 4 | 16 | 87 | 173 / 106 / 3.0 / 1,884 / 234 |
+| D35/D36 (`dcf32bc`) | **2/10** | 0.65 | 26 | 14 | 98 | 197 | 148 / 75 / 2.8 / 2,279 / 142 |
+| `dcf32bc`, all six Phase 2 groups switched back | **6/10** | 0.58 | 42 | 21 | 29 | 249 | 156 / 85 / 2.9 / 2,107 / 152 |
+| `dcf32bc`, C3 (retreat fire) switched back | 3/10 | 0.72 | 25 | 15 | 77 | 244 | 149 / 78 / 2.7 / 1,939 / 164 |
+
+- Phase 1's end wins as often as the M6 baseline (8/10): the drop came with Phase 2's fight rules and Phase 3's production, as bisected before.
+- With all six groups switched back, 2 → 6 wins and HOLD deaths 98 → 29. C3 alone changes nothing (3/10). The army at 10:00 is still 75-85 supply against Phase 1's 106.
+- D35 in these games: 2 of 57 extra-Gateway orders came without a new Gateway (`ce4c719`: 72 of 140). D36: the air switch was on 58 % of the game time (`ce4c719`: 40 %); 2/10 against 3/10 is within the ±2 spread.
+- In the D35/D36 batch, 79 of 126 DEFEND holds had C5's out-range penalty (-1 to -3), and some holds came at level 8-9 from C9's re-engagement wait ("no new engagement until …").
