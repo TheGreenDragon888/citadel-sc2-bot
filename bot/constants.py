@@ -371,6 +371,12 @@ MINERAL_FLOAT_BANK: int = 700
 # many tiles of it, re-ordered at most this often
 GATEWAY_POWER_SEARCH: int = 5
 GATEWAY_POWER_RETRY_S: float = 30.0
+# M7 D35: with no powered Gateway spot free, a Pylon next to a free unpowered one, at most this many
+# times per spot (a spot that stays unpowered isn't tried again)
+GATEWAY_SPACE_PYLON_TRIES: int = 2
+# ... and a spot that had its tries is passed over by asking ares for the free spot nearest a point
+# this far to each side of the base instead (ares offers the one nearest the point asked)
+GATEWAY_SPACE_PROBE: float = 10.0
 # ProductionController (adds Gateways/Robos and the tech they need) starts when the opener's
 # timed schedule is finished, or at this time at the latest
 PRODUCTION_CONTROLLER_START_S: float = 330.0
@@ -1027,3 +1033,7 @@ MIX_FRESH_S: float = 60.0
 # Zealots (Zealots can't hit air; Zerg Air on f2084c6 went 9/10 at value ratio 0.58)
 AIR_SWITCH_SHARE: float = 0.30
 AIR_SWITCH_HOLD_S: float = 60.0
+# M7 D36: once on, the air switch turns off only after the share has stayed below this (not below
+# AIR_SWITCH_SHARE) for AIR_SWITCH_HOLD_S. With one threshold it went off at shares of 0.24-0.29 in
+# 8 of 25 offs in a CheatInsane Zerg Air batch, and the Templar tech went down each time (TUNE)
+AIR_SWITCH_OFF_SHARE: float = 0.15

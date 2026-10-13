@@ -39,6 +39,8 @@ from bot.constants import (
     FOURTH_BASE_WINDOW_S,
     GATEWAY_POWER_RETRY_S,
     GATEWAY_POWER_SEARCH,
+    GATEWAY_SPACE_PROBE,
+    GATEWAY_SPACE_PYLON_TRIES,
     MAX_GATEWAYS,
     MAX_PRODUCTION_STRUCTURES,
     MINERAL_FLOAT_BANK,
@@ -174,6 +176,20 @@ def extra_gateway(minerals: float, banked_for: float, gateways: int, building: b
     return minerals >= bank and banked_for >= hold_s and not building and gateways < max_gateways
 
 
+def gateway_space(powered_spot: bool, pylon_building: bool, unpowered_spot: bool, spot_tries: int,
+                  max_tries: int = GATEWAY_SPACE_PYLON_TRIES) -> str:
+    """M7 D35: what an extra-Gateway order does. "gateway" when a powered spot is free; else "wait"
+    while a Pylon is under construction (it may power one); else "pylon" when a free spot only
+    lacks power and fewer than `max_tries` Pylons were ordered for it; else "none" (pure). ares's
+    `BuildStructure` builds nothing without a powered spot, which left 72 of 140 orders in a
+    CheatInsane Zerg batch without a Gateway."""
+    if powered_spot:
+        return "gateway"
+    if pylon_building:
+        return "wait"
+    return "pylon" if unpowered_spot and spot_tries < max_tries else "none"
+
+
 def mode_shares(base: dict[UnitTypeId, float], mode: str, race: str, carriers_seen: bool) -> dict[UnitTypeId, float]:
     """M7 E3: the mix in percent for `mode` from the normal one (`base`, K3 shares included) (pure)."""
     shares = dict(base)
@@ -245,6 +261,10 @@ class Production:
         self.mode: str = NORMAL  # M7 E3: the mix selection, and its changes (game seconds, mode)
         self.bank_since: Optional[float] = None  # M7 D34: since when minerals have been >= EXTRA_GATEWAY_BANK
         self.extra_gateways: int = 0
+        self.space_pylons: int = 0  # M7 D35: Pylons ordered to make room for an extra Gateway
+        self.no_gateway_space = False  # logged once until a Gateway spot is free again
+        self.space_pylon_tries: dict[Point2, int] = {}  # Gateway spot -> Pylons ordered for it
+        self.gateway_order: Optional[tuple[str, Optional[Point2]]] = None  # the D34/D35 order being given
         self.mode_changes: list[tuple[float, str]] = []
 
     def gateway_upkeep(self) -> None:
@@ -273,6 +293,87 @@ class Production:
             ):
                 self._power_ordered[gate.tag] = bot.time
                 logger.info(f"PRODUCTION Gateway at {gate.position.rounded} unpowered: Pylon at {spot.rounded} ({bot.time_formatted})")
+
+    def _extra_gateway_behaviors(self, schedule_finished: bool, plan: "DefensePlan") -> list["Behavior"]:
+        """M7 D34/D35: the extra Gateway, or a Pylon to make room for one (`gateway_space`). A
+        MacroPlan stops at the first behavior that acts (ares `MacroPlan.execute` is `any(...)`), so
+        an order given for one step was lost whenever supply, probes or a warp-in acted first (a
+        staged test lost 4 of 8): the order is given every step until its building is under
+        construction, and only then does the next EXTRA_GATEWAY_HOLD_S of bank start."""
+        bot = self.bot
+        if bot.minerals >= EXTRA_GATEWAY_BANK:
+            self.bank_since = bot.time if self.bank_since is None else self.bank_since
+        else:
+            self.bank_since = None
+        structures = bot.mediator.get_own_structures_dict
+        gateways = len(structures[UnitTypeId.GATEWAY]) + len(structures[UnitTypeId.WARPGATE])
+        building = bool(bot.mediator.get_building_counter[UnitTypeId.GATEWAY]) or any(
+            not g.is_ready for g in structures[UnitTypeId.GATEWAY]
+        )
+        if building and self.gateway_order is not None and self.gateway_order[0] == "gateway":
+            self.gateway_order = None  # it went through
+            self.bank_since = bot.time if self.bank_since is not None else None
+        banked_for = 0.0 if self.bank_since is None else bot.time - self.bank_since
+        after_opener = schedule_finished or bot.time >= PRODUCTION_CONTROLLER_START_S
+        if not (after_opener and not plan.hold_tech and extra_gateway(bot.minerals, banked_for, gateways, building)):
+            if not building:
+                self.gateway_order = None
+            return []
+        powered = bot.mediator.request_building_placement(
+            base_location=bot.start_location, structure_type=UnitTypeId.GATEWAY,
+            within_psionic_matrix=True, reserve_placement=False, production=True,
+        )
+        pylons = structures[UnitTypeId.PYLON]
+        pylon_building = bool(bot.mediator.get_building_counter[UnitTypeId.PYLON]) or any(not p.is_ready for p in pylons)
+        base, spot = (None, None) if powered or pylon_building else self._unpowered_gateway_spot()
+        action = gateway_space(powered is not None, pylon_building, spot is not None, self.space_pylon_tries.get(spot, 0))
+        if action == "gateway":
+            if self.gateway_order != ("gateway", None):
+                self.gateway_order = ("gateway", None)
+                self.extra_gateways += 1
+                self.no_gateway_space = False
+                logger.info(f"PRODUCTION {bot.time_formatted} extra Gateway ({gateways + 1}) at {powered.rounded}: {bot.minerals} minerals banked for {banked_for:.0f} s")
+            return [BuildStructure(bot.start_location, UnitTypeId.GATEWAY)]
+        if action == "pylon":
+            # the free Pylon placement nearest the spot (not ares's production Pylon spots, which can be farther)
+            if self.gateway_order != ("pylon", spot):
+                self.gateway_order = ("pylon", spot)
+                self.space_pylons += 1
+                self.space_pylon_tries[spot] = self.space_pylon_tries.get(spot, 0) + 1
+                logger.info(f"PRODUCTION {bot.time_formatted} Pylon for Gateway space near {spot.rounded} ({gateways} Gateways, no powered spot free)")
+            return [BuildStructure(base, UnitTypeId.PYLON, closest_to=spot, find_alternative=False, production=False)]
+        self.gateway_order = None
+        if action == "none":
+            self.bank_since = bot.time  # looked again only after another EXTRA_GATEWAY_HOLD_S of bank
+            if not self.no_gateway_space:
+                self.no_gateway_space = True
+                logger.info(f"PRODUCTION {bot.time_formatted} no Gateway space left at our bases ({gateways} Gateways)")
+        return []  # "wait": a Pylon is under construction
+
+    def _unpowered_gateway_spot(self) -> tuple[Optional[Point2], Optional[Point2]]:
+        """(base location, spot) of a free Gateway placement without power at one of our bases,
+        nearest the main first (ares's placements; `find_alternative` off, so no other base).
+        ares offers a base's free spot nearest `closest_to`, so a spot that had its
+        GATEWAY_SPACE_PYLON_TRIES is passed over by asking again from GATEWAY_SPACE_PROBE away on
+        each side of the base."""
+        bot = self.bot
+        bases = [bot.start_location] + [base for base, _ in bot.mediator.get_own_expansions]  # the list leaves out the main
+        found: Optional[tuple[Point2, Point2]] = None
+        for base in bases:
+            if not any(th.distance_to(base) < 3 for th in bot.townhalls):
+                continue
+            d = GATEWAY_SPACE_PROBE
+            for near in (base, base.offset((d, 0)), base.offset((-d, 0)), base.offset((0, d)), base.offset((0, -d))):
+                spot = bot.mediator.request_building_placement(
+                    base_location=base, structure_type=UnitTypeId.GATEWAY, closest_to=near,
+                    within_psionic_matrix=False, reserve_placement=False, find_alternative=False,
+                )
+                if spot is None:
+                    break  # nothing free at this base
+                if self.space_pylon_tries.get(spot, 0) < GATEWAY_SPACE_PYLON_TRIES:
+                    return base, spot
+                found = found or (base, spot)
+        return found if found is not None else (None, None)  # only spots that had their tries: "none"
 
     def _pylon_spot_near(self, point: Point2) -> Optional[Point2]:
         bot = self.bot
@@ -451,6 +552,9 @@ class Production:
         ):
             # M7 E3 (§4.2 capital air WARNING): one Stargate goes down early
             out.append(BuildStructure(bot.start_location, UnitTypeId.STARGATE))
+        # M7 D34/D35: a Gateway more while a mineral bank stays (after the opener; not while tech
+        # waits), ahead of the unit spenders below
+        out.extend(self._extra_gateway_behaviors(schedule_finished, plan))
         templar = self.templar_missing()
         if templar > 0:
             # M7 K3: Templar up to the floor, before the mix's SpawnController (as Observers are)
@@ -481,23 +585,6 @@ class Production:
                 out.append(SpawnController({UnitTypeId.ZEALOT: {"proportion": 1.0, "priority": 0}}, freeflow_mode=True))
             elif gateway_mix := self.gateway_mix(buildable):
                 out.append(SpawnController(gateway_mix, freeflow_mode=True))
-        # M7 D34: a Gateway more while a mineral bank stays (after the opener; not while tech waits)
-        if bot.minerals >= EXTRA_GATEWAY_BANK:
-            self.bank_since = bot.time if self.bank_since is None else self.bank_since
-        else:
-            self.bank_since = None
-        structures = bot.mediator.get_own_structures_dict
-        gateways = len(structures[UnitTypeId.GATEWAY]) + len(structures[UnitTypeId.WARPGATE])
-        building = bool(bot.mediator.get_building_counter[UnitTypeId.GATEWAY]) or any(
-            not g.is_ready for g in structures[UnitTypeId.GATEWAY]
-        )
-        banked_for = 0.0 if self.bank_since is None else bot.time - self.bank_since
-        after_opener = schedule_finished or bot.time >= PRODUCTION_CONTROLLER_START_S
-        if after_opener and not plan.hold_tech and extra_gateway(bot.minerals, banked_for, gateways, building):
-            out.append(BuildStructure(bot.start_location, UnitTypeId.GATEWAY))
-            self.extra_gateways += 1
-            self.bank_since = bot.time  # the next one only after another EXTRA_GATEWAY_HOLD_S of bank
-            logger.info(f"PRODUCTION {bot.time_formatted} extra Gateway ({gateways + 1}): {bot.minerals} minerals banked for {banked_for:.0f} s")
         if (schedule_finished or bot.time >= PRODUCTION_CONTROLLER_START_S) and not plan.hold_tech:
             out.append(
                 ProductionController(

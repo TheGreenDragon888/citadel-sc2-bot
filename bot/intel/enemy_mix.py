@@ -11,7 +11,8 @@
 Only units with a weapon (`ranges.has_weapon`) count. Sightings older than `MIX_FRESH_S` fade
 linearly to nothing over another `MIX_FRESH_S`. `ArchonSwitch` turns an Archon share on at its
 threshold and off again only after the share has stayed below it for `MIX_SWITCH_HOLD_S`, so the
-mix doesn't flip back and forth (`ShareSwitch`; the air one holds for `AIR_SWITCH_HOLD_S`).
+mix doesn't flip back and forth (`ShareSwitch`; the air one holds for `AIR_SWITCH_HOLD_S` and, M7
+D36, turns off only below `AIR_SWITCH_OFF_SHARE`).
 `EnemyMixTracker` reads the cache each intel tick.
 """
 
@@ -24,6 +25,7 @@ from bot.army.engagement import is_fighter
 from bot.army.ranges import has_weapon
 from bot.constants import (
     AIR_SWITCH_HOLD_S,
+    AIR_SWITCH_OFF_SHARE,
     AIR_SWITCH_SHARE,
     BIO_SHARE_FOR_ARCHONS,
     CAPITAL_AIR_FRESH_S,
@@ -91,27 +93,32 @@ def measure(
     return EnemyMix(army, bio / army, zealot / army, air / army, capital_value)
 
 
-def switch(on: bool, share: float, threshold: float, below_since: Optional[float], now: float, hold_s: float = MIX_SWITCH_HOLD_S) -> tuple[bool, Optional[float]]:
-    """Hysteresis for an Archon share: on at `threshold`; off once the share has been below it for
-    `hold_s` (`below_since`: when it fell below, None while at or above) (pure). Returns the new
-    (on, below_since)."""
+def switch(on: bool, share: float, threshold: float, below_since: Optional[float], now: float, hold_s: float = MIX_SWITCH_HOLD_S,
+           off_threshold: Optional[float] = None) -> tuple[bool, Optional[float]]:
+    """Hysteresis for a mix share: on at `threshold`; off once the share has been below
+    `off_threshold` (default `threshold`) for `hold_s` (`below_since`: when it fell below, None
+    while at or above) (pure). Returns the new (on, below_since). M7 D36: the air switch turns off
+    at a lower share than it turns on."""
     if share >= threshold:
         return True, None
     if not on:
         return False, None
+    if share >= (threshold if off_threshold is None else off_threshold):
+        return True, None
     since = now if below_since is None else below_since
     return (False, None) if now - since >= hold_s else (True, since)
 
 
 class ShareSwitch:
-    def __init__(self, threshold: float, hold_s: float = MIX_SWITCH_HOLD_S) -> None:
+    def __init__(self, threshold: float, hold_s: float = MIX_SWITCH_HOLD_S, off_threshold: Optional[float] = None) -> None:
         self.threshold = threshold
         self.hold_s = hold_s
+        self.off_threshold = off_threshold
         self.on = False
         self.below_since: Optional[float] = None
 
     def update(self, share: float, now: float) -> bool:
-        self.on, self.below_since = switch(self.on, share, self.threshold, self.below_since, now, self.hold_s)
+        self.on, self.below_since = switch(self.on, share, self.threshold, self.below_since, now, self.hold_s, self.off_threshold)
         return self.on
 
 
@@ -124,7 +131,7 @@ class EnemyMixTracker:
         self.mix = EnemyMix()
         self.vs_bio = ShareSwitch(BIO_SHARE_FOR_ARCHONS)
         self.vs_zealots = ShareSwitch(ZEALOT_SHARE_FOR_ARCHONS)
-        self.air = ShareSwitch(AIR_SWITCH_SHARE, AIR_SWITCH_HOLD_S)
+        self.air = ShareSwitch(AIR_SWITCH_SHARE, AIR_SWITCH_HOLD_S, AIR_SWITCH_OFF_SHARE)
         self.peak_capital: float = 0.0  # M7 E3 (§8): the highest capital_value seen this game
 
     def _value(self, type_id) -> float:

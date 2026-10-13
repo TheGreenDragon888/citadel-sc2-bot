@@ -64,7 +64,7 @@ from bot.intel.scout_planner import main_rescout_due, observer_trip_ok, trip_sec
 from bot.macro.build_executor import bases_cap, tech_waits  # noqa: E402
 from bot.defense.static_defense import line_next  # noqa: E402
 from bot.macro.production import (  # noqa: E402
-    air_zerg_shares, extra_gateway, gas_starved, mix_mode, mode_shares, next_upgrades, starved_seconds, templar_floor,
+    air_zerg_shares, extra_gateway, gas_starved, gateway_space, mix_mode, mode_shares, next_upgrades, starved_seconds, templar_floor,
     unit_proportions,
 )
 from bot.army.templar import TemplarInfo, behind, morph_pairs  # noqa: E402
@@ -344,6 +344,24 @@ def _air_switch(steps):  # noqa: E302
 
 case("air switch: on at 30%, held 60 s below, then off", _air_switch,
      [(0.35, 100.0), (0.10, 110.0), (0.10, 169.0), (0.10, 170.0)], expected=[True, True, True, False])
+
+
+def _air_switch_d36(steps):  # noqa: E302
+    sw = ShareSwitch(0.30, 60.0, 0.15)
+    return [sw.update(share, now) for share, now in steps]
+
+
+case("air switch D36: between the off and on shares it stays on", _air_switch_d36,
+     [(0.35, 100.0), (0.25, 110.0), (0.20, 200.0), (0.16, 400.0)], expected=[True, True, True, True])
+case("air switch D36: off 60 s after falling below the off share", _air_switch_d36,
+     [(0.35, 100.0), (0.10, 110.0), (0.10, 169.0), (0.10, 170.0)], expected=[True, True, True, False])
+case("air switch D36: back into the band resets the hold", _air_switch_d36,
+     [(0.35, 100.0), (0.10, 110.0), (0.20, 150.0), (0.10, 160.0), (0.10, 219.0), (0.10, 220.0)],
+     expected=[True, True, True, True, True, False])
+case("air switch D36: off, it needs the on share again", _air_switch_d36,
+     [(0.35, 100.0), (0.10, 110.0), (0.10, 170.0), (0.25, 180.0), (0.30, 190.0)], expected=[True, True, False, False, True])
+case("switch: default off share is the on share", switch, True, 0.25, 0.30, None, 100.0, 60.0, None, expected=(True, 100.0))
+case("switch: within the band, no hold", switch, True, 0.25, 0.30, 90.0, 100.0, 60.0, 0.15, expected=(True, None))
 case("mix: capital value counts Carriers (no weapon), fades old sightings", _mix,
      ("CARRIER", 6.0, False, False, 0.0, True, 600.0), ("TEMPEST", 5.0, False, True, 90.0, True, 425.0),
      ("STALKER", 2.0, False, True, 0.0, False, 175.0),
@@ -437,6 +455,11 @@ case("extra Gateway: not before the hold", extra_gateway, 1500, 10.0, 10, False,
 case("extra Gateway: not while one is building", extra_gateway, 1500, 25.0, 10, True, 1000, 20.0, 20, expected=False)
 case("extra Gateway: not at the cap", extra_gateway, 1500, 25.0, 20, False, 1000, 20.0, 20, expected=False)
 case("extra Gateway: not without the bank", extra_gateway, 900, 25.0, 10, False, 1000, 20.0, 20, expected=False)
+case("Gateway space: a powered spot: the Gateway", gateway_space, True, True, True, 0, 2, expected="gateway")
+case("Gateway space: none powered, a Pylon building: wait", gateway_space, False, True, True, 0, 2, expected="wait")
+case("Gateway space: none powered, a free spot: a Pylon", gateway_space, False, False, True, 1, 2, expected="pylon")
+case("Gateway space: the spot had its tries", gateway_space, False, False, True, 2, 2, expected="none")
+case("Gateway space: no spot at all", gateway_space, False, False, False, 0, 2, expected="none")
 case("line defense: a Pylon first", line_next, False, False, False, True, True, expected=UnitTypeId.PYLON)
 case("line defense: then the Cannon", line_next, True, False, False, True, True, expected=UnitTypeId.PHOTONCANNON)
 case("line defense: the Battery while the Forge builds", line_next, True, False, False, False, True, expected=UnitTypeId.SHIELDBATTERY)
