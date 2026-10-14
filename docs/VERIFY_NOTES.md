@@ -2752,3 +2752,38 @@ No crashes and no caught bot errors; every `ROW` has `log=ok`, `err=0` and `raa=
 - With all six groups switched back, 2 → 6 wins and HOLD deaths 98 → 29. C3 alone changes nothing (3/10). The army at 10:00 is still 75-85 supply against Phase 1's 106.
 - D35 in these games: 2 of 57 extra-Gateway orders came without a new Gateway (`ce4c719`: 72 of 140). D36: the air switch was on 58 % of the game time (`ce4c719`: 40 %); 2/10 against 3/10 is within the ±2 spread.
 - In the D35/D36 batch, 79 of 126 DEFEND holds had C5's out-range penalty (-1 to -3), and some holds came at level 8-9 from C9's re-engagement wait ("no new engagement until …").
+
+**D37, rounds 2-3, and a repeat of C4** (same batch, seed and load; `scripts/m7_d37_switch_back.py` groups on `dcf32bc`). A container restart stopped the after-home-fight run after 9 games and the C4 repeat after 5; both were finished with `--start` from the same worktrees (their `./data` kept). A duplicated queue had started the first round-3 lanes in worktrees it then recreated; those runs were stopped after about 30 minutes and started again from fresh worktrees (logs of the stopped runs kept in `~/m7_d37/r3_bad`, not counted).
+
+| Code (all `dcf32bc` but the first) | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths | RETREAT deaths | First launch (median) | Games won, first launch before 9:00 / later | Launches held by home fight / remembered army / intel |
+|---|---|---|---|---|---|---|---|---|---|
+| Phase 1's end (`2307de5`) | **8/10** | 0.56 | 21 | 4 | 16 | 87 | 7:51 | 8/9, 0/1 | (no C4) |
+| D35/D36, nothing switched back | **2/10** | 0.65 | 26 | 14 | 98 | 197 | 9:25 | 2/3, 0/7 | 14 / 15 / 30 |
+| All six groups switched back | 6/10 | 0.58 | 42 | 21 | 29 | 249 | 8:43 | 5/5, 1/5 | (no C4) |
+| C1 step-out switched back | 5/10 | 0.51 | 29 | 16 | 57 | 162 | 9:44 | 1/2, 4/8 | 18 / 33 / 43 |
+| HOLD (C1 fallback + C9) | 3/10 | 0.67 | 32 | 19 | 75 | 286 | 9:21 | 1/3, 2/7 | 21 / 28 / 42 |
+| C2 (eligibility) | 4/10 | 0.54 | 23 | 11 | 57 | 197 | 9:24 | 2/3, 2/7 | 15 / 18 / 32 |
+| C3 (retreat fire) | 3/10 | 0.72 | 25 | 15 | 77 | 244 | 9:11 | 1/3, 2/7 | 14 / 12 / 32 |
+| **C4 (launch gate)** | **8/10** | **0.45** | 32 | 19 | 11 | 133 | 8:32 | 6/7, 2/3 | (none) |
+| **C4, repeat** | **6/10** | 0.49 | 34 | 12 | 27 | 165 | 8:47 | 4/5, 2/5 | (none) |
+| C5 (out-range penalty) | 6/10 | 0.52 | 28 | 15 | 30 | 164 | 9:36 | 1/2, 5/8 | 12 / 12 / 30 |
+| C4, intel wait only | 6/10 | 0.49 | 29 | 10 | 35 | 146 | 8:55 | 3/5, 3/5 | 12 / 11 / (off) |
+| C4, remembered-army gate only | 5/10 | 0.59 | 25 | 9 | 50 | 191 | 8:50 | 2/6, 3/4 | 10 / (off) / 17 |
+| C4, home-fight wait only | 4/10 | 0.64 | 24 | 10 | 64 | 230 | 9:48 | 2/3, 2/7 | (off) / 25 / 30 |
+
+What it shows:
+- **C4 is the Phase 2 rule that costs these games**: with it switched back, 8/10 and 6/10 (14/20) against 2/10 here, 3/10 on `ce4c719` and 2/10 on `df54f97` (7/30 on the three commits with it). HOLD deaths 98 → 11 and 27.
+- **Its three parts each hold the launch on their own**: with any one switched back the other two still held 21-35 times per batch, and the first launch stayed at 8:50-9:48 (4-6/10). Only with all three off did the first launch come at 8:32-8:47.
+- **An early first launch wins** against this opponent: over the 11 `dcf32bc` batches, 28 of 45 games with the first launch before 9:00 were won (62 %) against 27 of 69 later (39 %); Phase 1's end launched first at a median 7:51. CheatInsane's economy outgrows ours while the army waits (the reference's two wins were the two games where C4 held nothing).
+- The other groups move it by 0-4 wins (within the ±2 spread but for C5 and C1 step-out at 5-6/10). C3 changes nothing.
+- The armies at 10:00 are 73-88 supply in every `dcf32bc` variant against Phase 1's 106: the Phase 3/4 production changes (Templar tech, Storm, Blink and the timed tech) still cost army size, which may be the rest of the gap.
+- C4 was built (Phase 2, D21) against launches into stale intel and home fights; switching it back is a decision for the user, with the batches it was built for (Protoss Air VeryHard, the cheese batches) to re-run.
+
+**D35/D36 regression check** (`dcf32bc`, clean worktree `~/wt_d36`, same seeds and opponent id scheme as the `ce4c719` run):
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | Unspent at 10:00 (mean) | Extra-Gateway orders / repeats | Air switch on |
+|---|---|---|---|---|---|---|---|
+| Zerg Air, `ce4c719` / **`dcf32bc`** | 10 / **10** | 0.28 / 0.32 | 11 / 11 | 0 / 0 | 2,116 / **1,586** | 41 / 13 → **33 / 0** | (not measured) / 31 % |
+| VeryHard Zerg, `ce4c719` / **`dcf32bc`** | 9 / **9** | | | | 1,719 / 1,714 | 62 / 5 → **61 / 0** | 10 % |
+
+VeryHard Zerg's loss is game 3 (Ley Lines, 9:40), as on every commit since M5. Every `ROW` has `log=ok`, `err=0`, `raa=0` (20 games).
