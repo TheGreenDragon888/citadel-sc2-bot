@@ -2825,3 +2825,5 @@ VeryHard Zerg's loss is game 3 (Ley Lines, 9:40), as on every commit since M5. E
 - **Losses elsewhere:** VeryHard Zerg game 3 (Ley Lines, 10:33), as on every commit since M5. VeryHard Protoss game 5 (Pylon, 10:07): an early Stalker attack at 4:50-5:32 beat the home defense, and at 8:00 the bot was on one base with 2 army supply and 21 probes lost, before any launch (none is possible under 150 supply), so not C4's. Cannon rush game 5 (Pylon, main variant, 9:54), the game lost on most commits since Phase 3. Paired A game 8 (Magannatha, 22:03).
 
 No crashes and no caught bot errors; every `ROW` has `log=ok`, `err=0` and `raa=0` (150 games).
+
+**M7 accepted (user decision D39, 2026-10-15)** on this run, with the CheatInsane Zerg Air target unmet (5/10; target 9/10) and deferred. The ladder criterion (no crash or time-out in the first 20 games after the upload) is still open and waits for M6's 20 ladder games.
