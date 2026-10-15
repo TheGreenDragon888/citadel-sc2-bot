@@ -2787,3 +2787,41 @@ What it shows:
 | VeryHard Zerg, `ce4c719` / **`dcf32bc`** | 9 / **9** | | | | 1,719 / 1,714 | 62 / 5 → **61 / 0** | 10 % |
 
 VeryHard Zerg's loss is game 3 (Ley Lines, 9:40), as on every commit since M5. Every `ROW` has `log=ok`, `err=0`, `raa=0` (20 games).
+
+### D38: C4 removed (user decision 2026-10-15), full batch set run 2026-10-15
+
+**Code under test:** `9b63cd8` (`dcf32bc`'s D35/D36 plus D38: `attack_decision.py`, `test_attack_decision.py` and `test_counterattack.py` back to Phase 1's; `army.py` without the remembered-army level, the intel freshness, the home-fight time and the Observer's look; no `LAUNCH_*` constants). Its bot code differs from D37's "C4 switched back" worktree only in no longer running the discarded remembered-army simulation (`diff -r ~/wt_d37_c4/bot ~/wt_d38/bot`). The Phase 4 batch set, same seeds and openers, fresh opponent ids (`m7d38-*`), from a worktree pinned at `9b63cd8`, 4 at a time; logs `~/m7_d38`, replays `replays/m7-d38-*`.
+
+**Summary (M7's acceptance, M7_PLAN Phase 4)**
+
+| Criterion | `ce4c719` (D32-D34) | **`9b63cd8` (D38)** |
+|---|---|---|
+| VeryHard Air: Protoss ≥ 7, Terran ≥ 9 with no loss to Battlecruisers, Zerg ≥ 9 | 10 (forced 10, 10) / 10 / 10 | **PASS**: 10 (forced 9, 10) / 10 (no loss) / 10 |
+| CheatInsane Air: Terran ≥ 7/10 | 8/10 | **PASS: 10/10** |
+| CheatInsane Air: Zerg ≥ 9/10 | 3/10 | **NOT MET: 5/10.** The same code (C4 off) went 8/10 and 6/10 in D37: 19/30 over three runs, against 7/30 on the three commits with C4 |
+| Unspent minerals at 10:00 below 2,670 | every batch below | **PASS**: every batch below (means 95-2,049) |
+| M1 Hard × 10 | 10/10 | **PASS**: 10/10 |
+| M2/M3 cheese × 10 (≥ 8/10, correct flag, scout criterion) | 10 / 9 + tie / 10 / 10 | **PASS**: proxy rax 10/10, cannon rush 9/10, 12 pool 10/10, worker rush 10/10. Correct flag 40/40; no scout lost before 4:00 in 10, 10, 10 and 9 of 10 |
+| M4 VeryHard × 10 (≥ 7 each) | 9 / 10 / 10 | **PASS**: Zerg 9/10, Terran 10/10, Protoss 9/10 |
+| M5 staged counterattack 7/7 | PASS | **PASS** (trigger + recall 4/4, merge, in_position, early) |
+
+**Offline tests:** `test_m7_rules` 234/234, `test_attack_decision` 16/16 (Phase 1's cases; C4's 7 are gone), `test_threat_flags` 31/31, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38. `check_game_log.py` (in the worktree): `RESULT PASS`, 163 records, 0 malformed, `./data` 458 KB.
+
+**Staged tests** (`9b63cd8`): outranged 3/3 PASS, engagement PASS, counterattack 7/7, Blink PASS, Templar 5/5 PASS, `test_gateway_space.py` PASS (`plain`: 20 Gateways at 11:59 from 17 orders, 4 Pylons for space; `no_power`: 19 Gateways built after the fill, 6 Pylons for space).
+
+**Air:**
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Protoss Air free / A / B, `ce4c719` | 10 / 10 / 10 | 0.28 / 0.32 / 0.38 | 13 / 16 / 14 | 2 / 5 / 3 | 1 (0) / 0 / 0 | 10 / 17 / 23 | 169 / 251 / 279 |
+| **Protoss Air free / A / B, `9b63cd8`** | **10 / 9 / 10** | **0.45 / 0.57 / 0.38** | 28 / 31 / 22 | **12 / 19 / 10** | 3 (0) / 10 (0) / 0 | 37 / 50 / 29 | 352 / 417 / 243 |
+| Terran Air, `ce4c719` / `9b63cd8` | 10 / 10 | 0.22 / 0.22 | 13 / 14 | 0 / 3 | 0 / 1 (0) | 0 / 3 | 130 / 109 |
+| Zerg Air, `ce4c719` / `9b63cd8` | 10 / 10 | 0.28 / 0.23 | 11 / 11 | 0 / 0 | 0 / 0 | 6 / 0 | 153 / 104 |
+| CheatInsane Terran Air, `ce4c719` / `9b63cd8` | 8 / **10** | 0.42 / 0.35 | 28 / 29 | 16 / 14 | 27 (10) / 17 (2) | 62 / 39 | 727 / 412 |
+| CheatInsane Zerg Air, `ce4c719` / `9b63cd8` | 3 / **5** | 0.76 / 0.81 | 21 / 37 | 13 / 24 | 97 (25) / 53 (17) | 257 / 221 | 1,094 / 816 |
+
+- **What C4 bought:** against VeryHard Protoss Air the armies now launch about twice as often and retreat within 60 s 10-19 times per batch (`ce4c719`: 2-5), at value lost / killed 0.38-0.57 (0.28-0.38). Phase 1's code, which C4 was built against, had 1.21 and 12 in the Protoss Air batch; the wins held (10, 9 and 10 of 10).
+- **CheatInsane Zerg Air:** the first launch at a median 8:19, but 2 of 7 early launches won (D37's two C4-off runs: 6/7 and 4/5); 24 of 37 launches retreated within 60 s. Losses: games 1, 2, 3, 6, 9 (Magannatha, Ultralove twice, Ley Lines, Persephone).
+- **Losses elsewhere:** VeryHard Zerg game 3 (Ley Lines, 10:33), as on every commit since M5. VeryHard Protoss game 5 (Pylon, 10:07): an early Stalker attack at 4:50-5:32 beat the home defense, and at 8:00 the bot was on one base with 2 army supply and 21 probes lost, before any launch (none is possible under 150 supply), so not C4's. Cannon rush game 5 (Pylon, main variant, 9:54), the game lost on most commits since Phase 3. Paired A game 8 (Magannatha, 22:03).
+
+No crashes and no caught bot errors; every `ROW` has `log=ok`, `err=0` and `raa=0` (150 games).
