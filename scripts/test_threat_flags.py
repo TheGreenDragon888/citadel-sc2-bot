@@ -17,7 +17,14 @@ sys.path.insert(0, str(ROOT))
 from loguru import logger  # noqa: E402
 
 from bot.constants import MIN_PLAN_DURATION_S, UNIT_TTL_S  # noqa: E402
-from bot.intel.threat_flags import Evidence, ExpiryContext, FlagStore, Threat  # noqa: E402
+from bot.intel.threat_flags import (  # noqa: E402
+    CAPITAL_AIR_TECH_SOURCE,
+    CAPITAL_AIR_UNITS_SOURCE,
+    Evidence,
+    ExpiryContext,
+    FlagStore,
+    Threat,
+)
 
 RESULTS: list[tuple[str, bool]] = []
 
@@ -150,6 +157,39 @@ def test_keys_and_history() -> None:
     check("history records raise and expiry", raised == [("POOL_12", "pool", False), ("POOL_12", "lings", True)])
 
 
+def test_capital_air() -> None:
+    """M7 E2: WARNING from the tech (STRUCTURE, no timer); ACTIVE from the ships (UNIT TTL)."""
+    store = FlagStore()
+    check("CAPITAL_AIR: none before anything is seen", store.capital_air() is None)
+    store.raise_flag(Threat.CAPITAL_AIR, Evidence.STRUCTURE, CAPITAL_AIR_TECH_SOURCE, 300.0, "Fleet Beacon", tags=[7], positions=[(50.0, 50.0)])
+    check("CAPITAL_AIR: WARNING from the tech", store.capital_air() == "WARNING")
+    run_until(store, 300.0, 1500.0, ctx(), step=5.0)
+    check("CAPITAL_AIR WARNING: no timer (still there after 20 min unseen)", store.capital_air() == "WARNING")
+    store.raise_flag(Threat.CAPITAL_AIR, Evidence.UNIT, CAPITAL_AIR_UNITS_SOURCE, 1500.0, "Tempests worth 850")
+    check("CAPITAL_AIR: ACTIVE from the ships", store.capital_air() == "ACTIVE")
+    ttl = UNIT_TTL_S["CAPITAL_AIR"]
+    run_until(store, 1500.0, 1500.0 + ttl, ctx())
+    held = store.capital_air() == "ACTIVE"
+    run_until(store, 1500.0 + ttl + 0.5, 1500.0 + ttl + 1.0, ctx())
+    check(f"CAPITAL_AIR ACTIVE: held {ttl:g} s after the last confirm, then back to WARNING", held and store.capital_air() == "WARNING")
+    store.on_unit_destroyed(7, 2000.0)
+    check("CAPITAL_AIR WARNING: rule (a) when the Fleet Beacon dies", store.capital_air() is None)
+
+
+def test_satisfied() -> None:
+    """M7 E2: AIR_HARASS stays active when satisfied; satisfied clears when the flag expires."""
+    store = FlagStore()
+    store.raise_flag(Threat.AIR_HARASS, Evidence.STRUCTURE, "air_tech", 200.0, "Stargate", tags=[3], positions=[(10.0, 10.0)])
+    check("AIR_HARASS: not satisfied when raised", not store.is_satisfied(Threat.AIR_HARASS))
+    store.set_satisfied(Threat.AIR_HARASS, True, 260.0, "Cannons at 2 of 2 mineral lines")
+    check("AIR_HARASS: satisfied, still active", store.is_satisfied(Threat.AIR_HARASS) and store.is_active(Threat.AIR_HARASS))
+    store.set_satisfied(Threat.AIR_HARASS, False, 300.0, "a third base")
+    check("AIR_HARASS: not satisfied again with a new mineral line", not store.is_satisfied(Threat.AIR_HARASS))
+    store.set_satisfied(Threat.AIR_HARASS, True, 320.0, "Cannons at 3 of 3")
+    store.on_unit_destroyed(3, 400.0)
+    check("AIR_HARASS: expired by rule (a), satisfied cleared", not store.is_active(Threat.AIR_HARASS) and not store.satisfied)
+
+
 def main() -> int:
     logger.remove()  # keep the output to the PASS/FAIL lines
     test_unit_ttl()
@@ -159,6 +199,8 @@ def main() -> int:
     test_rule_b()
     test_rule_c_and_ares()
     test_keys_and_history()
+    test_capital_air()
+    test_satisfied()
     for name, ok in RESULTS:
         print(f"{'PASS' if ok else 'FAIL'}  {name}")
     failed = sum(not ok for _, ok in RESULTS)

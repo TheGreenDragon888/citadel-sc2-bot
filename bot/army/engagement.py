@@ -18,7 +18,7 @@ hallucinations and units that can't fight; and enemy static defense within
 support.
 """
 
-from typing import TYPE_CHECKING, Iterable, Optional, Sequence
+from typing import TYPE_CHECKING, Iterable, NamedTuple, Optional, Sequence
 
 from ares.consts import EngagementResult, UnitTreeQueryType
 from sc2.ids.unit_typeid import UnitTypeId
@@ -26,7 +26,15 @@ from sc2.position import Point2
 from sc2.unit import Unit
 from sc2_helper.combat_simulator import CombatSimulator
 
-from bot.constants import ENGAGE_ENEMY_RADIUS, ENGAGE_STATIC_RADIUS
+from bot.army.ranges import can_hit, outrange_penalty, outranges_hitters
+from bot.constants import (
+    ENGAGE_ENEMY_RADIUS,
+    ENGAGE_STATIC_RADIUS,
+    FIGHT_LOG_TYPES,
+    OUTRANGE_PENALTY_PER_SHARE,
+    WEAPONLESS_CAP_SHARE,
+    WEAPONLESS_DAMAGE_TYPES,
+)
 
 if TYPE_CHECKING:
     from ares import AresBot
@@ -82,6 +90,39 @@ def is_static_defense(structure: Unit) -> bool:
     return True
 
 
+class FightInputs(NamedTuple):
+    """What one `Engagement.level` call simulated (M7 §8 fight inputs)."""
+
+    own_text: str
+    own_value: float
+    enemy_text: str
+    enemy_value: float
+    penalty: int = 0  # M7 C5: levels taken off for out-ranging enemies
+    cap: Optional[int] = None  # M7 C7: the value level, when it lowered the simulator's level
+
+    def text(self) -> str:
+        return (
+            f"vs {self.enemy_text} ({self.enemy_value:.0f}) | ours {self.own_text} ({self.own_value:.0f})"
+            + (f"; value cap {self.cap}" if self.cap is not None else "")
+            + (f"; -{self.penalty} out-ranged" if self.penalty else "")
+        )
+
+
+def composition_text(pairs: Iterable[tuple[str, float]], max_types: int = FIGHT_LOG_TYPES) -> tuple[str, float]:
+    """(type name, resource value) per unit -> ("8 TEMPEST 4 ZEALOT", total value): counts by type,
+    the highest total value first, at most `max_types` types (the rest summed as "+N more")."""
+    counts: dict[str, int] = {}
+    values: dict[str, float] = {}
+    for name, value in pairs:
+        counts[name] = counts.get(name, 0) + 1
+        values[name] = values.get(name, 0.0) + value
+    order = sorted(counts, key=lambda n: (-values[n], n))
+    text = " ".join(f"{counts[n]} {n}" for n in order[:max_types])
+    if len(order) > max_types:
+        text += f" +{sum(counts[n] for n in order[max_types:])} more"
+    return text or "nothing", sum(values.values())
+
+
 def level_from_sim(won: bool, health_left: float, own_health: float, enemy_health: float) -> int:
     """ares's mapping (`combat_sim_manager.py:147-173`) with `own_health` = our HP + shields."""
     if won:
@@ -111,6 +152,12 @@ def level_from_sim(won: bool, health_left: float, own_health: float, enemy_healt
     return EngagementResult.TIE
 
 
+def value_level(own_value: float, enemy_value: float) -> int:
+    """M7 C7 (§4.5.2, D19): the level `level_from_sim` gives if each side's resource value were its
+    health and the larger side kept the difference (pure)."""
+    return int(level_from_sim(own_value > enemy_value, abs(own_value - enemy_value), own_value, enemy_value))
+
+
 class Engagement:
     def __init__(self, bot: "AresBot"):
         self.bot = bot
@@ -118,6 +165,7 @@ class Engagement:
         self.sim = CombatSimulator()
         self.sim.enable_timing_adjustment(True)
         self.calls: int = 0  # simulator calls this game (§3: at most 2 per evaluation)
+        self.last_inputs: Optional[FightInputs] = None  # the last `level` call's inputs (M7 §8)
 
     # -- values ----------------------------------------------------------------------------------
 
@@ -169,8 +217,10 @@ class Engagement:
     # -- the level -------------------------------------------------------------------------------
 
     def level(self, own: Sequence[Unit], enemy: Sequence[Unit], defender: int) -> int:
-        """EngagementResult value (0-10) of `own` fighting `enemy`."""
+        """EngagementResult value (0-10) of `own` fighting `enemy`. The inputs are kept in
+        `last_inputs` for the log lines (M7 §8)."""
         own = [u for u in own if is_fighter(u) or (u.is_structure and u.can_attack)]
+        self.last_inputs = self._inputs(own, enemy)
         if not own:
             return int(EngagementResult.LOSS_EMPHATIC if enemy else EngagementResult.TIE)
         if not enemy:
@@ -182,4 +232,49 @@ class Engagement:
         won, health_left = self.sim.predict_engage(list(own), list(enemy), defender_player=defender)
         own_health = sum(u.health + u.shield for u in own)
         enemy_health = sum(u.health + u.shield for u in enemy)
-        return int(level_from_sim(won, health_left, own_health, enemy_health))
+        raw = int(level_from_sim(won, health_left, own_health, enemy_health))
+        # M7 C7 (D19): the simulator sees Void Rays, Carriers, Banelings ... as harmless (it rated
+        # 12 Zealots against 4 Void Rays a 10), so their share of the enemy's value caps it by value
+        enemy_value = self.value(enemy)
+        weaponless = self.value(u for u in enemy if u.type_id in WEAPONLESS_DAMAGE_TYPES)
+        if enemy_value > 0 and weaponless >= WEAPONLESS_CAP_SHARE * enemy_value:
+            cap = value_level(self.value(own), enemy_value)
+            if cap < raw:
+                raw = cap
+                self.last_inputs = self.last_inputs._replace(cap=cap)
+        # M7 C5 (§4.5.2): the simulator never sees positions, and rated home fights against
+        # Tempest armies 7-9 at a third of their value in the Phase 1 batches
+        penalty = outrange_penalty(self.outranged_share(own, enemy), OUTRANGE_PENALTY_PER_SHARE)
+        self.last_inputs = self.last_inputs._replace(penalty=penalty)
+        return max(int(EngagementResult.LOSS_EMPHATIC), raw - penalty)
+
+    def outranged_share(self, own: Sequence[Unit], enemy: Sequence[Unit]) -> float:
+        """M7 C5: the share of the enemy's value that out-ranges every unit of ours able to hit it
+        (by OUTRANGED_MARGIN; melee units only when they are all that can, D23), or that none of
+        ours can hit while it can hit some of them."""
+        kinds = list({u.type_id: u for u in own}.values())  # one unit per type
+        total = out = 0.0
+        for e in enemy:
+            v = self.value([e])
+            if v <= 0:
+                continue
+            total += v
+            hitters = [u for u in kinds if can_hit(u, e)]
+            if hitters:
+                if outranges_hitters(e, hitters):
+                    out += v
+            elif any(can_hit(e, u) for u in kinds):
+                out += v
+        return out / total if total > 0 else 0.0
+
+    def _inputs(self, own: Sequence[Unit], enemy: Sequence[Unit]) -> FightInputs:
+        def pairs(units: Sequence[Unit]) -> list[tuple[str, float]]:
+            out = []
+            for u in units:
+                cost = self.bot.calculate_unit_value(u.type_id)
+                out.append((u.type_id.name, cost.minerals + cost.vespene))
+            return out
+
+        own_text, own_value = composition_text(pairs(own))
+        enemy_text, enemy_value = composition_text(pairs(enemy))
+        return FightInputs(own_text, own_value, enemy_text, enemy_value)

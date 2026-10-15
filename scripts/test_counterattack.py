@@ -418,7 +418,7 @@ class StagedCitadel(CitadelBot):
         if self.case == "merge":
             roles = getattr(self, "merged_roles", set())
             checks.append(("merged squad is in the ATTACK squad", roles == {Role.ATTACK}, self.home_result or ""))
-            checks.append(("main attack launched", self.army.attacking or any(a == "launch" for _, a, _, _ in self.army.decisions), ""))
+            checks.append(("main attack launched", self.army.attacking or any(d.action == "launch" for d in self.army.decisions), ""))
             self.verdict = checks
             return
         if recalled is not None:

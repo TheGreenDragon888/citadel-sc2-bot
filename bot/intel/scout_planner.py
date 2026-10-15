@@ -21,12 +21,14 @@ Unit scouts (§4.3 per-matchup rows; combat units only while no M2 defense threa
 - PvP: a Stalker poke at the enemy natural at Core + STALKER_POKE_AFTER_CORE_S; the first
   Observer outside the enemy natural choke once the Robo is done, until 6:00; a second one at
   home once a Twilight Council is seen.
-- Hallucinated Phoenix (only with an existing Sentry, user decision) at HALLUCINATION_AT_S, and
-  whenever the enemy main has gone unseen long enough after HALLUCINATION_FROM_S.
+- Hallucinated Phoenix (only with an existing Sentry, user decision) at HALLUCINATION_AT_S (PvT
+  only since M7: the PvP and PvZ rows were dropped), and whenever the enemy main has gone unseen
+  long enough after HALLUCINATION_FROM_S.
 - §4.4 row 15: while UNKNOWN_AGGRO is active and the enemy main unscouted, the first Adept (a
   shade) or Stalker goes to look.
 - From EXPANSION_CHECK_FROM_S, every EXPANSION_CHECK_EVERY_S: a free Observer, else a probe,
-  visits the expansion locations not seen for EXPANSION_FRESH_S.
+  visits the expansion locations not seen for EXPANSION_FRESH_S. An Observer goes only if the
+  main re-scout won't fall due before its trip ends, or another Observer stays free (M7 B8).
 - §5 re-scout trigger: stale STRUCTURE evidence (`FlagStore.stale`) is looked at by a free
   Observer, or by a probe when it is on our side of the map; an enemy main unseen for
   MAIN_STALE_S after MAIN_STALE_FROM_S by a free Observer (or a Phoenix, above).
@@ -70,6 +72,7 @@ from bot.constants import (
     MAIN_RADIUS,
     MAIN_STALE_FROM_S,
     MAIN_STALE_S,
+    NORMAL_TO_FASTER,
     OBSERVER_AFTER_ROBO_S,
     OBSERVER_CHOKE_STANDOFF,
     OBSERVER_PATH_FRACTION,
@@ -133,6 +136,33 @@ def _ring(centre: Point2, radius: float, count: int) -> list[Point2]:
         Point2((centre.x + radius * math.cos(2 * math.pi * k / count), centre.y + radius * math.sin(2 * math.pi * k / count)))
         for k in range(count)
     ]
+
+
+def main_rescout_due(now: float, main_seen_at: Optional[float], last_rescout_at: float) -> bool:
+    """§5 re-scout trigger for the enemy main: after MAIN_STALE_FROM_S, the main unseen for
+    MAIN_STALE_S and no main re-scout sent in the last MAIN_STALE_S (pure; M7 B4)."""
+    return (
+        now >= MAIN_STALE_FROM_S
+        and (main_seen_at is None or now - main_seen_at > MAIN_STALE_S)
+        and now - last_rescout_at >= MAIN_STALE_S
+    )
+
+
+def trip_seconds(start: Point2, points: list[Point2], speed: float) -> float:
+    """Straight-line seconds from `start` through `points` in order at `speed` per second (pure)."""
+    total, here = 0.0, start
+    for p in points:
+        total += here.distance_to(p)
+        here = p
+    return total / speed if speed > 0 else math.inf
+
+
+def observer_trip_ok(
+    now: float, trip_s: float, main_seen_at: Optional[float], last_rescout_at: float, free_observers: int
+) -> bool:
+    """M7 B8 (D15): an Observer may start an expansion check if another Observer stays free for the
+    §5 main re-scout, or that re-scout won't fall due before the trip ends (pure)."""
+    return free_observers >= 2 or not main_rescout_due(now + trip_s, main_seen_at, last_rescout_at)
 
 
 class ScoutPlanner:
@@ -393,8 +423,10 @@ class ScoutPlanner:
             self.sent.add("home_observer")
             task = PostTask(self, observers[0].tag, "home_observer", own_nat.towards(bot.start_location, HOME_OBSERVER_OFFSET), None)
             self._give(task, observers[0], "Twilight Council seen")
-        self._expansion_checks()
+        # the main re-scout first: an expansion trip took the only free Observer for 1-2 minutes
+        # at a time, and the enemy main went unseen from 5:43 to 11:01 in the first ladder loss (M7 B4)
         self._rescouts()
+        self._expansion_checks()
 
     def _expansion_checks(self) -> None:
         """§4.3: 4:30, then every 60 s, visit each unscouted expansion location."""
@@ -405,16 +437,19 @@ class ScoutPlanner:
         if self._task_active("expansion_check"):
             return
         self._last_expansion_check = now
-        observers = self._free_observers()
-        enemy_main: Point2 = bot.enemy_start_locations[0]
-        enemy_nat: Point2 = bot.mediator.get_enemy_nat
-        points = [
-            p for p, _ in bot.mediator.get_enemy_expansions
-            if now - self._expansion_seen_at.get(p, -EXPANSION_FRESH_S) >= EXPANSION_FRESH_S
-            and not any(th.distance_to(p) < 8 for th in bot.townhalls)
-            # a probe stays out of the enemy main and natural
-            and (observers or (p.distance_to(enemy_main) > 8 and p.distance_to(enemy_nat) > 8))
-        ][:EXPANSION_CHECK_MAX]
+        # while the main re-scout waits for an Observer, an expansion check doesn't take one (M7 B4)
+        observers = [] if self._main_rescout_waiting() else self._free_observers()
+        kept = ""
+        if observers:
+            # M7 B8: nor does it when the main re-scout would fall due before the trip ends and no
+            # other Observer is free; base speed without upgrades, so the estimate errs long
+            observer = observers[0]
+            trip = nearest_order(observer.position, self._expansion_points(observer_trip=True))
+            trip_s = trip_seconds(observer.position, trip, observer.movement_speed * NORMAL_TO_FASTER)
+            if not observer_trip_ok(now, trip_s, self.detectors.main_seen_at, self._main_rescout_at, len(observers)):
+                observers = []
+                kept = f"; the Observer stays for the main re-scout ({trip_s:.0f} s trip)"
+        points = self._expansion_points(observer_trip=bool(observers))
         if not points:
             return
         if observers:
@@ -425,7 +460,21 @@ class ScoutPlanner:
             task = ProbeLookTask(self, unit.tag, "expansion_check", nearest_order(unit.position, points))
         else:
             return
-        self._give(task, unit, f"{len(points)} locations unseen for {EXPANSION_FRESH_S:g} s")
+        self._give(task, unit, f"{len(points)} locations unseen for {EXPANSION_FRESH_S:g} s{kept}")
+
+    def _expansion_points(self, observer_trip: bool) -> list[Point2]:
+        """The enemy expansion locations an expansion check visits (§4.3), at most
+        EXPANSION_CHECK_MAX; a probe's trip leaves out the enemy main and natural."""
+        bot = self.bot
+        now = bot.time
+        enemy_main: Point2 = bot.enemy_start_locations[0]
+        enemy_nat: Point2 = bot.mediator.get_enemy_nat
+        return [
+            p for p, _ in bot.mediator.get_enemy_expansions
+            if now - self._expansion_seen_at.get(p, -EXPANSION_FRESH_S) >= EXPANSION_FRESH_S
+            and not any(th.distance_to(p) < 8 for th in bot.townhalls)
+            and (observer_trip or (p.distance_to(enemy_main) > 8 and p.distance_to(enemy_nat) > 8))
+        ][:EXPANSION_CHECK_MAX]
 
     def _rescouts(self) -> None:
         """§5 re-scout trigger: stale STRUCTURE evidence, and a stale enemy main after 3:00."""
@@ -453,16 +502,18 @@ class ScoutPlanner:
             self._rescout_sent_at[key] = now
             self._give(task, unit, f"{key[0].name} ({key[1]}) evidence stale")
             return
-        seen = self.detectors.main_seen_at
-        if (
-            now >= MAIN_STALE_FROM_S
-            and (seen is None or now - seen > MAIN_STALE_S)
-            and now - self._main_rescout_at >= MAIN_STALE_S
-            and (observers := self._free_observers())
+        if main_rescout_due(now, self.detectors.main_seen_at, self._main_rescout_at) and (
+            observers := self._free_observers()
         ):
             self._main_rescout_at = now
             task = LookTask(self, observers[0].tag, "rescout", [bot.enemy_start_locations[0]])
             self._give(task, observers[0], "enemy main unseen")
+
+    def _main_rescout_waiting(self) -> bool:
+        """The §5 main re-scout is due and no re-scout is on its way (M7 B4)."""
+        return not self._task_active("rescout") and main_rescout_due(
+            self.bot.time, self.detectors.main_seen_at, self._main_rescout_at
+        )
 
     def _hunt_points_free(self) -> list[Point2]:
         """§4.7 hunt points no hunt task is on its way to yet."""

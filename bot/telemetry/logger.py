@@ -38,6 +38,7 @@ from bot.constants import (
     GAME_LOG_MAX_EVENTS,
     LADDER_TIE_GAME_SECONDS,
     LOGS_SUBDIR,
+    LOST_FAR_DISTANCE,
     METRIC_TIMES_S,
     SCOUT_LOSS_CHECK_S,
     TELEMETRY_SNAPSHOT_EVERY_S,
@@ -102,6 +103,10 @@ class Telemetry:
         self.guarded_steps: int = 0
         self._last_snapshot: float = 0.0
         self.log_written: bool = False
+        # M7 §8: army units lost by their intent at death, and those lost farther than
+        # LOST_FAR_DISTANCE from the intent's point ("scout" for scouting units, "none" without one)
+        self.lost_by_intent: dict[str, int] = {}
+        self.lost_far: dict[str, int] = {}
 
     # -- scouts (M3) -----------------------------------------------------------------------------
 
@@ -127,12 +132,15 @@ class Telemetry:
     def scouts_lost_before(self, seconds: float = SCOUT_LOSS_CHECK_S) -> list[ScoutRecord]:
         return [r for r in self.scouts if r.outcome == "lost" and r.ended_at is not None and r.ended_at < seconds]
 
-    def on_own_unit_destroyed(self, unit, role: str = "?") -> None:
-        """`unit` is last step's snapshot of our destroyed unit; `role` its ares role."""
-        if unit.tag in self._active_scouts:
+    def on_own_unit_destroyed(self, unit, role: str = "?", intent=None) -> None:
+        """`unit` is last step's snapshot of our destroyed unit; `role` its ares role; `intent`
+        the army's (mode, point) for it, if it had one (M7)."""
+        scouting = unit.tag in self._active_scouts
+        if scouting:
             self.scout_ended(unit.tag, "expired" if unit.is_hallucination else "lost")
         if is_fighter(unit):
             self.army_value_lost += self._value(unit.type_id)
+            self._army_unit_lost(unit, "scout" if scouting else intent)
         if unit.type_id != UnitTypeId.PROBE:
             return
         self.probes_lost += 1
@@ -146,6 +154,23 @@ class Telemetry:
         logger.info(
             f"PROBE lost at {pos.rounded} ({bot.time_formatted}, {role}); nearest enemy "
             + (f"{near.type_id.name} at {near.position.distance_to(pos):.1f}" if near is not None else "none seen")
+        )
+
+    def _army_unit_lost(self, unit, intent) -> None:
+        """M7 §8: where an army unit died, what it was doing, and how far from its point."""
+        pos = unit.position  # a plain point: `unit` is last step's object (see PROBE lost below)
+        if intent == "scout" or intent is None:
+            mode, distance = intent or "none", None
+        else:
+            mode, point = intent
+            distance = pos.distance_to(point)
+        self.lost_by_intent[mode] = self.lost_by_intent.get(mode, 0) + 1
+        if distance is not None and distance > LOST_FAR_DISTANCE:
+            self.lost_far[mode] = self.lost_far.get(mode, 0) + 1
+        logger.info(
+            f"UNIT lost {unit.type_id.name} at {pos.rounded} ({self.bot.time_formatted}, {mode}"
+            + (f" {distance:.0f} from its point" if distance is not None else "")
+            + ")"
         )
 
     def record_step_time(self, started: float) -> float:
@@ -266,8 +291,9 @@ class Telemetry:
         logger.info(
             f"METRIC army value_lost={self.army_value_lost:.0f} value_killed={self.army_value_killed:.0f}"
         )
-        for t, action, level, reason in army.decisions if army is not None else []:
-            logger.info(f"METRIC engage {_mmss(t)} {action} level={level} ({reason})")
+        for d in army.decisions if army is not None else []:
+            values = f" values {d.own_value:.0f} vs {d.enemy_value:.0f}" if d.own_value is not None else ""
+            logger.info(f"METRIC engage {_mmss(d.t)} {d.action} level={d.level} ({d.reason}){values}")
         lost = self.scouts_lost_before()
         logger.info(
             f"METRIC scouts tasks={len(self.scouts)} lost_before_{_mmss(SCOUT_LOSS_CHECK_S)}={len(lost)}"
@@ -292,6 +318,7 @@ class Telemetry:
     def game_record(
         self, result: str, flags=None, army=None, opener: str = "", ruleset: Optional[str] = None,
         wall_ok: Optional[bool] = None, memory=None, preraised: Optional[list[str]] = None, errors=None,
+        detectors=None,
     ) -> dict[str, Any]:
         """Every §8 metric for this game as one JSON-ready dict."""
         bot = self.bot
@@ -305,7 +332,7 @@ class Telemetry:
 
         counter = army.counter if army is not None else None
         return {
-            "version": 2,
+            "version": 7,  # 3: M7 Phase 0 fields; 4: M7 Phase 1 fields; 5, 6: M7 Phase 3 fields (K2, K3); 7: Phase 4
             "game_id": self.game_id,
             "date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "result": result,
@@ -339,8 +366,13 @@ class Telemetry:
             ),
             "army_value": {"lost": round(self.army_value_lost), "killed": round(self.army_value_killed)},
             "engage": capped([
-                {"t": round(t, 1), "action": action, "level": level, "reason": reason}
-                for t, action, level, reason in (army.decisions if army is not None else [])
+                {
+                    "t": round(d.t, 1), "action": d.action, "level": d.level, "reason": d.reason,
+                    # M7 §8: the fight values the level came from (None when nothing was simulated)
+                    "own_value": round(d.own_value) if d.own_value is not None else None,
+                    "enemy_value": round(d.enemy_value) if d.enemy_value is not None else None,
+                }
+                for d in (army.decisions if army is not None else [])
             ]),
             "counterattacks": capped(list(counter.outcomes) if counter is not None else []),
             "scouts": {"tasks": len(self.scouts), f"lost_before_{SCOUT_LOSS_CHECK_S:.0f}s": len(self.scouts_lost_before())},
@@ -353,6 +385,41 @@ class Telemetry:
             # M6 error guard: errors caught per part, and each part's first one ("m:ss Type: message")
             "errors": dict(errors.counts) if errors is not None else {},
             "errors_first": dict(errors.first) if errors is not None else {},
+            # M7 §8: army units lost by intent, and those lost far from their point
+            "lost_by_intent": dict(self.lost_by_intent),
+            "lost_far": dict(self.lost_far),
+            # M7 B1 regression metric (must stay 0) and B4 main re-scout starts (game seconds)
+            "reinforce_after_retreat": army.reinforce_after_retreat if army is not None else 0,
+            "rescouts": capped([round(r.started_at) for r in self.scouts if r.task == "rescout"]),
+            # M7 K2/K3 §8: blinks by kind; storms cast and Archons morphed
+            "blinks": dict(army.blink.counts) if army is not None and hasattr(army, "blink") else {},
+            "storms": army.templar.counts["storms"] if army is not None and hasattr(army, "templar") else 0,
+            "archons": army.templar.counts["archons"] if army is not None and hasattr(army, "templar") else 0,
+            # M7 E3 §8: capital air (first WARNING / ACTIVE, peak value), the mix selection's changes
+            # and when a 4th base was first wanted (E1)
+            "capital_air": self._capital_air(flags),
+            "mix_changes": capped([{"t": t, "mode": m} for t, m in getattr(getattr(self.bot, "production", None), "mode_changes", [])]),
+            "fourth_base_at": getattr(getattr(self.bot, "executor", None), "fourth_base_at", None),
+            # M7 §8: enemy structure and capital ship types, first seen (game seconds)
+            "tech_seen": capped([
+                {"type": name, "t": round(t, 1)}
+                for name, t in sorted((detectors.first_seen if detectors is not None else {}).items(), key=lambda kv: kv[1])
+            ]),
+        }
+
+    def _capital_air(self, flags) -> dict[str, Any]:
+        """M7 E3 §8: the enemy race, the first CAPITAL_AIR WARNING and ACTIVE (game seconds) and the
+        peak remembered capital-ship value."""
+        def first(source: str) -> Optional[float]:
+            times = [r.raised_at for r in (flags.history if flags is not None else []) if r.threat.name == "CAPITAL_AIR" and r.source == source]
+            return round(min(times), 1) if times else None
+
+        production = getattr(self.bot, "production", None)
+        return {
+            "race": self.bot.enemy_race.name,
+            "warning": first("capital_air_tech"),
+            "active": first("capital_air_units"),
+            "peak_value": round(production.mix.peak_capital) if production is not None else 0,
         }
 
     def write_game_record(self, record: dict[str, Any]) -> bool:

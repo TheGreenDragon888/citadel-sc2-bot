@@ -18,6 +18,17 @@ including the §5 phase rules.
 | scout_killed | UNKNOWN_AGGRO | STRUCTURE | §4.4 row 15: our main scouting probe killed before reaching the enemy main (scout_planner.py calls `scout_killed`), unless an active rush flag already explains it. Expires once the enemy main is scouted, or by UNKNOWN_AGGRO_PHASE_END_S (M3) |
 
 "Missing structure" flags have no tags or positions, so they expire only by their phase rule.
+
+M7 (§8): `first_seen` records the first sighting of each enemy structure type and each capital
+ship type (CAPITAL_AIR_TYPES), logged as `INTEL first seen ...` and kept for the game record.
+
+M7 E2 (§4.2, §4.4 rows 9, 13, 18):
+- AIR_HARASS (STRUCTURE): an enemy Stargate, Spire / Greater Spire or Starport Tech Lab
+  (`AIR_HARASS_TECH`). Its plan stops forcing builds once satisfied (defense_planner.py).
+- CAPITAL_AIR WARNING (STRUCTURE, `CAPITAL_AIR_TECH_SOURCE`): a Fleet Beacon, Fusion Core or Greater
+  Spire. ACTIVE (UNIT, `CAPITAL_AIR_UNITS_SOURCE`): raised and re-confirmed while the remembered
+  capital ships (`EnemyMix.capital_value`, enemy_mix.py) are worth at least `CAPITAL_AIR_MIN_VALUE`;
+  it expires `UNIT_TTL_S["CAPITAL_AIR"]` after the last confirmation. Each logs `INTEL capital air`.
 """
 
 import math
@@ -32,6 +43,10 @@ from sc2.unit import Unit
 
 from bot.constants import (
     BRIDGE_HOME_RADIUS,
+    AIR_HARASS_TECH,
+    CAPITAL_AIR_MIN_VALUE,
+    CAPITAL_AIR_TECH,
+    CAPITAL_AIR_TYPES,
     CANNON_PROBE_FROM_S,
     CANNON_PROBE_LINGER_S,
     CANNON_PROBE_UNTIL_S,
@@ -58,6 +73,8 @@ from bot.constants import (
     POOL_12_PHASE_END_S,
     PROXY_CHECK_FROM_S,
     PROXY_CHECK_SETTLE_S,
+    PROXY_NATURAL_SEEN_FROM_S,
+    PROXY_NATURAL_WAIT_UNTIL_S,
     PROXY_CHECK_UNTIL_S,
     PROXY_DETECT_UNTIL_S,
     PROXY_FAR_FROM_MAIN,
@@ -75,10 +92,19 @@ from bot.constants import (
     WORKER_RUSH_UNTIL_S,
 )
 from bot.geometry import in_map
-from bot.intel.threat_flags import Evidence, ExpiryContext, FlagStore, Threat
+from bot.intel.threat_flags import (
+    CAPITAL_AIR_TECH_SOURCE,
+    CAPITAL_AIR_UNITS_SOURCE,
+    Evidence,
+    ExpiryContext,
+    FlagStore,
+    Threat,
+)
 
 if TYPE_CHECKING:
     from ares import AresBot
+
+    from bot.intel.enemy_mix import EnemyMixTracker
 
 WORKERS: frozenset[UnitTypeId] = WORKER_TYPES
 CANNON_RUSH_TYPES: frozenset[UnitTypeId] = frozenset(
@@ -113,6 +139,26 @@ def _mmss(seconds: float) -> str:
     return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
 
 
+# M7 B6: outcomes of the §4.4 rows 7/10 missing-production test
+PROXY_PRODUCTION, PROXY_EXPANSION, PROXY_WAIT, PROXY_MISSING = "production", "expansion", "wait", "missing"
+
+
+def proxy_production_check(
+    has_main_production: bool, natural_townhall_seen: bool, natural_looked_at: bool, now: float
+) -> str:
+    """§4.4 rows 7 and 10 with M7 B6 (pure): "production" (a Barracks/Gateway in their main),
+    "expansion" (none, but a townhall at their natural: an expansion first, not a proxy), "wait"
+    (none, and their natural not looked at since PROXY_NATURAL_SEEN_FROM_S, until
+    PROXY_NATURAL_WAIT_UNTIL_S), else "missing" (counts toward PROXY)."""
+    if has_main_production:
+        return PROXY_PRODUCTION
+    if natural_townhall_seen:
+        return PROXY_EXPANSION
+    if not natural_looked_at and now < PROXY_NATURAL_WAIT_UNTIL_S:
+        return PROXY_WAIT
+    return PROXY_MISSING
+
+
 class Detectors:
     def __init__(self, bot: "AresBot", flags: FlagStore, override_for: Callable[[Threat, Evidence], bool]):
         """`override_for(threat, evidence_kind)` says whether a new flag ends the ares opener."""
@@ -138,11 +184,15 @@ class Detectors:
         self._pool_decided: bool = False
         # one-time checks
         self.proxy_checked: bool = False
+        self._proxy_wait_logged: bool = False  # M7 B6
         self.no_natural_checked: bool = False
         self._forge_first_checked: bool = False
         # enemy workers seen near our bases during a worker rush: never cannon-rush probes (M3)
         self._rush_worker_tags: set[int] = set()
         self.unknown_aggro_at: Optional[float] = None
+        # M7 §8: enemy structure / capital ship type name -> game second it was first seen
+        self.first_seen: dict[str, float] = {}
+        self.mix: Optional["EnemyMixTracker"] = None  # M7 E2: main.py hands in Production.mix
 
     # -- helpers -------------------------------------------------------------------------------
 
@@ -192,12 +242,31 @@ class Detectors:
 
     def update(self) -> None:
         self._track_scouting()
+        self._track_first_seen()
         self._worker_rush()
         self._cannon_rush()
         self._forge_first()
         self._early_pool()
         self._proxy()
         self._no_natural()
+        self._air_harass()
+        self._capital_air()
+
+    def _track_first_seen(self) -> None:
+        """M7 §8: the first sighting of each enemy structure type and each capital ship type
+        (snapshots and ares's ghosts count: they were seen to be there)."""
+        bot = self.bot
+        for unit in bot.enemy_structures:
+            self._first_sight(unit)
+        for unit in bot.enemy_units:
+            if unit.type_id in CAPITAL_AIR_TYPES:
+                self._first_sight(unit)
+
+    def _first_sight(self, unit: Unit) -> None:
+        name = unit.type_id.name
+        if name not in self.first_seen:
+            self.first_seen[name] = self.bot.time
+            logger.info(f"INTEL first seen {name} at {self.bot.time_formatted} {unit.position.rounded}")
 
     def _track_scouting(self) -> None:
         bot = self.bot
@@ -430,11 +499,15 @@ class Detectors:
 
     # -- PROXY ---------------------------------------------------------------------------------
 
-    def _proxy(self) -> None:
+    def _proxy_missing_check(self) -> None:
+        """§4.4 rows 7 and 10, once: no Barracks/Gateway in the scouted main, or too few workers.
+        M7 B6 (user decision): the missing-production part waits until their natural has been in
+        vision (until PROXY_NATURAL_WAIT_UNTIL_S) and doesn't count an expansion-first opening (a
+        Nexus first raised a false PROXY in 7 of 8 losses to the built-in Protoss Air build)."""
         bot = self.bot
         now = bot.time
         race = self.enemy_race
-        if (
+        if not (
             not self.proxy_checked
             and race in MAIN_PRODUCTION
             and now >= PROXY_CHECK_FROM_S
@@ -446,44 +519,66 @@ class Detectors:
             # after the main counted as scouted, and row 10 raised a false PROXY before row 3)
             and now - self.main_scouted_at >= PROXY_CHECK_SETTLE_S
         ):
+            return
+        enemy_main = bot.enemy_start_locations[0]
+        in_main = [s for s in bot.enemy_structures if s.type_id in MAIN_PRODUCTION[race] and s.distance_to(enemy_main) < MAIN_RADIUS]
+        if self.flags.was_raised(Threat.WORKER_RUSH):
+            # the rush explains the missing production and workers (M3: false PROXY flags
+            # in worker-rush test games)
             self.proxy_checked = True
-            enemy_main = bot.enemy_start_locations[0]
-            in_main = [s for s in bot.enemy_structures if s.type_id in MAIN_PRODUCTION[race] and s.distance_to(enemy_main) < MAIN_RADIUS]
-            if self.flags.was_raised(Threat.WORKER_RUSH):
-                # the rush explains the missing production and workers (M3: false PROXY flags
-                # in worker-rush test games)
-                logger.info(f"SCOUT proxy check skipped at {bot.time_formatted}: they worker-rushed")
-                return
-            if race == Race.Protoss and not in_main and any(
-                s.type_id == UnitTypeId.FORGE and s.distance_to(enemy_main) < MAIN_RADIUS for s in bot.enemy_structures
-            ):
-                # §4.4 row 3 decides a Forge before the Gateway, not row 10 (M3: false PROXY flags
-                # in every cannon-rush test game)
-                logger.info(f"SCOUT proxy check at {bot.time_formatted}: a Forge instead of a Gateway (row 3)")
-                return
-            workers = len(self.enemy_workers_in_main)
-            reasons = []
-            if not in_main:
-                reasons.append(f"no {'Barracks' if race == Race.Terran else 'Gateway'} in the scouted main")
-            # the worker counts are §4.4's rule as written: they count what the scout saw. Only
-            # counting once the mineral line was in vision cut false flags vs the built-in AI but
-            # also missed a 3-Barracks all-in (3 SCVs seen) that the count had caught
-            if race == Race.Terran and workers <= PROXY_TERRAN_MAX_SCVS:
-                reasons.append(f"{workers} SCVs seen in the main (<= {PROXY_TERRAN_MAX_SCVS})")
-            if race == Race.Protoss:
-                build_s = bot.game_data.units[UnitTypeId.PROBE.value].cost.time / 22.4
-                # the starting probes + one per build time until the probes were counted (the
-                # scout may have left the main since), less their own scouting probe
-                seen_at = self._workers_last_added_at
-                expected = self._start_workers + math.floor(seen_at / build_s) - 1
-                if workers <= expected - PROXY_PROTOSS_WORKERS_SHORT:
-                    reasons.append(f"{workers} probes seen in the main, expected ~{expected}")
-            logger.info(
-                f"SCOUT proxy check at {bot.time_formatted}: {len(in_main)} "
-                f"{'Barracks' if race == Race.Terran else 'Gateways'} in the main, {workers} workers seen"
-            )
-            if reasons:
-                self._raise(Threat.PROXY, Evidence.STRUCTURE, "proxy_missing", "; ".join(reasons))
+            logger.info(f"SCOUT proxy check skipped at {bot.time_formatted}: they worker-rushed")
+            return
+        if race == Race.Protoss and not in_main and any(
+            s.type_id == UnitTypeId.FORGE and s.distance_to(enemy_main) < MAIN_RADIUS for s in bot.enemy_structures
+        ):
+            # §4.4 row 3 decides a Forge before the Gateway, not row 10 (M3: false PROXY flags
+            # in every cannon-rush test game)
+            self.proxy_checked = True
+            logger.info(f"SCOUT proxy check at {bot.time_formatted}: a Forge instead of a Gateway (row 3)")
+            return
+        production = proxy_production_check(
+            has_main_production=bool(in_main),
+            natural_townhall_seen=self.natural_townhall_seen_at is not None,
+            natural_looked_at=self.natural_seen_at is not None and self.natural_seen_at >= PROXY_NATURAL_SEEN_FROM_S,
+            now=now,
+        )
+        if production == PROXY_WAIT:
+            if not self._proxy_wait_logged:
+                self._proxy_wait_logged = True
+                logger.info(
+                    f"SCOUT proxy check waits at {bot.time_formatted}: no "
+                    f"{'Barracks' if race == Race.Terran else 'Gateway'} in the main, their natural not seen yet"
+                )
+            return
+        self.proxy_checked = True
+        workers = len(self.enemy_workers_in_main)
+        reasons = []
+        if production == PROXY_MISSING:
+            reasons.append(f"no {'Barracks' if race == Race.Terran else 'Gateway'} in the scouted main")
+        # the worker counts are §4.4's rule as written: they count what the scout saw. Only
+        # counting once the mineral line was in vision cut false flags vs the built-in AI but
+        # also missed a 3-Barracks all-in (3 SCVs seen) that the count had caught
+        if race == Race.Terran and workers <= PROXY_TERRAN_MAX_SCVS:
+            reasons.append(f"{workers} SCVs seen in the main (<= {PROXY_TERRAN_MAX_SCVS})")
+        if race == Race.Protoss:
+            build_s = bot.game_data.units[UnitTypeId.PROBE.value].cost.time / 22.4
+            # the starting probes + one per build time until the probes were counted (the
+            # scout may have left the main since), less their own scouting probe
+            seen_at = self._workers_last_added_at
+            expected = self._start_workers + math.floor(seen_at / build_s) - 1
+            if workers <= expected - PROXY_PROTOSS_WORKERS_SHORT:
+                reasons.append(f"{workers} probes seen in the main, expected ~{expected}")
+        logger.info(
+            f"SCOUT proxy check at {bot.time_formatted}: {len(in_main)} "
+            f"{'Barracks' if race == Race.Terran else 'Gateways'} in the main, {workers} workers seen"
+            + (", a townhall at their natural (expansion first)" if production == PROXY_EXPANSION else "")
+        )
+        if reasons:
+            self._raise(Threat.PROXY, Evidence.STRUCTURE, "proxy_missing", "; ".join(reasons))
+
+    def _proxy(self) -> None:
+        now = self.bot.time
+        self._proxy_missing_check()
         # production structures away from the enemy main
         far = self.far_production()
         if far:
@@ -496,6 +591,45 @@ class Detectors:
                     Threat.PROXY, Evidence.STRUCTURE, "proxy_structure",
                     f"enemy {names} > {PROXY_FAR_FROM_MAIN:g} from the enemy main", **evidence,
                 )
+
+    def _structure_flag(self, threat: Threat, source: str, types: frozenset, reason: str) -> list[Unit]:
+        """Raise or re-confirm a STRUCTURE flag from the enemy structures of `types` seen (snapshots
+        count: they were seen there). Returns them."""
+        seen = [s for s in self.bot.enemy_structures if s.type_id in types]
+        if not seen:
+            return []
+        evidence = {"tags": [s.tag for s in seen], "positions": [s.position for s in seen]}
+        if self.flags.get(threat, source) is not None:
+            self.flags.confirm(threat, source, self.bot.time, **evidence)
+        else:
+            names = ", ".join(sorted({s.type_id.name for s in seen}))
+            self._raise(threat, Evidence.STRUCTURE, source, f"{reason}: {names}", **evidence)
+        return seen
+
+    def _air_harass(self) -> None:
+        """M7 E2 (§4.4 rows 9, 13): AIR_HARASS from an air production / tech structure."""
+        self._structure_flag(Threat.AIR_HARASS, "air_tech", AIR_HARASS_TECH, "enemy air tech seen")
+
+    def _capital_air(self) -> None:
+        """M7 E2 (§4.2 capital air): WARNING from the tech, ACTIVE from the capital ships' value."""
+        bot = self.bot
+        warned = self.flags.get(Threat.CAPITAL_AIR, CAPITAL_AIR_TECH_SOURCE) is not None
+        if self._structure_flag(Threat.CAPITAL_AIR, CAPITAL_AIR_TECH_SOURCE, CAPITAL_AIR_TECH, "capital-ship tech seen") and not warned:
+            logger.info(f"INTEL capital air WARNING at {bot.time_formatted}")
+        if self.mix is None:
+            return
+        value = self.mix.mix.capital_value
+        if value < CAPITAL_AIR_MIN_VALUE:
+            return
+        if self.flags.get(Threat.CAPITAL_AIR, CAPITAL_AIR_UNITS_SOURCE) is not None:
+            self.flags.confirm(Threat.CAPITAL_AIR, CAPITAL_AIR_UNITS_SOURCE, bot.time)
+            return
+        ships = sorted({u.type_id.name for u in bot.mediator.get_cached_enemy_army if u.type_id in CAPITAL_AIR_TYPES})
+        self._raise(
+            Threat.CAPITAL_AIR, Evidence.UNIT, CAPITAL_AIR_UNITS_SOURCE,
+            f"capital ships worth {value:.0f} (>= {CAPITAL_AIR_MIN_VALUE:.0f}): {', '.join(ships)}",
+        )
+        logger.info(f"INTEL capital air ACTIVE at {bot.time_formatted}: value {value:.0f}, {', '.join(ships)}")
 
     def far_production(self) -> list[Unit]:
         bot = self.bot

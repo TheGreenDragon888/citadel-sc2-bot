@@ -5,16 +5,16 @@
 ## 1. Overview
 
 **Vision.** Citadel is a Protoss bot for the AI Arena StarCraft II ladder. It is economy-first, defense-first and information-driven. It gathers heavy scouting information to build defensive plans and to find weaknesses in the opponent.
-1. **Economy-first:** it keeps building probes until 66 (TUNE), saturates quickly, and expands on schedule unless a threat flag vetoes it.
+1. **Economy-first:** it keeps building probes until 66 (TUNE; more with a 4th base, §4.5.1), saturates quickly, and expands on schedule unless a threat flag vetoes it.
 2. **Defense-first:** it holds worker rushes, cannon rushes, 12-pools, proxy Barracks/Gateways and early one-base all-ins.
 3. **Information-driven:** it follows a per-matchup scouting schedule (§4.3), and rule-based threat flags (§5) turn sightings into the defensive branches it chooses.
 
 **Win condition (v1).**
-- **Primary:** macro to 3 bases, then build a Stalker/Immortal/Colossus/Zealot army (Archons vs Z) with +1/+2 weapons. Launch the max-out attack using the gates on `EngagementResult` (§4.5.2). After a won fight, work down the target list in §4.5.2. After a retreat, fall back to the defensive position at our newest base and re-max.
+- **Primary:** macro to 3 bases (a 4th when gas-starved with a mineral bank, §4.5.1, M7), then build a Blink Stalker/Immortal/Colossus/Zealot army with +1/+2 weapons. Vs Z it adds High Templar (Psionic Storm) and Archons; vs T and P, small Archon shares against bio and Zealot-heavy armies (§4.5.1). Launch the max-out attack using the gates on `EngagementResult` (§4.5.2). After a won fight, work down the target list in §4.5.2. After a retreat, fall back to the defensive position at our newest base and re-max.
 - **Secondary (v1):** counterattack when the enemy army is out of position (§4.6).
 - **Tie avoidance:** games reaching 80,640 loops (60:00) end in a tie (Verified, user-supplied controller source). The end-game rules in §4.7 apply from 40:00.
 - **Why:** a bot that out-mines and out-defends its opponent has a bigger army by about 8–10 minutes. The risk is spending it badly, and gating attacks on the simulator is the fix.
-- **Beyond v1:** Carrier/Void Ray/Tempest late game on 4+ bases.
+- **Beyond v1:** Carriers and Skytoss as the main army. (Void Rays and Tempests are in v1 only as the answer to enemy capital ships, §4.5.1, M7.)
 
 **Definition of done for v1:**
 - Beats built-in VeryHard in ≥ 70% and Harder in ≥ 90% of games, across T/Z/P, on at least 3 of the 7 pool maps.
@@ -52,7 +52,8 @@ citadel/
     ruleset.py                # detects 12- vs 8-worker ruleset on loop 0 (§4.0)
     intel/
       ares_bridge.py          # reads ares IntelManager flags + UnitMemoryManager each eval tick
-      detectors.py            # Citadel-only detectors (cannon rush, proxy, no-natural, tech, air, DT, timing, out-of-position)
+      detectors.py            # Citadel-only detectors (cannon rush, proxy, no-natural, tech, air, capital air, DT, timing, out-of-position)
+      enemy_mix.py            # M7: remembered enemy army shares (bio, Zealot, air) and capital-air value, from ares's army cache
       threat_flags.py         # ThreatFlag store with expiry rules (§5)
       scout_planner.py        # per-matchup scouting schedule (§4.3)
     macro/
@@ -67,7 +68,9 @@ citadel/
       wall_fallback.py        # ramp wall fallback for non-standard ramps (§4.8)
     army/
       squads.py               # squad roles: DEFEND, ATTACK, HARASS, SCOUT
-      micro.py                # ares CombatManeuver wrappers (stalker kite, retreat)
+      micro.py                # ares CombatManeuver wrappers (stalker kite, retreat, out-ranged rule; §4.5.3)
+      blink.py                # M7: Blink rules (blink back, blink onto out-rangers, blink to finish; §4.5.3)
+      templar.py              # M7: High Templar control (Psionic Storm, staying behind, Archon morphs; §4.5.3)
       attack_decision.py      # main attack/retreat on EngagementResult (§4.5.2)
       counterattack.py        # out-of-position counterattack (§4.6)
     memory/
@@ -87,7 +90,7 @@ citadel/
    - While in the opener, let the ares build runner run unless a flag with `override_opener=True` is active. An override calls `self.build_order_runner.set_build_completed()` (Verified API exists) and switches to the defensive macro rules.
    - After the opener, apply the macro rules.
 4. Every 4 steps: `economy.step()` (probes, gas, chrono, expansions, subject to `DefensePlan.allow_expand`), `production.step()` (unit mix from the matchup and active flags) and `scout_planner.step()` (assign or advance scouting tasks).
-5. Every step: `worker_defense.step()` and squad micro.
+5. Every step: `worker_defense.step()` and squad micro (including Blink and High Templar control, M7).
 6. Every 16 steps: `attack_decision` and `counterattack`. The combat sim runs at most twice per evaluation.
 7. `telemetry` records step timings and, every ~30 s of game time, a snapshot.
 
@@ -172,12 +175,13 @@ Citadel reuses the ares IntelManager wherever it has a detector. The ares detect
 | Threat | Detector | Citadel trigger (added or backup) | Plan |
 |---|---|---|---|
 | **Worker rush** | ares worker-rush flag | Local backup: ≥ 5 enemy workers within 30 range of our main before 2:00. This catches the rush before the ares flag fires | Pull all probes except 2. Focus-fire the enemy worker with the lowest HP+shield. Pull a probe back to mine when its HP+shield < 15 and swap in a fresh one. Keep building probes. Continue the Gateway; the first Zealot is top priority. End the pull when enemy workers near our base are ≤ 1 |
-| **Cannon rush** | **Not in ares** | `detectors.cannon_rush`: enemy Pylon, Forge or Photon Cannon within 25 of our main or natural townhall before 4:00, or an enemy probe inside our main between 1:00 and 3:00 for > 10 s | Attack an **unfinished** Pylon with 3 probes and each unfinished Cannon with 4 probes (the proven CreepyBot pattern is 1 drone per probe and 4 per cannon). Kill the enemy probe with 1–2 probes. If a Cannon completes: stop the probe attack, build out of its range, get Stalkers or an Immortal, and cancel the natural if the Cannon covers it. Cancel our own structures that are about to die |
+| **Cannon rush** | **Not in ares** | `detectors.cannon_rush`: enemy Pylon, Forge or Photon Cannon within 25 of our main or natural townhall before 4:00, or an enemy probe inside our main between 1:00 and 3:00 for > 10 s | Attack an **unfinished** Pylon with 3 probes and each unfinished Cannon with 4 probes (the proven CreepyBot pattern is 1 drone per probe and 4 per cannon). Kill the enemy probe with 1–2 probes. If a Cannon completes: stop the probe attack, build out of its range, get Stalkers or an Immortal, and cancel the natural if the Cannon covers it. Cancel our own structures that are about to die. **M7 (user decision):** while an enemy Cannon stands within 25 of our main or natural, the army waits at the top of the main ramp, not at the natural; it still clears Cannons near our bases once it can beat them (in M7's test games every unit sent to the natural walked past the rush Cannons and died) |
 | **12-pool / early lings** | ares ling-rush flag | `detectors.early_pool`: Spawning Pool seen before the natural Hatchery, or lings seen before 2:20 (+20 s for 8-worker) | Cancel or delay the natural Nexus if it is not yet started. Build a Zealot or Adept from the Gateway. Hold the ramp gap with that unit (`protoss_wall_warpin`/gap position, or the fallback in §4.8). Add a Shield Battery in the main. Probes defend only against lings in the mineral line. Resume the Nexus once we have ≥ 3 units and no lings within 20 |
-| **Proxy Barracks** | ares marine-rush and reaper flags (unit-based) | `detectors.proxy`: 0 Barracks in the Terran main at 1:45, or SCV count ≤ expected − 2, or a production structure seen > 50 from the enemy main | Keep the probe count up but skip the natural until 2 units are out. Add a 2nd Gateway and a Battery in the main. Hold at the top of the ramp. Stalkers vs Reapers. Chrono the Gateway units |
+| **Proxy Barracks** | ares marine-rush and reaper flags (unit-based) | `detectors.proxy`: 0 Barracks in the Terran main at 1:45, or SCV count ≤ expected − 2, or a production structure seen > 50 from the enemy main (M7: the missing-production test waits for the natural to be seen and skips an expansion-first opening, §4.4 rows 7 and 10) | Keep the probe count up but skip the natural until 2 units are out. Add a 2nd Gateway and a Battery in the main. Hold at the top of the ramp. Stalkers vs Reapers. Chrono the Gateway units. **M7 (user decision):** while the flag stands, the army goes and kills a known proxy production structure once it can win that fight, as it clears Cannons near our bases (in M7's test games the plan held one base for 60 minutes under the attack's supply gate while the proxy Barracks stood) |
 | **Proxy Gateway** | ares proxy-Zealot flag | Same structure test as proxy Barracks, using Gateways | Same as proxy Barracks |
 | **One-base all-in** (roach/4-gate/3-rax) | ares roach, ravager, marine, marauder and four-gate flags | `detectors.no_natural`: no natural townhall by 2:45 (T/P) or 2:15 (Z) (+30 s for 8-worker), plus ≥ 2 gas or ≥ 3 production structures | 2–3 Batteries at the natural (or the main if the natural isn't taken). All Gateways producing. Delay the 3rd Nexus and the Forge. Army holds at the natural choke. Immortals first vs roaches |
-| **Air / cloak** (Oracle/Banshee/Mutas/DTs) | **Not in ares** | `detectors.tech`: Stargate, Starport with tech lab, Spire, Dark Shrine, or Twilight with no expansion | Build the Forge now, then 1 Photon Cannon + 1 Battery per mineral line. Observer at home vs DTs (build a Robotics Facility if none). Stalkers or Archons vs Mutas |
+| **Air / cloak** (Oracle/Banshee/Mutas/DTs) | **Not in ares** | `detectors.tech`: Stargate, Starport with tech lab, Spire, Dark Shrine, or Twilight with no expansion. M7 builds the air part (AIR_HARASS: Stargate, Starport with tech lab, Spire) | Build the Forge now, then 1 Photon Cannon + 1 Battery per mineral line. Observer at home vs DTs (build a Robotics Facility if none). Stalkers vs Mutas, plus Psionic Storm vs Z; Archons are not used as anti-air (M7, user decision) |
+| **Capital air** (Tempest/Carrier/Mothership, Battlecruiser, Brood Lord) — M7 | **Not in ares** | `detectors.capital_air`: WARNING when a Fleet Beacon, Fusion Core or Greater Spire is seen; ACTIVE while the capital ships seen recently are worth ≥ `CAPITAL_AIR_MIN_VALUE` (TUNE, about one unit) | WARNING: one Stargate early, and Blink moves up the Twilight chain. ACTIVE: the capital-air mix (§4.5.1), for every race |
 | **Timing attack** | **Not in ares** | `detectors.timing`: remembered enemy army value > 1.3× ours, with its centroid moving toward our bases (distance shrinking over 2 evaluations) | Pull the army to the natural choke next to the Batteries. Keep producing. Don't expand |
 | **Macro opponent** | ares expansion and greedy flags | Nothing (the pattern: natural taken on time, 3rd base by 4:30) | Allow our 3rd Nexus on schedule; an optional 4th at ~7:00 |
 
@@ -192,7 +196,7 @@ All scouts use ares `KeepUnitSafe` and path with `find_path_next_point` on `medi
 |---|---|---|---|
 | 0:40 or Gateway placement | Probe | Go to the enemy main (`enemy_start_locations[0]`) and circle it, check the natural at ~1:30, then return through the likely proxy spots (map-analyzer regions within 40 of our natural) | Race (vs Random), gas count/timing, Pool/Barracks/Gateway timing, worker count, natural timing, proxy structures |
 | 1:00–1:40 | 2nd probe, only if the enemy main showed fewer structures than expected | Patrol our main edge and natural perimeter | Cannon-rush Pylons, proxies |
-| 4:30, then every 60 s | Probe or Observer | Visit each unscouted enemy expansion location | Base count |
+| 4:30, then every 60 s | Probe or Observer | Visit each unscouted enemy expansion location. The §5 main re-scout comes first: while it is due, no Observer goes on an expansion check (M7). **M7 (user decision):** an Observer starts an expansion check only if the enemy main won't go stale (§5, 60 s) before it gets back, or another Observer stays free for the re-scout; otherwise a probe goes | Base count |
 | From 6:00 | Observer | Travels with the army | Fresh engagement intel for the combat sim |
 
 **Per matchup:**
@@ -204,13 +208,13 @@ All scouts use ares `KeepUnitSafe` and path with `find_path_next_point` on `medi
 | PvT | 5:30, then when the main is stale > 90 s | Hallucinated Phoenix | Starport count, Armory, Fusion Core, Ghost Academy |
 | PvZ | ~3:00 | Adept shade into the natural or main | Roach Warren, Baneling Nest, ling count, 3rd base |
 | PvZ | ~3:45 | Oracle (1 only), flying over the main and third | Drone count, 3rd/4th base, Lair. Cast Revelation on the largest clump if castable (VERIFY cost); Revelation keeps vision on those units. Kill drones only if no Queen or Spore is within 10 |
-| PvZ | ~6:30 | Hallucinated Phoenix | Spire, Hydra Den, Infestation Pit |
 | PvP | Core + ~30 s | Stalker poke at the natural | Unit count, Nexus timing |
-| PvP | ~4:30 | Hallucinated Phoenix over the main | Stargate, Twilight, Dark Shrine, Robo count |
 | PvP | Robo done | Observer 1 → outside the enemy natural choke, safe from detection; Observer 2 at home if a Twilight is seen | Army movement, timing attacks, DT defence |
 | Random | — | Probe until the race is known, then that matchup's rows | Race |
 
-**Hallucination rule:** applies when the enemy main is stale (> 60 s without vision, after 4:00) and a Sentry has ≥ 75 energy. Cast Hallucination (Phoenix), then send the Phoenix explicitly over the main and natural, and then away. It costs no gas and no army. Blizzard's 5.0.16b hotfix notes list "Reverted spawned Hallucinations inheriting their caster's order queue" (Verified), which is why the Phoenix must be given its own orders.
+**Dropped in M7 (user decision):** the PvZ ~6:30 and PvP ~4:30 Hallucinated Phoenix rows. The vs-Z and vs-P mixes have no Sentry, so they never fired; the Observer re-scout (§5) covers the enemy main.
+
+**Hallucination rule:** applies when the enemy main is stale (> 60 s without vision, after 4:00) and a Sentry has ≥ 75 energy. Only an existing Sentry casts it (user decision), so in practice it fires vs T only (the only mix with a Sentry). Cast Hallucination (Phoenix), then send the Phoenix explicitly over the main and natural, and then away. It costs no gas and no army. Blizzard's 5.0.16b hotfix notes list "Reverted spawned Hallucinations inheriting their caster's order queue" (Verified), which is why the Phoenix must be given its own orders.
 
 ### 4.4 Observation → inference → response
 Rows whose Source column names ares take their inference from the ares flags (§4.2), with the local trigger as a backup. For rows 5, 7, 8 and 10, add 20–30 s to each time for the 8-worker ruleset (TUNE, Uncertain).
@@ -223,10 +227,10 @@ Rows whose Source column names ares take their inference from the ares flags (§
 | 4 | Spawning Pool started before the Hatchery; lings seen before 2:20 | POOL_12 | ares + Citadel | 12-pool plan |
 | 5 | No Hatchery at the Zerg natural by 1:45 and Pool done | ONE_BASE_ALLIN (1-base ling/roach) | Citadel | One-base plan; Batteries |
 | 6 | Roach Warren before 2:45, or ≥ 2 gases with no 3rd Hatchery by 3:00 | ONE_BASE_ALLIN (roach/ravager) | ares roach/ravager + Citadel | One-base plan; Immortals; 2 Batteries |
-| 7 | Terran main: no Barracks at 1:30, or SCV count ≤ 12 at 1:30 | PROXY (Barracks) | Citadel | Proxy plan |
+| 7 | Terran main: no Barracks at 1:30, or SCV count ≤ 12 at 1:30. **M7 (user decision):** the missing-Barracks test waits until the enemy natural has been in vision (until `PROXY_NATURAL_WAIT_UNTIL_S`, TUNE), and doesn't count when a townhall is there (Command Center first) | PROXY (Barracks) | Citadel | Proxy plan |
 | 8 | ≥ 2 Barracks and no natural CC by 2:30 | ONE_BASE_ALLIN (2–3 rax) | ares marine + Citadel | One-base plan |
 | 9 | Factory + Starport with no expansion by 3:00 | AIR_HARASS (Banshee/Cyclone/drop) | Citadel | Air/cloak plan (Cannon + Battery, Observer) |
-| 10 | Protoss main: no Gateway by 1:30, or probe count short by ≥ 2 | PROXY (Gateways) | ares proxy-Zealot + Citadel | Proxy plan |
+| 10 | Protoss main: no Gateway by 1:30, or probe count short by ≥ 2. **M7 (user decision):** the missing-Gateway test waits until the enemy natural has been in vision (until `PROXY_NATURAL_WAIT_UNTIL_S`, TUNE), and doesn't count when a Nexus is there (Nexus first; it raised a false PROXY in 7 of 8 losses to the built-in Protoss Air build) | PROXY (Gateways) | ares proxy-Zealot + Citadel | Proxy plan |
 | 11 | ≥ 3 Gateways and no Nexus by 3:00 (P) | ONE_BASE_ALLIN (4-gate) | ares four-gate | One-base plan; Batteries at the ramp |
 | 12 | Twilight Council + no expansion, or a Dark Shrine seen | DT (DTs/Blink) | Citadel | Robotics Facility → Observer at home; Forge → Cannon |
 | 13 | Stargate seen (P), Spire seen (Z) | AIR_HARASS | Citadel | Air/cloak plan |
@@ -234,16 +238,24 @@ Rows whose Source column names ares take their inference from the ares flags (§
 | 15 | Scouting probe killed before reaching the enemy main | UNKNOWN_AGGRO (likely aggression) | Citadel | Assume the worst: +1 Battery, delay the 3rd, re-scout with the first unit (Adept/Stalker) |
 | 16 | Enemy army value > 1.3× ours and approaching | TIMING_ATTACK | Citadel | Pull the army to the natural choke next to the Batteries; keep producing; don't expand |
 | 17 | Enemy army ≥ 60 path-distance from all its bases, and seen recently (§4.6) | ARMY_OUT_OF_POSITION | Citadel | Evaluate the counterattack (§4.6) |
+| 18 | Fleet Beacon, Fusion Core or Greater Spire seen; capital ships seen (M7) | CAPITAL_AIR (WARNING; ACTIVE) | Citadel | Capital-air plan (§4.2) and mix (§4.5.1) |
 
 ### 4.5 Transition to the win condition
 
 #### 4.5.1 Composition and upgrades
 - **Army composition** (production targets as ratios, %):
-  - vs T: Stalker 30 / Zealot 20 / Immortal 15 / Colossus 25 / Observer 2 fixed / Sentry 1.
-  - vs Z: Zealot 25 / Stalker 25 / Immortal 25 / Archon 15 / Colossus 10.
-  - vs P: Stalker 40 / Immortal 25 / Colossus 25 / Zealot 10.
-  - Air switch: if enemy air supply is ≥ 30% of their army, shift the Stalker share up and add Archons (plus optional Phoenix vs Z only; Phoenix production vs T/P is cut).
-- **Upgrades:** Forge weapons first, then armour. Twilight → Charge (vs Z, T) or Blink (vs P), then Colossus range.
+  - vs T: Stalker 30 / Zealot 20 / Immortal 15 / Colossus 25 / Observer 2 fixed / Sentry 1. **M7:** plus a small Archon share (TUNE, ~10%) while the remembered enemy army is mostly biological (TUNE, ≥ 50% of its supply; "biological" is the unit attribute in game data).
+  - vs Z: Zealot 25 / Stalker 25 / Immortal 25 / Archon 15 / Colossus 10. **M7:** plus High Templar (TUNE) for Psionic Storm. Templar whose energy is spent, or beyond the caster count (TUNE), morph into Archons (§4.5.3).
+  - vs P: Stalker 40 / Immortal 25 / Colossus 25 / Zealot 10. **M7:** plus a small Archon share (TUNE, ~10%) while the remembered enemy army is Zealot-heavy (TUNE, ≥ 30% of its supply).
+  - **M7:** vs T and P, Archons come from High Templar that morph straight away; there is no Psionic Storm research there (user decision). The Archon shares turn off again after a hold time (TUNE), so the mix doesn't flip back and forth.
+  - Air switch: if enemy air supply is ≥ 30% of their army, shift the Stalker share up. **M7 (user decision):** Archons are not used as anti-air (this replaces "add Archons"), and no Phoenix is built in M7 (Phoenix production vs T/P stays cut). The switch ends after a hold time (TUNE). **M7 (user decision):** once on, it ends only after the share has stayed below a lower off share (TUNE, ~15%) for the hold time. **M7 (user decisions):** vs Zerg while the enemy air share is at the switch's threshold, the Archon and High Templar shares go to Stalkers. A mass of Void Rays raises the Stalker share only; it doesn't trigger the capital-air mix.
+  - **Capital-air mix (M7, every race):** while CAPITAL_AIR is ACTIVE (§4.2), the Colossus share drops (TUNE, ~0-10%), the Blink Stalker share rises, and Void Rays and/or Tempests are added. Expected (standard-patch values; the AIE maps may differ, so the M7 staged test sets the shares):
+    - vs Tempests, Void Rays first: they are faster than Tempests, the Tempest's air bonus is against massive units (Void Rays aren't), the Void Ray's bonus is against armored units (Tempests are), and they need only a Stargate;
+    - vs Carriers, Battlecruisers and Brood Lords, Tempests: range, and their bonus against massive units.
+
+    The mix returns to normal after the capital ships have been gone for a hold time (TUNE). A Tempest vs Tempest fight is an even trade, so the side that already has more wins.
+- **Upgrades:** Forge weapons first, then armour. Twilight → Blink then Charge (vs P, T) or Charge then Blink (vs Z) (M7, user decision). Robotics Bay → Extended Thermal Lance. Templar Archives → Psionic Storm (vs Z). **M7:** each research building works through its own list in parallel, and an upgrade never starts the building it needs (that building comes from the unit mix or its own timed step: Twilight Council, and the Templar Archives vs Z, at TUNE times). **M7 (user decision):** the Twilight Council and Templar Archives, and research there, wait while fewer than 2 of our Nexuses are finished.
+- **Economy (M7, user decision):** a 4th base when minerals are ≥ `FOURTH_BASE_BANK` (TUNE) and gas income has been short of production's needs for `FOURTH_BASE_GAS_STARVED_S` (TUNE), with 3 bases saturated and `DefensePlan.allow_expand`; the probe target rises with it. While gas-starved with a mineral bank, Zealots may exceed their share. **M7 (user decision):** not while the enemy army is air-heavy (the air switch's share), since Zealots can't hit air. **M7 (user decision):** while a mineral bank lasts (TUNE), more Gateways, up to a cap (TUNE). **M7 (user decision):** when no powered Gateway spot is free, a Pylon next to a free one first.
 - **Note:** if the ruleset is 5.0.16, Blizzard's 5.0.16b hotfix notes say "Colossus damaged increased from 10(+5 vs Light) to 12(+3 vs Light)" (Verified). It is slightly worse against Marines and Zerglings, so re-check the vs T/Z Colossus share with the combat sim before tuning.
 
 #### 4.5.2 Attack / retreat on `EngagementResult`
@@ -261,15 +273,42 @@ MIN_STATE_SECONDS = 20  # no attack/retreat flip within 20 s unless result <= 2
 ```
 
 - **Home defence** engages at ≥ `DEFEND_ENGAGE` and never leaves the battery radius, because Shield Batteries are not simulated (Uncertain).
+  - **M7:** only units that can hit something in the threat group answer it, and only they count in its simulation; the others hold the defensive position. The squad fights the enemies that were evaluated (within 20 of the threat), not whatever each unit happens to see.
+  - **M7:** units walk back to the defensive position with a move, not an attack-move, so they don't chase attackers out of the battery radius.
+  - **M7 (user decision): hysteresis.** Once the squad engages a home threat, it keeps fighting until the level falls to `DEFEND_DISENGAGE_AT` (TUNE) or below. Then it falls back toward the main in one move (all `HOLD_FALLBACK_STEPS` at once, kept for `HOLD_FALLBACK_KEEP_S`), and it doesn't engage again outside the defensive position for `MIN_STATE_SECONDS`. Without this, fights against Void Ray armies flipped to holding mid-fight, and the holding units stepped away from out-rangers without shooting.
 - **Inputs:**
   - Own side: units in the ATTACK squad.
   - Enemy side: remembered enemy army units (UnitMemoryManager) within 20 of the squad's path target, or of the squad itself.
   - Also add **enemy static defense within 15 of the target** explicitly: Photon Cannons, Bunkers, Spine Crawlers, Planetary Fortresses, and Shield Batteries as support.
   - Whether the sim models structures is **Uncertain**. Day-1 test: compare 6 Stalkers vs [] against 6 Stalkers vs [1 Photon Cannon]. If the result doesn't change, apply a penalty instead: count each Cannon/Bunker/Spine as 3 Stalkers' worth of supply and a Planetary Fortress as 8 (TUNE). Apply it by lowering the result by one level per 4 penalty-supply.
+  - **Launch (M7, user decision):** no gate beyond the level and supply above. M7 first added three (the level against the whole remembered enemy army, a wait for fresh intel while the army's Observer looked, and no launch soon after a home fight); they held the first launch back by about a minute and lost games against CheatInsane Zerg Air, so they were removed.
+  - **Out-range penalty (M7, only if needed):** if the fight-input logs (§8) show the simulator rating fights against out-ranging enemies as wins, lower the level by `OUTRANGE_PENALTY_PER_SHARE` (TUNE) per share of enemy value that out-ranges all our units able to hit it, or that none of them can hit. The simulator never sees positions (§11.3). "Out-ranges" is as in §4.5.3. Our melee units count only when they are the only units of ours able to hit that enemy (user decision): with Zealots in the army, sieged Siege Tanks otherwise never counted.
+  - **Weaponless units (M7, user decision):** Void Rays, Carriers, Battlecruisers, Oracles, Banelings, Widow Mines, Disruptors and Swarm Hosts have no weapon in this game data, so the simulator sees them as harmless. When they make up at least `WEAPONLESS_CAP_SHARE` (TUNE) of the enemy's value, the level is at most the **value level**: the level the mapping above gives if each side's resource value (game-data costs) were its health and the larger side kept the difference. The out-range penalty then applies to that.
 - **Retreat** at ≤ `RETREAT_AT`, or when the squad's current value is < 40% of its start value.
 - **After retreating,** fall back to the defensive position at our newest base, re-max, and don't re-launch for 45 s.
 - **Targets:** nearest known enemy expansion → the next one → the main.
-- **Reinforcements** rally in groups of ≥ 8 supply; never trickle them in.
+- **Reinforcements** rally in groups of ≥ 8 supply; never trickle them in. They go out only while the attack is on, and a retreat or recall sends them home too.
+
+#### 4.5.3 Unit control (M7)
+Citadel's choices, decided after the first ladder losses. Every threshold is TUNE in `bot/constants.py`; ranges and speeds come from game data.
+- **Weapon ranges (user decision):** game data's, through python-sc2. A type with no weapon there uses ares's influence-map range for it (`WEIGHT_COSTS`), ours and the enemy's: Void Rays, Carriers, Sentries, Banelings, burrowed Widow Mines and Infestors. Our units with a range from neither keep their pre-M7 behaviour: they go with the squad, answer threats and never step out.
+- **Out-ranged rule:**
+  - A unit that is not committed to a fight (holding, moving or retreating) and is inside the reach of a visible enemy it can't hit, or that out-ranges it by ≥ `OUTRANGED_MARGIN`, steps out of that enemy's reach (ares `KeepUnitSafe`).
+  - **Melee units (user decision):** a unit whose range is at most `MELEE_RANGE_MAX` (TUNE) is out-ranged only by enemies it can't hit. Closing the gap is its job: on Phase 2's first code, Zealots stepped back from Marines and lost two proxy-rax games.
+  - Committed units (an attack, or a home fight the squad chose) keep fighting.
+  - If out-rangers the squad can't beat cover the defensive position, it moves back toward the main in steps (`HOLD_FALLBACK_STEP` × at most `HOLD_FALLBACK_STEPS`).
+- **Retreat:** retreating units shoot only enemies that fight back, and only when faster than every visible threat that can hit them. Blink Stalkers blink away first.
+- **Blink:** Stalkers with Blink ready:
+  - **blink back** on low shields (`BLINK_BACK_SHIELD_FRACTION`) when threatened;
+  - **blink onto out-rangers together** when the squad is committed (at most `BLINK_IN_PER_TARGET_S` per target, so they arrive as a group);
+  - **blink to finish** a fleeing unit one volley would kill, only when the landing spot is safe and the local fight is won.
+
+  They never blink into fog, onto ground with enemy fire above `BLINK_DANGER_MAX`, or up a cliff without vision of the landing spot.
+- **High Templar:**
+  - They stay behind the squad and cast Psionic Storm on clumps, never on our own units (ares's AoE behaviour).
+  - Templar whose energy is spent for `TEMPLAR_MORPH_AFTER_S`, or beyond `TEMPLAR_MAX_CASTERS`, morph into Archons in pairs.
+  - Citadel morphs them itself: ares's production would merge any two idle Templar, casters included.
+- **Void Rays and Tempests:** Void Rays target capital and armored units first, and use Prismatic Alignment when ≥ `VOIDRAY_ALIGN_MIN_ARMORED` armored enemies are in range. Tempests target massive units first and step back between shots like the other kiters.
 
 ### 4.6 v1 Counterattack
 In v1, weakness exploitation is limited to counterattacking an out-of-position army.
@@ -322,6 +361,7 @@ class Threat(Enum):
     WORKER_RUSH = auto(); CANNON_RUSH = auto(); POOL_12 = auto(); PROXY = auto()
     ONE_BASE_ALLIN = auto(); AIR_HARASS = auto(); DT = auto(); TIMING_ATTACK = auto()
     MACRO = auto(); UNKNOWN_AGGRO = auto(); ARMY_OUT_OF_POSITION = auto()
+    CAPITAL_AIR = auto()   # M7: WARNING from STRUCTURE evidence, ACTIVE from UNIT evidence (§4.2)
 
 class Evidence(Enum):
     STRUCTURE = auto()   # buildings, tech, missing-structure-at-time observations
@@ -355,6 +395,7 @@ class DefensePlan:
   - TIMING_ATTACK: 30 s.
   - ARMY_OUT_OF_POSITION: 15 s.
   - Lings / POOL_12 from units: 45 s.
+  - CAPITAL_AIR (ACTIVE, M7): `CAPITAL_AIR_UNIT_TTL` (TUNE) after the remembered capital-ship value drops below `CAPITAL_AIR_MIN_VALUE`.
 - **STRUCTURE evidence never expires on a timer.** It expires only when:
   - (a) every evidence tag has been reported destroyed (`on_unit_destroyed`); or
   - (b) we get vision of every evidence position and the structure is absent (a re-scout contradicts it); or
@@ -364,6 +405,7 @@ class DefensePlan:
     - ONE_BASE_ALLIN: enemy natural townhall seen, or time > 7:00 with our 3 Batteries and ≥ 20 army supply.
     - POOL_12: time > 4:00.
     - AIR_HARASS and DT: never by phase. They stay until detection exists at every mineral line; then the flag moves to "satisfied" and stops forcing builds.
+    - CAPITAL_AIR (WARNING, M7): never by phase; only by (a) or (b).
 - **ARES evidence** follows the matching category. A unit-based ares flag (e.g. ling rush) is treated as UNIT with its TTL, even if the ares boolean stays True. Record the ares reset behaviour in `constants.ARES_INTEL` after reading the source.
 - **Minimum plan duration** is 20 s, unless the flag is cleared by rule (a).
 - **Re-scout trigger:** any STRUCTURE flag whose evidence positions haven't been seen for > 90 s, or `now - last_main_scout > 60` after 3:00.
@@ -401,11 +443,12 @@ class DefensePlan:
 | M4 | 10–11 | Squads, `EngagementResult` gates, retreat hysteresis, end-game rules | VeryHard ≥ 7/10 across races |
 | M5 | 12–13 | Counterattack (§4.6), opponent memory, telemetry, step guard | Counterattack triggers and recalls correctly in ≥ 3 staged tests; no crash in 30 local games |
 | M6 | 14 | Upload with bot data enabled; watch the first ladder games | No crashes or timeouts in the first 20 games |
+| M7 | after M6 | Ladder fixes (user decision; plan and file-level steps in `docs/M7_PLAN.md`): fight and loss telemetry; army bugs; out-ranged rule, launch gate, threat eligibility, retreat (§4.5.2-4.5.3); per-building research, Blink, High Templar/Archons; 4th base, AIR_HARASS and CAPITAL_AIR detection and the capital-air mix (§4.2, §4.5.1) | Each phase's criteria in `docs/M7_PLAN.md`; VeryHard × 10 vs each race's built-in Air build, and CheatInsane × 10 vs the Terran and Zerg Air builds, meet the targets set after the baseline batches; the M1-M5 regressions hold; no crash or time-out in the first 20 ladder games after each upload. **Accepted (user decision, 2026-10-15)** with the CheatInsane Zerg Air target unmet (5/10 against 9/10), deferred; the ladder games follow its upload (M6 passed its 20 on 2026-10-06) |
 
 **Cut from v1:**
 - Stasis Wards; Oracle harass as a plan (the Oracle is for scouting only); Phoenix production vs T/P.
 - Natural walls and PvZ full walls.
-- Disruptors, High Templar, Skytoss, Warp Prism, Blink micro.
+- Disruptors, Warp Prism, and Carriers / Skytoss as the main army. (M7 took High Templar and Blink micro off this list, and allows Void Rays and Tempests as the capital-air answer, §4.5.1.)
 - Custom opener selection (WinrateBased replaces it).
 - Base trades (counterattack only while our base is safe).
 - 8-worker build optimisation beyond the shifted builds in §4.1.
@@ -421,6 +464,11 @@ class DefensePlan:
 - **Ladder environment:** `aiarena/local-play-bootstrap` (run with `docker compose up`) with Citadel's actual ladder zip, before every upload. Unzip the ladder zip into `bots/Citadel/`, add a line to `matches`, and afterwards read `results.json`, `replays/` and `logs/`.
 - **Maps and ruleset:** run each opener on all 7 pool maps and log `wall_ok` and the ruleset.
 - **Staged counterattack tests:** use debug spawning (ares chat debug, Verified) to place an enemy army 70 path-distance away. Check the trigger, the target choice, and the recall when the enemy army returns.
+- **M7 staged tests** (debug spawning, dev-only scripts):
+  - out-ranged units at a hold point (Tempests);
+  - Blink;
+  - High Templar (Storm placement, no Storm on our own units, Archon morphs);
+  - which equal-cost groups beat Tempests, Battlecruisers, Brood Lords and a mass of Void Rays on the AIE data (sets the §4.5.1 capital-air shares, and decides whether Void Ray masses join that response; user decision).
 - **Metrics per game** (JSON line in `./data/logs/`, capped at the last 200 games; also stdout):
   - result, opponent id/race, map, game length, opener, ruleset, tie flag;
   - flags with their raise and expire reasons (and times);
@@ -428,6 +476,12 @@ class DefensePlan:
   - first enemy aggression time; army value lost vs killed;
   - `EngagementResult` values at each attack/retreat decision; counterattack outcomes;
   - startup ms; mean/p99/max step ms.
+  - **M7:**
+    - the fight inputs (unit counts and values, both sides) at each decision;
+    - enemy tech and capital ships, first seen;
+    - army losses by intent and distance from their point;
+    - blinks, storms and Archon morphs;
+    - capital-air state changes.
 
 ## 9. Risks and known pitfalls
 

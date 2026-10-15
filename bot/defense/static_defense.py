@@ -6,6 +6,10 @@
   Workers are sent directly (`mediator.build_with_specific_worker`), like wall_fallback.py.
 - Natural batteries use ares's static-defence placement at the natural, with a Pylon there first.
 - `gateways_needed`: more Gateways at the main through ares's BuildStructure.
+- M7 E2 (AIR_HARASS): the Forge (`forge_now`), and at every mineral line a Pylon, then a Photon
+  Cannon and a Shield Battery (`line_defense`), placed by `_line_spots` within MINERAL_LINE_SEARCH
+  of the minerals' centre, clear of the probes' paths to the minerals and gases; one order per
+  base per DEFENSE_ORDER_RETRY_S (`line_next` picks what comes next).
 - A finished enemy Cannon's range is taken out of ares's placement table
   (`mediator.get_placements_dict`, entries marked unavailable, restored when the Cannon dies), so
   new buildings go down out of its range (§4.2 cannon rush); build orders already aimed there
@@ -26,6 +30,10 @@ from sc2.position import Point2
 
 from bot.constants import (
     BUILDER_DANGER_RADIUS,
+    LINE_DEFENSE_NEXUS_CLEARANCE,
+    MINERAL_LINE_RADIUS,
+    MINERAL_LINE_SEARCH,
+    MINING_PATH_CLEARANCE,
     CANNON_COVER_EXTRA,
     DEFENSE_ORDER_RETRY_S,
     MAIN_BATTERY_RAMP_DIST,
@@ -36,6 +44,7 @@ from bot.constants import (
     RAMP_CORRIDOR_LENGTH,
     SAME_LEVEL_Z,
 )
+from bot.defense.defense_planner import mineral_lines
 from bot.geometry import in_map
 from bot.intel.threat_flags import Threat
 from bot.macro.economy import ReserveForPending, ReserveForStructure
@@ -57,6 +66,18 @@ STATIC_DEFENSE: frozenset[UnitTypeId] = frozenset(
 )
 
 
+def line_next(powered_spot: bool, cannon: bool, battery: bool, forge_ready: bool, battery_tech: bool) -> Optional[UnitTypeId]:
+    """M7 E2: what a mineral line's defense needs next (pure): a Pylon while no spot is powered,
+    then the Cannon (once the Forge is ready), then the Battery; None when it has both (or must wait)."""
+    if cannon and battery:
+        return None
+    if not powered_spot:
+        return UnitTypeId.PYLON
+    if not cannon:
+        return UnitTypeId.PHOTONCANNON if forge_ready else (UnitTypeId.SHIELDBATTERY if not battery and battery_tech else None)
+    return UnitTypeId.SHIELDBATTERY if battery_tech else None
+
+
 class StaticDefense:
     def __init__(self, bot: "AresBot", planner: "DefensePlanner"):
         self.bot = bot
@@ -64,6 +85,7 @@ class StaticDefense:
         self._last_main_order: float = -DEFENSE_ORDER_RETRY_S
         self._blocked: dict[int, list[tuple]] = {}  # cannon tag -> placements we made unavailable
         self._blocked_at: dict[int, Point2] = {}  # cannon tag -> its position
+        self._line_order: dict[int, float] = {}  # M7 E2: Nexus tag -> last mineral-line order
 
     # -- per defense tick ------------------------------------------------------------------------
 
@@ -75,6 +97,8 @@ class StaticDefense:
             self._main_batteries(plan.batteries_needed["main"])
         if plan.cancel_natural:
             self._cancel_natural()
+        if plan.line_defense:
+            self._line_defense()
 
     def behaviors(self, plan: "DefensePlan") -> list["Behavior"]:
         """ares behaviors for the defense MacroPlan: natural batteries (and their Pylon), and
@@ -93,6 +117,10 @@ class StaticDefense:
                     out.append(BuildStructure(nat, UnitTypeId.PYLON, find_alternative=False))
             elif self._count_near(UnitTypeId.SHIELDBATTERY, nat, NATURAL_RADIUS) < need_nat and bot.can_afford(UnitTypeId.SHIELDBATTERY):
                 out.append(BuildStructure(nat, UnitTypeId.SHIELDBATTERY, static_defence=True, find_alternative=False))
+        if plan.forge_now and plan.allow_forge:
+            # M7 E2 (AIR_HARASS): the Forge now, for the mineral-line Cannons
+            if not (bot.structures(UnitTypeId.FORGE) or bot.mediator.get_building_counter[UnitTypeId.FORGE]) and bot.can_afford(UnitTypeId.FORGE):
+                out.append(BuildStructure(bot.start_location, UnitTypeId.FORGE))
         if plan.gateways_needed:
             gates = (
                 len(bot.mediator.get_own_structures_dict[UnitTypeId.GATEWAY])
@@ -222,6 +250,59 @@ class StaticDefense:
         if spots and bot.can_afford(UnitTypeId.PYLON) and self._order(UnitTypeId.PYLON, spots[0]):
             self._last_main_order = bot.time
             logger.info(f"DEFENSE Pylon for the main battery at {spots[0].rounded}, {bot.time_formatted}")
+
+    # -- mineral-line defense (M7 E2, AIR_HARASS) ------------------------------------------------
+
+    def _line_spots(self, th, centre: Point2, type_id: UnitTypeId) -> list[Point2]:
+        """Placeable spots within MINERAL_LINE_SEARCH of a mineral line's centre, at least
+        LINE_DEFENSE_NEXUS_CLEARANCE from its Nexus and clear of the probes' paths (the segments from
+        the Nexus to each mineral field and gas), nearest the centre first."""
+        bot = self.bot
+        size = BUILDING_SIZE_ENUM_TO_RADIUS[STRUCTURE_TO_BUILDING_SIZE[type_id]]
+        targets = [r.position for r in bot.resources if r.distance_to(th) <= MINERAL_LINE_RADIUS]
+        cx, cy = round(centre.x), round(centre.y)
+        out = []
+        for dx in range(-MINERAL_LINE_SEARCH, MINERAL_LINE_SEARCH + 1):
+            for dy in range(-MINERAL_LINE_SEARCH, MINERAL_LINE_SEARCH + 1):
+                p = Point2((cx + dx, cy + dy))
+                if (
+                    in_map(bot, p)
+                    and p.distance_to(centre) <= MINERAL_LINE_SEARCH
+                    and p.distance_to(th) >= LINE_DEFENSE_NEXUS_CLEARANCE + size
+                    and all(self._distance_to_segment(p, th.position, t) >= MINING_PATH_CLEARANCE + size for t in targets)
+                    and bot.mediator.can_place_structure(position=p, structure_type=type_id)
+                    and not self.planner.cannon_covers(p, 1.0)
+                ):
+                    out.append(p)
+        return sorted(out, key=lambda p: p.distance_to(centre))
+
+    def _line_defense(self) -> None:
+        """At every mineral line: a Pylon, then a Photon Cannon and a Shield Battery (`line_next`)."""
+        bot = self.bot
+        now = bot.time
+        pylons = bot.mediator.get_own_structures_dict[UnitTypeId.PYLON]
+        height = bot.game_info.terrain_height.data_numpy
+        forge_ready = any(f.is_ready for f in bot.structures(UnitTypeId.FORGE))
+        battery_tech = bot.tech_requirement_progress(UnitTypeId.SHIELDBATTERY) >= 1
+        reach = MINERAL_LINE_SEARCH + 2
+        for th, centre in mineral_lines(bot):
+            if now - self._line_order.get(th.tag, -DEFENSE_ORDER_RETRY_S) < DEFENSE_ORDER_RETRY_S:
+                continue
+            cannon = self._count_near(UnitTypeId.PHOTONCANNON, centre, reach) > 0
+            battery = self._count_near(UnitTypeId.SHIELDBATTERY, centre, reach) > 0
+            if cannon and battery:
+                continue
+            spots = self._line_spots(th, centre, UnitTypeId.PHOTONCANNON)
+            powered = [p for p in spots if cy_pylon_matrix_covers(p, pylons, height, pylon_build_progress=1.0)]
+            if not powered and any(not p.is_ready and p.distance_to(centre) <= reach for p in pylons):
+                continue  # its Pylon is on the way
+            want = line_next(bool(powered), cannon, battery, forge_ready, battery_tech)
+            if want is None or not bot.can_afford(want):
+                continue
+            where = (self._line_spots(th, centre, UnitTypeId.PYLON) if want == UnitTypeId.PYLON else powered)[:1]
+            if where and self._order(want, where[0]):
+                self._line_order[th.tag] = now
+                logger.info(f"DEFENSE {want.name} at the mineral line of the Nexus at {th.position.rounded}: {where[0].rounded}, {bot.time_formatted}")
 
     def _order(self, type_id: UnitTypeId, pos: Point2) -> bool:
         mediator = self.bot.mediator

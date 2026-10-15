@@ -16,6 +16,9 @@ Expiry (§5):
   (c) the threat's phase rule (computed by the caller, see `ExpiryContext.phase_over`).
 - ARES evidence expires like the category in `ThreatFlag.expires_as` (UNIT or STRUCTURE).
 - No flag expires within `MIN_PLAN_DURATION_S` of being raised, except by rule (a).
+
+"Satisfied" (M7 E2, §5 AIR_HARASS and DT): an active threat whose plan has done its job (detection
+at every mineral line) stays active but stops forcing builds; `set_satisfied` flips it either way.
 """
 
 from dataclasses import dataclass, field
@@ -39,6 +42,13 @@ class Threat(Enum):
     MACRO = auto()
     UNKNOWN_AGGRO = auto()
     ARMY_OUT_OF_POSITION = auto()
+    # M7 E2: WARNING from STRUCTURE evidence (source "capital_air_tech"), ACTIVE from UNIT evidence
+    # (source "capital_air_units", UNIT_TTL_S["CAPITAL_AIR"] after the value drops)
+    CAPITAL_AIR = auto()
+
+
+CAPITAL_AIR_TECH_SOURCE = "capital_air_tech"
+CAPITAL_AIR_UNITS_SOURCE = "capital_air_units"
 
 
 class Evidence(Enum):
@@ -114,6 +124,7 @@ class FlagStore:
         # §5 re-scout trigger: STRUCTURE flags whose evidence positions have gone unseen for
         # RESCOUT_STALE_S; the scout planner reads this (M3)
         self.stale: dict[tuple[Threat, str], list[Position]] = {}
+        self.satisfied: set[Threat] = set()  # M7 E2: active threats whose plan has done its job
 
     # -- raising -------------------------------------------------------------------------------
 
@@ -202,6 +213,29 @@ class FlagStore:
     def was_raised(self, threat: Threat) -> bool:
         return any(r.threat == threat for r in self.history)
 
+    def capital_air(self) -> Optional[str]:
+        """M7 E2: "ACTIVE" (capital ships seen recently), "WARNING" (their tech seen) or None."""
+        if (Threat.CAPITAL_AIR, CAPITAL_AIR_UNITS_SOURCE) in self.flags:
+            return "ACTIVE"
+        if (Threat.CAPITAL_AIR, CAPITAL_AIR_TECH_SOURCE) in self.flags:
+            return "WARNING"
+        return None
+
+    # -- satisfied (M7 E2) ---------------------------------------------------------------------
+
+    def is_satisfied(self, threat: Threat) -> bool:
+        return threat in self.satisfied and self.is_active(threat)
+
+    def set_satisfied(self, threat: Threat, satisfied: bool, now: float, reason: str) -> None:
+        """Mark an active threat's plan done (or not any more), logging each change."""
+        if satisfied == (threat in self.satisfied):
+            return
+        if satisfied:
+            self.satisfied.add(threat)
+        else:
+            self.satisfied.discard(threat)
+        logger.info(f"FLAG {threat.name} {'satisfied' if satisfied else 'no longer satisfied'} at {_mmss(now)}: {reason}")
+
     # -- expiry --------------------------------------------------------------------------------
 
     def on_unit_destroyed(self, tag: int, now: float) -> None:
@@ -250,6 +284,8 @@ class FlagStore:
 
     def _expire(self, key: tuple[Threat, str], now: float, reason: str) -> None:
         flag = self.flags.pop(key)
+        if not self.is_active(flag.threat):
+            self.satisfied.discard(flag.threat)
         self._rescout_logged.discard(key)
         self.stale.pop(key, None)
         record = self._records.pop(key, None)

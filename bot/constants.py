@@ -136,6 +136,14 @@ ARES_INTEL: dict[str, AresIntelFlag] = {
 # protoss_builds.yml, which covers the opener (checked at start-up).
 PROBE_TARGET: int = 66
 MAX_BASES: int = 3  # M1 deliverable: 3 bases
+# M7 E1 (§4.5.1 economy): a 4th base once minerals are at least FOURTH_BASE_BANK and production has
+# been gas-starved (production.gas_starved) for FOURTH_BASE_GAS_STARVED_S, with the 3 bases'
+# mineral lines saturated and DefensePlan.allow_expand (TUNE). Once wanted, it stays wanted (a lost
+# 4th is rebuilt); probes then go to PROBE_TARGET + FOURTH_BASE_EXTRA_PROBES (its two gases and spares)
+FOURTH_BASE_BANK: int = 1500
+FOURTH_BASE_GAS_STARVED_S: float = 60.0  # ... of gas-starved time within the last FOURTH_BASE_WINDOW_S
+FOURTH_BASE_WINDOW_S: float = 120.0  # (gas-starved flips often: 37 times in a 23-min game, 75% of it on)
+FOURTH_BASE_EXTRA_PROBES: int = 8
 # While a threat plan forbids expanding (M2): probes to this many per ready base, plus a spare
 # few for the next base (16 on minerals + 6 on gas saturate one base)
 PROBES_PER_HELD_BASE: int = 22
@@ -200,6 +208,9 @@ class ScheduleItem(NamedTuple):
     only_if_until_s: Optional[float] = None
     # Activates the item before `at_s` when this condition holds
     early_if: Optional[str] = None
+    # False for the research buildings' own timed steps (M7 K1): they don't decide when the opener
+    # schedule is finished (gas per base, expansion priority and ProductionController wait for that)
+    part_of_opener: bool = True
 
 
 # Per-opener timed steps (§4.1). Names match protoss_builds.yml. Times are TUNE.
@@ -297,6 +308,7 @@ OPENER_ESSENTIALS: Tuple[ScheduleItem, ...] = (
     ScheduleItem(0, "upgrade", UpgradeId.WARPGATERESEARCH),
     ScheduleItem(0, "bases", None, 2),
 )
+
 OPENER_SCHEDULES: dict[str, Tuple[ScheduleItem, ...]] = {
     "A_Standard": _A_SCHEDULE,
     "A2_Safe": _A2_SCHEDULE,
@@ -308,8 +320,8 @@ OPENER_SCHEDULES: dict[str, Tuple[ScheduleItem, ...]] = {
     "A2_vRandom": _A2_SCHEDULE,
 }
 
-# §4.5.1 army composition (%). M1 scaffolding (production.py). Archons are left out because
-# High Templar are cut from v1 (§7); the remaining shares are rescaled to 100%.
+# §4.5.1 army composition (%). M1 scaffolding (production.py); M7 K3 adds the vs-Z Archon share and
+# High Templar casters (TUNE), and production.unit_proportions turns the Archon share into Templar.
 # Observers are a fixed count, not a share.
 ARMY_COMPOSITION_PCT: dict[str, dict[UnitTypeId, float]] = {
     "Terran": {
@@ -319,42 +331,109 @@ ARMY_COMPOSITION_PCT: dict[str, dict[UnitTypeId, float]] = {
     "Zerg": {
         UnitTypeId.ZEALOT: 25, UnitTypeId.STALKER: 25, UnitTypeId.IMMORTAL: 25,
         UnitTypeId.COLOSSUS: 10,
+        # M7 K3: the spec's Archon 15 (made from Templar, production.templar_share) plus casters
+        UnitTypeId.ARCHON: 15, UnitTypeId.HIGHTEMPLAR: 8,
     },
     "Protoss": {
         UnitTypeId.STALKER: 40, UnitTypeId.IMMORTAL: 25, UnitTypeId.COLOSSUS: 25,
         UnitTypeId.ZEALOT: 10,
     },
 }
+# M7 E3 (§4.5.1) mix selection: normal (with K3's Archon shares) -> air switch (AIR_HARASS active and
+# the enemy air share at AIR_SWITCH_SHARE: the Stalker share rises by AIR_SWITCH_STALKER_PCT, nothing
+# else) -> capital air (CAPITAL_AIR ACTIVE: the Colossus share drops to CAPITAL_AIR_COLOSSUS_PCT, the
+# (Blink) Stalker share rises by CAPITAL_AIR_STALKER_PLUS_PCT and CAPITAL_AIR_ADD_PCT is added; vs P
+# with Carriers seen, more Tempests). The air units are E0's (VERIFY_NOTES "E0"): equal-value groups,
+# 5 runs each, wins of 5. TUNE
+AIR_SWITCH_STALKER_PCT: float = 30.0
+CAPITAL_AIR_COLOSSUS_PCT: float = 5.0
+CAPITAL_AIR_STALKER_PLUS_PCT: float = 15.0
+CAPITAL_AIR_ADD_PCT: dict[str, dict[UnitTypeId, float]] = {
+    # vs kiting Tempests: Stalkers + Tempests 5/5, Tempests 3/5, Void Rays 0/5 (not §4.5.1's Void Rays)
+    "Protoss": {UnitTypeId.TEMPEST: 25.0},
+    # vs Battlecruisers: Tempests 5/5 without a loss
+    "Terran": {UnitTypeId.TEMPEST: 25.0},
+    # vs Brood Lords + Corruptors: Void Rays 5/5 without a loss in 11 s (Tempests too, in 38 s)
+    "Zerg": {UnitTypeId.VOIDRAY: 25.0},
+}
+CAPITAL_VS_CARRIER_TEMPEST_PCT: float = 15.0
 # ares SpawnController priority (0 = highest)
 ARMY_PRIORITY: dict[UnitTypeId, int] = {
+    UnitTypeId.VOIDRAY: 0, UnitTypeId.TEMPEST: 0,
     UnitTypeId.COLOSSUS: 0, UnitTypeId.IMMORTAL: 1, UnitTypeId.STALKER: 2,
-    UnitTypeId.ZEALOT: 3, UnitTypeId.SENTRY: 4,
+    UnitTypeId.ZEALOT: 3, UnitTypeId.SENTRY: 4, UnitTypeId.HIGHTEMPLAR: 1,
 }
 OBSERVER_COUNT: int = 2  # §4.5.1 "Observer 2 fixed"
 # At this many banked minerals, also warp in Gateway units without waiting on higher-priority
-# units that are short of gas
+# units that are short of gas; M7 E1 (D28): only Zealots while gas-starved (production.gas_starved)
 MINERAL_FLOAT_BANK: int = 700
 # An unpowered idle Gateway blocks ares's SpawnController after Warp Gate: a Pylon within this
 # many tiles of it, re-ordered at most this often
 GATEWAY_POWER_SEARCH: int = 5
 GATEWAY_POWER_RETRY_S: float = 30.0
+# M7 D35: with no powered Gateway spot free, a Pylon next to a free unpowered one, at most this many
+# times per spot (a spot that stays unpowered isn't tried again)
+GATEWAY_SPACE_PYLON_TRIES: int = 2
+# ... and a spot that had its tries is passed over by asking ares for the free spot nearest a point
+# this far to each side of the base instead (ares offers the one nearest the point asked)
+GATEWAY_SPACE_PROBE: float = 10.0
 # ProductionController (adds Gateways/Robos and the tech they need) starts when the opener's
 # timed schedule is finished, or at this time at the latest
 PRODUCTION_CONTROLLER_START_S: float = 330.0
 MAX_PRODUCTION_STRUCTURES: int = 12
-# §4.5.1 upgrades: Forge weapons first, then armour; Twilight -> Charge (vs Z, T) or Blink (vs P);
-# then Colossus range. One at a time, in this order; UpgradeController builds the tech structures
-# each one needs.
+# M7 D34 (user decision): a mineral sink. ares's ProductionController adds production for a bank only
+# with 400 gas banked too, which a gas-starved bot never has; so while minerals have stayed at
+# least EXTRA_GATEWAY_BANK for EXTRA_GATEWAY_HOLD_S, one more Gateway (none under construction), up to
+# MAX_GATEWAYS Gateways + Warp Gates in all (TUNE)
+EXTRA_GATEWAY_BANK: int = 1000
+EXTRA_GATEWAY_HOLD_S: float = 20.0
+MAX_GATEWAYS: int = 20
+# §4.5.1 upgrades (M7 K1, user decisions): each research building works through its own list in
+# parallel, one upgrade at a time per building, and an upgrade never starts the building it needs
+# (UpgradeController with auto tech-up off). Forge weapons first, then armour; Twilight Blink then
+# Charge vs P and T, Charge then Blink vs Z (D7); Robotics Bay Extended Thermal Lance; Templar
+# Archives Psionic Storm (vs Z only, R1)
 UPGRADES_START_S: float = 300.0
-UPGRADES_VS_ZT: Tuple[UpgradeId, ...] = (
+_FORGE_CHAIN: Tuple[UpgradeId, ...] = (
     UpgradeId.PROTOSSGROUNDWEAPONSLEVEL1, UpgradeId.PROTOSSGROUNDWEAPONSLEVEL2,
-    UpgradeId.PROTOSSGROUNDARMORSLEVEL1, UpgradeId.CHARGE, UpgradeId.EXTENDEDTHERMALLANCE,
-    UpgradeId.PROTOSSGROUNDARMORSLEVEL2,
+    UpgradeId.PROTOSSGROUNDARMORSLEVEL1, UpgradeId.PROTOSSGROUNDARMORSLEVEL2,
 )
-UPGRADES_VS_P: Tuple[UpgradeId, ...] = (
-    UpgradeId.PROTOSSGROUNDWEAPONSLEVEL1, UpgradeId.PROTOSSGROUNDWEAPONSLEVEL2,
-    UpgradeId.PROTOSSGROUNDARMORSLEVEL1, UpgradeId.BLINKTECH, UpgradeId.EXTENDEDTHERMALLANCE,
-    UpgradeId.PROTOSSGROUNDARMORSLEVEL2,
+UPGRADE_CHAINS: dict[str, dict[UnitTypeId, Tuple[UpgradeId, ...]]] = {
+    "Terran": {
+        UnitTypeId.FORGE: _FORGE_CHAIN,
+        UnitTypeId.TWILIGHTCOUNCIL: (UpgradeId.BLINKTECH, UpgradeId.CHARGE),
+        UnitTypeId.ROBOTICSBAY: (UpgradeId.EXTENDEDTHERMALLANCE,),
+    },
+    "Protoss": {
+        UnitTypeId.FORGE: _FORGE_CHAIN,
+        UnitTypeId.TWILIGHTCOUNCIL: (UpgradeId.BLINKTECH, UpgradeId.CHARGE),
+        UnitTypeId.ROBOTICSBAY: (UpgradeId.EXTENDEDTHERMALLANCE,),
+    },
+    "Zerg": {
+        UnitTypeId.FORGE: _FORGE_CHAIN,
+        UnitTypeId.TWILIGHTCOUNCIL: (UpgradeId.CHARGE, UpgradeId.BLINKTECH),
+        UnitTypeId.ROBOTICSBAY: (UpgradeId.EXTENDEDTHERMALLANCE,),
+        UnitTypeId.TEMPLARARCHIVE: (UpgradeId.PSISTORMTECH,),
+    },
+}
+# M7 K1: the research buildings' own timed steps, shared by every opener and not part of its end
+# (ScheduleItem.part_of_opener): the Forge (A/A2 also have one at 4:15; before K1 the first upgrade
+# built it at UPGRADES_START_S), the Twilight Council per enemy race, and vs Zerg the Templar Archives
+FORGE_AT_S: float = 300.0
+TWILIGHT_AT_S: dict[str, float] = {"Terran": 330.0, "Protoss": 330.0, "Zerg": 330.0}
+TEMPLAR_ARCHIVES_AT_S: float = 480.0
+# M7 D29 (user decision): the timed Twilight Council / Templar Archives steps, ProductionController's
+# tech-up toward Templar and the research at those buildings wait while fewer than TECH_MIN_BASES of
+# our Nexuses are finished: on one base the units need the minerals (VERIFY_NOTES "Phase 3": Terran
+# game 3 and the cannon-rush losses)
+TECH_MIN_BASES: int = 2
+TECH_STEPS: Tuple[ScheduleItem, ...] = (
+    ScheduleItem(FORGE_AT_S, "structure", UnitTypeId.FORGE, part_of_opener=False),
+    *(
+        ScheduleItem(at_s, "structure", UnitTypeId.TWILIGHTCOUNCIL, only_if=f"vs_{race.lower()}", part_of_opener=False)
+        for race, at_s in TWILIGHT_AT_S.items()
+    ),
+    ScheduleItem(TEMPLAR_ARCHIVES_AT_S, "structure", UnitTypeId.TEMPLARARCHIVE, only_if="vs_zerg", part_of_opener=False),
 )
 
 # Army (bot/army/army.py): home defense radii, rally point, structure hunt, status log
@@ -408,6 +487,7 @@ UNIT_TTL_S: dict[str, float] = {
     "CANNON_RUSH": 20.0,  # raised by an enemy probe in our main (Citadel)
     "PROXY": 45.0,  # raised by units, e.g. ares's marine-rush or reaper flags (Citadel)
     "ONE_BASE_ALLIN": 45.0,  # raised by units, e.g. ares's roach flag (Citadel)
+    "CAPITAL_AIR": 60.0,  # M7 E2 CAPITAL_AIR_UNIT_TTL: ACTIVE stays this long after the value drops
 }
 UNIT_TTL_DEFAULT_S: float = 45.0
 MIN_PLAN_DURATION_S: float = 20.0  # no flag expires sooner, except by rule (a)
@@ -507,6 +587,9 @@ ARMY_HOLD_LEASH: float = 8.0  # ramp holds: engage only enemies this close to th
 # and enemy structures near our townhalls once the army has this much supply.
 ARMY_WORKER_THREAT_RADIUS: float = 12.0
 ARMY_CLEAR_STRUCTURES_SUPPLY: int = 8
+# M7 B9 (§4.2 proxy row, user decision): the DEFEND squad clears a known proxy production
+# structure while PROXY is active once it has this much supply (and wins at CLEAR_STATIC_LEVEL)
+PROXY_CLEAR_SUPPLY: int = 20
 NATURAL_HOLD_OFFSET: float = 6.0  # hold point: natural moved this far toward the enemy
 MAIN_BATTERY_RAMP_DIST: float = 6.0  # main batteries within this of the ramp top, main level
 # ... but clear of the path from the ramp top and the wall gap into the main (this long, and
@@ -651,7 +734,9 @@ RESCOUT_PROBE_RADIUS: float = 45.0
 # §4.3 hallucinated Phoenix, only with a Sentry that already exists (user decision): at these
 # times per enemy race, and whenever the enemy main has been unseen for HALLUCINATION_STALE_S
 # after HALLUCINATION_FROM_S (PvT row: 90 s)
-HALLUCINATION_AT_S: dict[str, float] = {"Protoss": 270.0, "Terran": 330.0, "Zerg": 390.0}
+# M7 (user decision): the PvP ~4:30 and PvZ ~6:30 rows are dropped (the vs-P and vs-Z mixes have no
+# Sentry, so they never fired; DESIGN.md §4.3)
+HALLUCINATION_AT_S: dict[str, float] = {"Terran": 330.0}
 HALLUCINATION_FROM_S: float = 240.0
 HALLUCINATION_STALE_S: dict[str, float] = {"Terran": 90.0}
 HALLUCINATION_STALE_DEFAULT_S: float = 60.0
@@ -685,6 +770,10 @@ ATTACK_START_MAX_SUPPLY: int = 190
 ATTACK_CONTINUE: int = 5  # keep attacking while >= this
 RETREAT_AT: int = 4  # retreat at <= this (3-level hysteresis vs ATTACK_START)
 DEFEND_ENGAGE: int = 4  # at home, inside the battery radius (batteries are not simulated)
+# M7 C9 (D22): once engaged, the DEFEND squad keeps fighting until the level is at most this; then the
+# defensive position falls back all HOLD_FALLBACK_STEPS at once, and it doesn't engage again outside
+# the defensive position for MIN_STATE_SECONDS
+DEFEND_DISENGAGE_AT: int = 2
 MIN_STATE_SECONDS: float = 20.0  # no attack/retreat flip within this unless the result is <= ...
 FLIP_ANYWAY_AT: int = 2  # ... this
 RETREAT_VALUE_FRACTION: float = 0.4  # retreat when the squad's value is below this x its start value
@@ -807,3 +896,135 @@ STEP_SECTION_LOG_MS: float = 2.0  # a slow step's warning lists the parts that t
 # (on the ladder an unhandled error ends the game as a Crash, VERIFY_NOTES "M6 findings")
 ERROR_TRACEBACKS_PER_PART: int = 3  # full tracebacks logged per part; later errors there ...
 ERROR_LOG_EVERY_S: float = 60.0  # ... get one line per part this often (game seconds) with the count
+
+
+# ---------------------------------------------------------------------------------------------
+# M7: ladder fixes (docs/M7_PLAN.md; DESIGN.md §4.2-§4.5.3, §8)
+# ---------------------------------------------------------------------------------------------
+
+# Phase 0 telemetry (§8 M7 metrics)
+FIGHT_LOG_TYPES: int = 6  # ENGAGE/DEFEND lines list at most this many unit types per side (highest value first)
+LOST_FAR_DISTANCE: float = 12.0  # an army unit that dies farther than this from its intent's point counts as "far"
+# §4.2 capital air (M7): the ships, by name in game data. An explicit list: python-sc2 reports a
+# Carrier as unable to attack (its interceptors do; VERIFY_NOTES "M7 findings")
+CAPITAL_AIR_TYPES: frozenset[UnitTypeId] = frozenset(
+    {
+        UnitTypeId.TEMPEST, UnitTypeId.CARRIER, UnitTypeId.MOTHERSHIP, UnitTypeId.BATTLECRUISER,
+        UnitTypeId.BROODLORD, UnitTypeId.BROODLORDCOCOON,
+    }
+)
+# M7 E3 (§4.5.3): a Void Ray uses Prismatic Alignment with at least this many armored enemies in reach
+VOIDRAY_ALIGN_MIN_ARMORED: int = 3
+# M7 E2 (§4.2 capital air): WARNING when one of these is seen ...
+CAPITAL_AIR_TECH: frozenset[UnitTypeId] = frozenset(
+    {UnitTypeId.FLEETBEACON, UnitTypeId.FUSIONCORE, UnitTypeId.GREATERSPIRE}
+)
+# ... ACTIVE while the remembered capital ships (CAPITAL_AIR_TYPES; Carriers have no weapon in game
+# data, so the list is explicit) are worth at least this (TUNE, about one capital ship), their
+# sightings fading out after CAPITAL_AIR_FRESH_S like the enemy mix's
+CAPITAL_AIR_MIN_VALUE: float = 400.0
+CAPITAL_AIR_FRESH_S: float = 60.0
+# a cocoon counts as the Brood Lord it becomes
+CAPITAL_AIR_VALUE_AS: dict[UnitTypeId, UnitTypeId] = {UnitTypeId.BROODLORDCOCOON: UnitTypeId.BROODLORD}
+# M7 E2 (§4.2 air/cloak, §4.4 rows 9, 13): AIR_HARASS when one of these enemy structures is seen
+AIR_HARASS_TECH: frozenset[UnitTypeId] = frozenset(
+    {UnitTypeId.STARGATE, UnitTypeId.SPIRE, UnitTypeId.GREATERSPIRE, UnitTypeId.STARPORTTECHLAB}
+)
+# its plan: the Forge now, then a Pylon, 1 Photon Cannon and 1 Shield Battery at every mineral line
+# (minerals within MINERAL_LINE_RADIUS of a ready Nexus), placed within MINERAL_LINE_SEARCH of the
+# minerals' centre, clear of the probes' paths to them (MINING_PATH_CLEARANCE) and at least
+# LINE_DEFENSE_NEXUS_CLEARANCE from the Nexus; one order per base per DEFENSE_ORDER_RETRY_S
+MINERAL_LINE_RADIUS: float = 10.0
+MINERAL_LINE_SEARCH: int = 6
+MINING_PATH_CLEARANCE: float = 1.0
+LINE_DEFENSE_NEXUS_CLEARANCE: float = 4.0
+# M7 B6 (§4.4 rows 7/10, user decision): the missing-Barracks/Gateway test counts their natural as
+# looked at once it was in vision at or after PROXY_NATURAL_SEEN_FROM_S (an expansion-first townhall
+# is down by ~1:05-1:20 in the baseline replays), and waits for that until PROXY_NATURAL_WAIT_UNTIL_S
+PROXY_NATURAL_SEEN_FROM_S: float = 90.0
+PROXY_NATURAL_WAIT_UNTIL_S: float = 150.0
+# M7 B8 (§4.3, user decision): an Observer's expansion trip time is estimated from its game-data
+# speed, which is per second on the "normal" game speed; bot.time counts "faster" seconds (game
+# loop / 22.4), 1.4 times as many (python-sc2 unit.py `movement_speed`, bot_ai.py `time`)
+NORMAL_TO_FASTER: float = 1.4
+
+# Phase 2: combat (§4.5.2-4.5.3)
+# C1 out-ranged rule: a unit holding, moving or retreating steps out of the reach (+ this buffer) of
+# a visible enemy it can't hit or that out-ranges it by at least OUTRANGED_MARGIN
+OUTRANGED_MARGIN: float = 2.0
+OUTRANGED_REACH_BUFFER: float = 1.0
+# C6 (D18): a unit with at most this range (game data: Zealot, Dark Templar, Zergling 0.1, workers 0.2,
+# Ultralisk 1.0) is out-ranged only by enemies it can't hit; closing the gap is its job
+MELEE_RANGE_MAX: float = 1.0
+# C1: while out-rangers the home defense isn't fighting cover the defensive position, it steps this
+# far toward our main, at most this many times; enemies seen this recently count (Tempests fire
+# from the edge of vision)
+HOLD_FALLBACK_STEP: float = 3.0
+HOLD_FALLBACK_STEPS: int = 4
+HOLD_FALLBACK_MEMORY_S: float = 10.0
+HOLD_FALLBACK_KEEP_S: float = 30.0  # ... and once back, it stays back this long after it was last needed
+# C5 (§4.5.2, built because the Phase 1 fight logs showed it): levels off a fight's level per
+# whole share of enemy value that out-ranges every unit of ours able to hit it, or that none can hit
+OUTRANGE_PENALTY_PER_SHARE: float = 4.0
+# C7 (D19, §4.5.2): army types with no weapon in this game data that deal damage themselves, which the
+# simulator sees as harmless (VERIFY_NOTES "M7 findings"). Casters (Sentry, Infestor, Viper) and the
+# Bunker (its cargo shoots) are left out. When these hold at least WEAPONLESS_CAP_SHARE of the enemy's
+# value, a fight's level is capped at the value level
+WEAPONLESS_DAMAGE_TYPES: frozenset[UnitTypeId] = frozenset(
+    {
+        UnitTypeId.VOIDRAY, UnitTypeId.CARRIER, UnitTypeId.BATTLECRUISER, UnitTypeId.ORACLE,
+        UnitTypeId.BANELING, UnitTypeId.WIDOWMINE, UnitTypeId.WIDOWMINEBURROWED, UnitTypeId.DISRUPTOR,
+        UnitTypeId.SWARMHOSTMP,
+    }
+)
+WEAPONLESS_CAP_SHARE: float = 0.2
+
+# Phase 3: Blink and Templar (§4.5.3)
+# K2 Blink. BLINK_RANGE is measured (VERIFY_NOTES "M7 findings": game data gives a cast range of 500)
+BLINK_RANGE: float = 8.0
+BLINK_BACK_SHIELD_FRACTION: float = 0.25  # blink back at or below this share of max shields, when threatened
+BLINK_DANGER_MAX: float = 60.0  # no landing on ground-grid danger above this (ares weight units; a Stalker adds 10)
+BLINK_IN_PER_TARGET_S: float = 10.0  # one blink-in wave per out-ranger this often ...
+BLINK_IN_WAVE_S: float = 0.5  # ... which ready Stalkers join this long after it starts ...
+BLINK_IN_MIN_STALKERS: int = 3  # ... and which starts only with this many ready within BLINK_GROUP_RADIUS
+BLINK_GROUP_RADIUS: float = 8.0
+BLINK_IN_MIN_GAIN: float = 2.0  # blink in only if it saves at least this much walking
+BLINK_FINISH_LEVEL: int = 7  # blink to finish only while the local fight's level is at least this
+# ... and only if the blink saves at least this much walking (in a VeryHard Zerg game most finish
+# blinks were 1-4 hops onto units just out of reach, and many never went off)
+BLINK_FINISH_MIN_GAIN: float = 3.0
+BLINK_CONFIRM_S: float = 1.0  # a blink counts once the Stalker's Blink goes on cooldown within this long
+# K3 High Templar and Archons (§4.5.1, §4.5.3). Vs Z the mix has Storm casters next to the spec's
+# Archon share (ARMY_COMPOSITION_PCT); Archons come only from Templar that Citadel morphs
+# (army/templar.py), never from ares's SpawnController (it merges any two idle Templar)
+TEMPLAR_MAX_CASTERS: int = 4  # Templar beyond this many (the lowest energy first) morph into Archons
+# ... and so do Templar whose Storm has been uncastable this long since the research: long enough for
+# a newly warped-in Templar to reach Storm energy, so only Templar that have spent theirs morph
+TEMPLAR_MORPH_AFTER_S: float = 60.0
+# Templar stand this far behind their squad's centre, toward our main (near enough that Storm's cast
+# range reaches past the front line)
+TEMPLAR_BEHIND: float = 2.0
+TEMPLAR_SPOT_SLACK: float = 1.5  # ... and are moved there only when farther than this from the spot
+# a Templar leaves out Storm targets within this many Storm radii of our Storms and Storm orders, so
+# a new Storm's centre is at least a radius away from them (at most half overlaps)
+TEMPLAR_STORM_SPACING: float = 2.0
+TEMPLAR_SHARE_MAX: float = 0.5  # the Templar share of the production mix never goes above this
+TEMPLAR_MORPH_RETRY_S: float = 5.0  # a pair asked to morph isn't asked again for this long
+# Archon shares vs T and P while the remembered enemy army is mostly biological / Zealot-heavy, by
+# supply; off again after the share has stayed below for MIX_SWITCH_HOLD_S. Sightings older than
+# MIX_FRESH_S fade out over another MIX_FRESH_S
+ARCHON_VS_BIO_PCT: float = 10.0
+BIO_SHARE_FOR_ARCHONS: float = 0.5
+ARCHON_VS_ZEALOT_PCT: float = 10.0
+ZEALOT_SHARE_FOR_ARCHONS: float = 0.3
+MIX_SWITCH_HOLD_S: float = 60.0
+MIX_FRESH_S: float = 60.0
+# §4.5.1 air switch threshold: enemy air supply share of their army, and its hold time (TUNE). M7
+# D30 uses it ahead of E3: while on, the gas-starved float makes the mix's Gateway units, not only
+# Zealots (Zealots can't hit air; Zerg Air on f2084c6 went 9/10 at value ratio 0.58)
+AIR_SWITCH_SHARE: float = 0.30
+AIR_SWITCH_HOLD_S: float = 60.0
+# M7 D36: once on, the air switch turns off only after the share has stayed below this (not below
+# AIR_SWITCH_SHARE) for AIR_SWITCH_HOLD_S. With one threshold it went off at shares of 0.24-0.29 in
+# 8 of 25 offs in a CheatInsane Zerg Air batch, and the Templar tech went down each time (TUNE)
+AIR_SWITCH_OFF_SHARE: float = 0.15

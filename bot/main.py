@@ -118,6 +118,8 @@ class CitadelBot(AresBot):
         self.economy = Economy(self)
         self.executor = BuildExecutor(self, self.opener, self.planner)
         self.production = Production(self)
+        self.executor.gas_starved_for = self.production.starved_for  # M7 E1: the 4th base
+        self.detectors.mix = self.production.mix  # M7 E2: CAPITAL_AIR ACTIVE from the capital ships' value
         self.army = Army(self, self.endgame, self.flags)
         self._load_memory()
         # §6: keep on_start under 5 s and log its duration
@@ -194,6 +196,8 @@ class CitadelBot(AresBot):
         if iteration % INTEL_EVERY_STEPS == 0:
             with guard("ares bridge"):
                 self.bridge.update()
+            with guard("enemy mix"):
+                self.production.mix.update()  # M7 K3: the Archon and air switches; E2: capital value
             with guard("detectors"):
                 self.detectors.update()
             with guard("flag expiry"):
@@ -311,7 +315,9 @@ class CitadelBot(AresBot):
         plan.add(supply_behavior(self, other_bases=not self.planner.plan.hold_wall_gap))
         for behavior in defense:
             plan.add(behavior)
-        plan.add(self.economy.worker_behavior(expansion_allowed=self.planner.plan.allow_expand))
+        plan.add(
+            self.economy.worker_behavior(expansion_allowed=self.planner.plan.allow_expand, bases_cap=executor.bases_cap())
+        )
         plan.add(ReserveForPending(UnitTypeId.NEXUS))  # a probe waiting at an expansion
         for behavior in executor.behaviors():
             plan.add(behavior)
@@ -341,6 +347,8 @@ class CitadelBot(AresBot):
         with guard("ares unit destroyed"):
             await super(CitadelBot, self).on_unit_destroyed(unit_tag)
         # one guard per call, so an error in one doesn't skip the others (e.g. §5 expiry rule (a))
+        # the unit's intent, read before `forget` drops it (M7 §8 losses by intent)
+        intent = self.army.intents.get(unit_tag) if self.army is not None else None
         if self.army is not None:
             with guard("unit destroyed"):
                 self.army.forget(unit_tag)
@@ -352,7 +360,7 @@ class CitadelBot(AresBot):
                 self.flags.on_unit_destroyed(unit_tag, self.time)  # §5 expiry rule (a)
         if own is not None and self.telemetry is not None:
             with guard("unit destroyed"):
-                self.telemetry.on_own_unit_destroyed(own, role)
+                self.telemetry.on_own_unit_destroyed(own, role, intent)
         if enemy is not None and self.telemetry is not None:
             with guard("unit destroyed"):
                 self.telemetry.on_enemy_unit_destroyed(enemy)
@@ -387,7 +395,7 @@ class CitadelBot(AresBot):
                 result = game_result.name if isinstance(game_result, Result) else str(game_result)
                 record = self.telemetry.game_record(
                     result, self.flags, self.army, self.opener, self.ruleset, self.wall_ok, self.memory, self.preraised,
-                    self.errors,
+                    self.errors, self.detectors,
                 )
                 self.telemetry.write_game_record(record)  # §8: ./data/logs
             except Exception:  # noqa: BLE001 - never crash at the end of a game

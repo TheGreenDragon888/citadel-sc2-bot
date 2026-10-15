@@ -19,15 +19,20 @@ from ares.consts import ID, TARGET
 from loguru import logger
 from sc2.ids.unit_typeid import UnitTypeId
 from sc2.ids.upgrade_id import UpgradeId
+from sc2.data import Race
 from sc2.dicts.upgrade_researched_from import UPGRADE_RESEARCHED_FROM
 from sc2.position import Point2
 
 from bot.constants import (
+    FOURTH_BASE_BANK,
+    FOURTH_BASE_GAS_STARVED_S,
     GAS_PER_BASE_AFTER_SCHEDULE,
     MAX_BASES,
     NATURAL_RADIUS,
     OPENER_ESSENTIALS,
     OPENER_SCHEDULES,
+    TECH_MIN_BASES,
+    TECH_STEPS,
     ScheduleItem,
 )
 
@@ -53,6 +58,13 @@ def _nat_ready(bot: "AresBot") -> bool:
     return any(th.is_ready and th.distance_to(nat) < 3 for th in bot.townhalls)
 
 
+def race_key(bot: "AresBot") -> str:
+    """The enemy race's name for per-race tables; Random counts as Terran until its race is seen
+    (§4.1)."""
+    race = bot.enemy_race
+    return race.name if race in (Race.Terran, Race.Zerg, Race.Protoss) else Race.Terran.name
+
+
 def _no_zerg_rush_flag(bot: "AresBot") -> bool:
     m = bot.mediator
     return not (m.get_enemy_ling_rushed or m.get_enemy_roach_rushed or m.get_enemy_ravager_rush)
@@ -72,6 +84,10 @@ CONDITIONS: dict[str, Callable[["AresBot"], bool]] = {
     "no_zerg_rush_flag": _no_zerg_rush_flag,
     "enemy_third": lambda bot: bool(bot.mediator.get_enemy_has_base_outside_natural),
     "enemy_expanded": lambda bot: bool(bot.mediator.get_enemy_expanded),
+    # M7 K1: the research buildings' per-race timed steps (constants.TECH_STEPS)
+    "vs_terran": lambda bot: race_key(bot) == "Terran",
+    "vs_protoss": lambda bot: race_key(bot) == "Protoss",
+    "vs_zerg": lambda bot: race_key(bot) == "Zerg",
 }
 
 
@@ -80,8 +96,42 @@ TECH_ITEMS: frozenset = frozenset(
     {
         UnitTypeId.ROBOTICSFACILITY, UnitTypeId.STARGATE, UnitTypeId.FORGE, UnitTypeId.TWILIGHTCOUNCIL,
         UnitTypeId.OBSERVER, UnitTypeId.ORACLE, UpgradeId.PROTOSSGROUNDWEAPONSLEVEL1,
+        UnitTypeId.TEMPLARARCHIVE,
     }
 )
+# M7 D29: research buildings that wait for TECH_MIN_BASES finished Nexuses (outside an opener)
+TECH_WAIT_BUILDINGS: frozenset = frozenset({UnitTypeId.TWILIGHTCOUNCIL, UnitTypeId.TEMPLARARCHIVE})
+
+
+def tech_waits(building: UnitTypeId, bases: int, part_of_opener: bool = False, min_bases: int = TECH_MIN_BASES) -> bool:
+    """M7 D29: a Twilight Council or Templar Archives (its timed step, the tech-up toward Templar,
+    or research there) waits while fewer than `min_bases` of our Nexuses are finished; an opener's
+    own items don't (pure)."""
+    return building in TECH_WAIT_BUILDINGS and not part_of_opener and bases < min_bases
+
+
+def bases_ready(bot: "AresBot") -> int:
+    return len(bot.townhalls.ready)
+
+
+def bases_cap(
+    minerals: float, starved_for: float, saturated: bool, allow_expand: bool, wanted_before: bool,
+    bank: float = FOURTH_BASE_BANK, starved_s: float = FOURTH_BASE_GAS_STARVED_S,
+) -> int:
+    """M7 E1: MAX_BASES, or one more once minerals are at least `bank`, production has been
+    gas-starved for `starved_s`, our bases' mineral lines are saturated and the DefensePlan allows
+    expanding; once wanted (`wanted_before`) it stays (pure)."""
+    if wanted_before or (allow_expand and saturated and minerals >= bank and starved_for >= starved_s):
+        return MAX_BASES + 1
+    return MAX_BASES
+
+
+def lines_saturated(bot: "AresBot") -> bool:
+    """MAX_BASES ready Nexuses whose mineral lines have together at least their ideal probes."""
+    ready = bot.townhalls.ready
+    return len(ready) >= MAX_BASES and sum(t.assigned_harvesters for t in ready) >= sum(t.ideal_harvesters for t in ready)
+
+
 # structures and upgrades that need a Forge; §4.2 one-base delays the Forge
 NEEDS_FORGE: frozenset = frozenset(
     {
@@ -103,18 +153,23 @@ class BuildExecutor:
         self.schedule: tuple[ScheduleItem, ...] = schedule
         self._reached: set[ScheduleItem] = set()  # items whose count was reached once
         self.waiting_for_money: bool = False
+        # M7 E1: seconds production has been gas-starved (main.py hands in Production.starved_for)
+        self.gas_starved_for: Callable[[], float] = lambda: 0.0
+        self.fourth_base_wanted: bool = False
+        self.fourth_base_at: Optional[float] = None  # game second it was first wanted (§8)
 
     @property
     def items(self) -> tuple[ScheduleItem, ...]:
         """The opener essentials (only once a threat flag or the timeout ended the opener
-        early), then the opener's timed schedule."""
+        early), then the opener's timed schedule, then the research buildings' timed steps (M7 K1)."""
         if self.planner.opener_ended_by is not None:
-            return OPENER_ESSENTIALS + self.schedule
-        return self.schedule
+            return OPENER_ESSENTIALS + self.schedule + TECH_STEPS
+        return self.schedule + TECH_STEPS
 
     @property
     def finished(self) -> bool:
-        return all(item in self._reached for item in self.items)
+        """Every opener item reached once (the research buildings' timed steps don't count)."""
+        return all(item in self._reached for item in self.items if item.part_of_opener)
 
     # -- targets used by the economy -------------------------------------------------------
 
@@ -125,12 +180,28 @@ class BuildExecutor:
         counts = [item.count for item in self.items if item.kind == "gas" and self._active(item)]
         return max(counts, default=len(bot.gas_buildings))
 
+    def bases_cap(self) -> int:
+        """M7 E1: MAX_BASES, or one more once gas-starved with a bank (`bases_cap`)."""
+        bot = self.bot
+        cap = bases_cap(
+            bot.minerals, self.gas_starved_for(), lines_saturated(bot), self.planner.plan.allow_expand,
+            self.fourth_base_wanted,
+        )
+        if cap > MAX_BASES and not self.fourth_base_wanted:
+            self.fourth_base_wanted = True
+            self.fourth_base_at = round(bot.time, 1)
+            logger.info(
+                f"ECONOMY {bot.time_formatted} base {cap} wanted: {bot.minerals} minerals, gas-starved for "
+                f"{self.gas_starved_for():.0f} s, mineral lines saturated"
+            )
+        return cap
+
     def bases_target(self) -> int:
         """Bases wanted now, after the DefensePlan: no new base while `allow_expand` is off
         (a Nexus already started stays), at most 2 while `allow_third` is off."""
         townhalls = len(self.bot.townhalls)
         if self.finished:
-            target = MAX_BASES
+            target = self.bases_cap()
         else:
             counts = [item.count for item in self.items if item.kind == "bases" and self._active(item)]
             target = max(counts, default=townhalls)
@@ -175,6 +246,11 @@ class BuildExecutor:
             return False
         if item.type_id in TECH_ITEMS and plan.hold_tech:
             return False
+        if tech_waits(item.type_id, bases_ready(bot), item.part_of_opener):
+            return False
+        production = getattr(bot, "production", None)
+        if item.type_id == UnitTypeId.TEMPLARARCHIVE and not item.part_of_opener and production is not None and not production.templar_tech_wanted():
+            return False  # M7 D32: vs an air-heavy Zerg the mix has no Templar
         if item.where == "nat" and plan.hold_wall_gap:
             return False  # the probe couldn't get past our own gap holder
         if item.where == "nat" and not self._have_natural():

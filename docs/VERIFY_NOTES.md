@@ -1628,3 +1628,1260 @@ match participation's `avg_step_time`. Rows are in match-id order, as the watche
   scored `InitializationError` for both bots, result `none`, no Elo change. `ladder_watch.py`
   lists such matches as `NOT PLAYED (not counted)`; a Citadel initialization failure would be a
   `loss` and count as a failure.
+
+## M7 findings
+
+API checks and Citadel's choices for M7 (`docs/M7_PLAN.md`). Checked before the plan was written
+(python-sc2 at `7ec25cf`, ares at `8730865`):
+- `Unit.is_biological` reads the type's attributes from game data (`sc2/unit.py:180-182`).
+- `Unit.can_attack_ground` / `can_attack_air` special-case only Battlecruiser and Oracle
+  (`sc2/unit.py:230-273`); a Carrier has no weapon in game data (its interceptors attack), so
+  "flying and can attack" misses it. Capital air is an explicit list (`CAPITAL_AIR_TYPES`).
+- `Unit.age` is the seconds since the Unit object's data was taken (`sc2/unit.py:471-473`).
+- `Unit.movement_speed` is game data at "normal" speed and excludes upgrades and buffs
+  (`sc2/unit.py:322-327`); `calculate_speed` adds them from python-sc2's own tables.
+- `Unit.abilities` leaves out abilities on cooldown or without their tech (`sc2/unit.py:598`).
+- ares has no Blink behavior (its ability tracker's Blink entry is commented out,
+  `ares-sc2/src/ares/managers/ability_tracker_manager.py:163`).
+- ares `AutoUseAOEAbility` casts Psionic Storm avoiding our own ground and air units
+  (`ares-sc2/src/ares/behaviors/combat/individual/auto_use_aoe_ability.py`).
+- ares's SpawnController morphs Archons from any two idle, ready High Templar not already morphing
+  (`ares-sc2/src/ares/behaviors/macro/spawn_controller.py`, `_handle_archon_morph`), so Archons
+  stay out of its mix and Citadel morphs them itself (§4.5.3).
+- **Weaponless unit types in this game data (found in Phase 2's staged engagement test).** A one-off check of `game_data.units[t]._proto.weapons` on PylonAIE_v4 (SC2 4.10 with the AIE map's data) found **no weapons** for:
+  - Sentry, Disruptor, Void Ray, Oracle, Carrier, Widow Mine (burrowed), Battlecruiser, Bunker, Baneling, Infestor, Swarm Host and Viper.
+  - The other army types checked have their weapons. The Tempest's are 10 against ground and 13 against air here.
+  - python-sc2 special-cases only the Battlecruiser's and Oracle's range and `can_attack_*` (`sc2/unit.py:230-297`). So a Void Ray reads `can_attack_air = can_attack_ground = False` with ranges 0/0, and so does a Carrier.
+  - ares hard-codes ranges and costs for its influence grids for several of these (`dicts/weight_costs.py`: Void Ray 6/6, Carrier 11/11, Battlecruiser 6/6, Oracle, Widow Mine, Baneling).
+  - **The combat simulator sees no attack for them either:** `Engagement.level` and ares's `can_win_fight` both rate 12 Zealots against 4 Void Rays at 10 (an emphatic win). The Phase 1 home fights rated 7-9 at a third of the enemy's value were against Void Ray and Carrier armies.
+  - So C1's out-ranged rule and C5's penalty don't see Void Rays or Carriers, and the simulator underrates every army built on them. **Put to the user;** no stand-in values were added (CLAUDE.md: no hard-coded unit stats).
+- **B8's trip estimate** (python-sc2 in the Poetry environment):
+  - `Unit.movement_speed` is "the unit movement speed on game speed 'normal'. To convert it to 'faster' movement speed, multiply it by a factor of '1.4'". It doesn't include upgrades or buffs (`sc2/unit.py:322-326`).
+  - `BotAI.time` is `game_loop / 22.4`, seconds on "faster" (`sc2/bot_ai.py:46-48`).
+  - So an Observer covers `movement_speed × 1.4` per `bot.time` second without Gravitic Boosters, and more with them; the estimate errs long (`NORMAL_TO_FASTER`).
+  - `Unit.distance_per_step` divides `real_speed` by 22.4 without the 1.4 (`sc2/unit.py:385-388`), so B8 doesn't use it.
+- **Phase 2 VERIFY items** (ares `8730865`, python-sc2 in the Poetry environment, map_analyzer):
+  - **Do Tempests add influence to ares's ground grid? Yes.** `Tempest` has a fixed entry in `ares/dicts/weight_costs.py`: GroundCost 17, GroundRange 10, AirCost 17, AirRange 14. `GridManager._add_cost_to_all_grids` adds it over range + `Pathing.RangeBuffer` (4.0 in ares's `config.yml`; Citadel's doesn't override it), so 14 on the ground grid (`managers/grid_manager.py` `_handle_weight_cost_unit`).
+    - Units with no entry use their game-data range and dps (`_handle_generic_unit`), so a Carrier gets the fixed entry (11) and its Interceptors their own weapons.
+  - **What does `KeepUnitSafe` do with no safe cell nearby?** When its cell isn't safe, it paths to `find_closest_safe_spot(radius=11)`: map_analyzer's `lowest_cost_points_array` returns the cells with the lowest cost within 11 (`Pather.py:276-282`), and ares takes the closest of them (`managers/path_manager.py:154-182`).
+    - So with no safe cell within 11 it walks to the least dangerous cell, which may still be in reach. It returns True (it acted) whenever the unit's cell isn't safe.
+  - **Does `Unit.movement_speed` exclude upgrades? Yes**, normal-speed game data without upgrades or buffs (`sc2/unit.py:322-326`; B8 above).
+  - **Is a cached army unit's `age` the time since it was last seen? Yes.** `Unit.age` is `(game_loop - unit.game_loop) / 22.4` (`sc2/unit.py:471-473`). ares stores every visible enemy each step (`main.py:631` → `UnitCacheManager.store_enemy_unit`), replacing the stored Unit by tag (`unit_cache_manager.py:281-327`), so a cached unit's `game_loop` is the last step it was in vision. `bot/intel/army_position.py` relies on the same.
+- **B2's in-game check (`poetry run python scripts/test_outranged.py --case idle_hold`, PylonAIE_v4,
+  code `f62475a`):** do units at their hold point get drawn out after an attacker beyond the
+  leash? No.
+  - Setup: 10 Tempests on hold position 12.5 from the anchor (the hold leash is 12) shot 6
+    Stalkers standing at it.
+  - Result: home defense held ("hold (level 1 < 5)", then level 0). The farthest any Stalker got
+    from the anchor was 4.7 (limit 16). They had ATTACK orders with an engaged target (the
+    Tempests that had spread inside 12 were in their micro's reach), and all 6 died within 13 s
+    while the Tempests took damage.
+  - So the plan's fallback (re-issuing a move when `engaged_target_tag` is set past the leash) is
+    not needed.
+  - What the test shows instead is the Phase 2 problem: a squad standing in an out-ranging
+    enemy's reach dies in place.
+- **Phase 0 in a real game** (`run_matches.py --difficulty VeryHard --race Protoss --build Air --map
+  PersephoneAIE_v4 --total 1 --game-seed 7500`, code `4a36da2`): the new lines show finding A
+  directly.
+  - `ENGAGE 09:28 launch level=10 ...; vs nothing (0) | ours 17 ADEPT 8 STALKER 2 IMMORTAL 1 COLOSSUS 3 ZEALOT (5025)`
+  - 24 s later: `ENGAGE 09:52 retreat level=3 ...; vs 8 VOIDRAY 10 STALKER 2 PHOENIX 3 ADEPT 1 ORACLE 2 SENTRY +4 more (6875)`.
+- **D18/D19 sources** (ares `8730865`, python-sc2 in the Poetry environment):
+  - `ares.dicts.weight_costs.WEIGHT_COSTS` (`ares-sc2/src/ares/dicts/weight_costs.py`) is a `dict[UnitTypeId, dict]` with the keys `AirCost`, `GroundCost`, `AirRange` and `GroundRange`.
+    - It has entries for the game-data-weaponless types Void Ray (6/6), Carrier (11/11), Battlecruiser (6/6), Oracle (ground 4), Sentry (5/5), Baneling (ground 3), burrowed Widow Mine (5.5/5.5) and Infestor (10/10).
+    - It has none for the Disruptor, Swarm Host, Viper, Bunker or unburrowed Widow Mine.
+    - Some entries include upgrades (Hydralisk 6). Citadel reads it only for types with no game-data weapon (`ranges.weapon_range`).
+  - python-sc2 gives the Battlecruiser `can_attack_ground`/`can_attack_air` and ranges 6/6, and the Oracle `can_attack_ground` and range 4 (`sc2/unit.py:228-294`). So those two never reach the ares fallback.
+  - Game-data ranges of the melee types (a one-off `_proto.weapons` dump on PylonAIE_v4): Zealot, Dark Templar, Zergling and Broodling 0.1; Probe, SCV and Drone 0.2; Ultralisk 1.0. The shortest ranged weapon is the Hellbat's 2.0 and the Interceptor's 2.0. Hence `MELEE_RANGE_MAX` = 1.0.
+  - The unburrowed Widow Mine has no weapon either (the earlier dump only had the burrowed one).
+  - ares's `BuildingManager` drops a Protoss build order 120 s after it was given (`BUILDING_WORKER_TIMEOUT`, `managers/building_manager.py:67, 229-235`). So a stuck Nexus order can't block the schedule for good (D20).
+
+- **Phase 3 VERIFY items** (ares `8730865`, python-sc2 in the Poetry environment; one-off debug games on PylonAIE_v4 with `client.debug_upgrade()` twice and `debug_set_unit_value`):
+  - **Ability ids:**
+    - Blink is `AbilityId.EFFECT_BLINK_STALKER` (1442; game data remaps it to `EFFECT_BLINK`, 3687).
+    - Psionic Storm is `PSISTORM_PSISTORM` (1036), the Archon morph `MORPH_ARCHON` (1766).
+    - The research upgrades are `UpgradeId.BLINKTECH`, `CHARGE` (both from `TWILIGHTCOUNCIL`), `EXTENDEDTHERMALLANCE` (`ROBOTICSBAY`) and `PSISTORMTECH` (`TEMPLARARCHIVE`; python-sc2's `UPGRADE_RESEARCHED_FROM`).
+  - **`unit.abilities`** (python-sc2 `unit.py:598-618`) leaves out abilities on cooldown or without their tech, and energy counts too.
+    - After Blink, `EFFECT_BLINK_STALKER` was gone from the Stalker's set.
+    - A High Templar with Storm researched had no `PSISTORM_PSISTORM` at 53 energy, and had it at 151.
+    - So "Blink ready" and "Storm castable" are both membership tests. No energy cost is hard-coded.
+  - **Ranges:**
+    - Game data gives Psionic Storm `cast_range` 9.0 (`game_data.abilities[...]._proto.cast_range`). ares's AoE table uses 8 for it (`dicts/aoe_ability_to_range.py`).
+    - Game data gives Blink `cast_range` 500, a placeholder. **Measured:** a Stalker ordered to blink 15 away landed 8.00 away. `BLINK_RANGE` (8.0) is that measurement, since game data doesn't carry it.
+  - **Archon morph:** ares's `AresBot.request_archon_morph([ht1, ht2])` (`main.py:169`) queues one two-tag `MORPH_ARCHON` raw command, sent after the step (`custom_bot_ai.py:365-374`, `main.py:445-446`). Its SpawnController uses that to merge any two idle Templar (`spawn_controller.py:329`), so Citadel calls `request_archon_morph` itself and keeps High Templar out of SpawnController's Archon logic.
+  - **Storm:** ares `AutoUseAOEAbility(unit, targets, bonus_tags=set(), recalculate=False, stack_same_spell=False)` (`behaviors/combat/individual/auto_use_aoe_ability.py`). For Storm it needs at least 4 targets in range, avoids our own ground and air units, and doesn't stack a Storm where one already is.
+  - **Safe spots:** `mediator.find_closest_safe_spot(from_pos, grid, radius=11)` and `mediator.is_position_safe(grid, position, weight_safety_limit=1.0)` (a grid value at or below the limit; 1.0 is a pathable cell with no enemy influence) (`managers/path_manager.py:154-182, 403-424`).
+  - **Terrain and vision:** `BotAI.get_terrain_height`, `get_terrain_z_height`, `in_pathing_grid` and `is_visible` (`bot_ai.py:1204-1245`). `in_pathing_grid` reads the start-of-game pathing grid.
+  - **`client.debug_upgrade()`** researches every upgrade available at that moment. Called twice it gave Blink, Charge, Storm and +2/+2 at once, so the staged tests use it (`client.py:881-885`).
+
+- **K3 build findings** (ares `8730865`):
+  - `AutoUseAOEAbility` isn't exported by `ares.behaviors.combat.individual`; it is imported from `ares.behaviors.combat.individual.auto_use_aoe_ability`.
+  - ares's Storm no-stacking check (`use_aoe_ability.py:_can_cast`) looks only at Storm effects already on the ground. In the staged `storm` case two Templar stormed overlapping spots in the same moment. Citadel spaces its Storms itself (`army/templar.py`, `TEMPLAR_STORM_SPACING`).
+  - The Storm radius Citadel uses is ares's table value (`AOE_ABILITY_SPELLS_INFO`, 2.0). The staged test measures "inside a Storm" with the effect's own radius from the game (`EffectData.radius`).
+  - Storms are counted from our `EffectId.PSISTORMPERSISTENT` effects (`EffectData.is_mine`, python-sc2 `game_state.py:96-140`), a new spot each; Archons from new `ARCHON` tags.
+  - ares's SpawnController counts only the types in its dict (`spawn_controller.py:98-103`), and `get_own_unit_count` includes units in production (`unit_cache_manager.py:425-430`). `production.unit_proportions` sizes the Templar share from those counts.
+  - Staged tests with Zerglings must spawn them after 3:00. ares raises its ling-rush flag before 2:30 with 3 Zerglings near our main, before 3:00 with 8 anywhere, and before 1:30 with 5 (`intel_manager.py:409-435`). Citadel's own early-ling flag runs to 2:20 (`EARLY_LINGS_UNTIL_S`). The 12-pool plan then pulled the army back to the main ramp, and the first `storm` run had no fight.
+  - **Blink counting** (found in the first VeryHard Zerg smoke game, 330 "finish" blinks): most finish blinks were 1-4 tile hops onto units just out of reach, and many never went off, because the next step's attack order replaced them. Counted per order, every retry counted again. Now a blink counts only when the Stalker's Blink goes on cooldown within `BLINK_CONFIRM_S` of the order, and a finish blink needs a gain of at least `BLINK_FINISH_MIN_GAIN` (3).
+
+- **Phase 4 VERIFY items** (ares `8730865`; one-off debug games on PylonAIE_v4, Citadel against a scripted Zerg):
+  - **Weapons in game data** (`game_data.units[...]._proto.weapons`):
+    - No weapon entries: Carrier, Battlecruiser, Void Ray. So E2 needs an explicit capital list, as planned.
+    - Tempest: air range 13, damage 30; ground range 10, damage 40.
+    - Brood Lord: one ground weapon, range 10. Mothership: one weapon, range 6.5.
+  - **Prismatic Alignment** is `AbilityId.EFFECT_VOIDRAYPRISMATICALIGNMENT` (2393). It is in a Void Ray's `abilities`. Cast, it puts `BuffId.VOIDRAYSWARMDAMAGEBOOST` on the Void Ray and drops out of `abilities` while on cooldown: a membership test, as for Blink and Storm.
+  - **`BROODLORDCOCOON` in ares's cache:** two Corruptors ordered `MORPHTOBROODLORD_BROODLORD` showed as `BROODLORDCOCOON` in `mediator.get_cached_enemy_army` (and as visible enemy units) for about 20 s, then as `BROODLORD`. Brood Lord attacks then add `BROODLING` units to the cache. The morph needs a ready Greater Spire, 150/150 and 2 free supply each; the first try failed for supply.
+  - **ares ProductionController** (`behaviors/macro/production_controller.py:86-235`): for each unit in the mix, highest priority first, it runs `TechUp(unit)`. `TechUp` builds the requirements in `dicts/unit_tech_requirement.py`: Stargate + Fleet Beacon for the Tempest (l.172-176), a Stargate for the Void Ray, and the Templar Archives for the High Templar (l.72-76). Then it adds the unit's production building while that unit is under its share. The cap is `max_production_structures` (Citadel passes `MAX_PRODUCTION_STRUCTURES`, 12), per building type. So a Void Ray or Tempest share alone gets Stargates and, for Tempests, the Fleet Beacon.
+
+## M7 baseline
+
+Bot code `8036973` (M6, unchanged by the M7 kickoff), run on 2026-10-06 in the cloud container:
+- SC2 Linux 4.10 (Base75689) from Blizzard's package (`docs/RESEARCH.md` commands).
+- The 7 pool maps.
+- Poetry on Python 3.12 (STATUS workaround). The `ares-sc2` submodule had to be checked out first: `git submodule update --init ares-sc2`.
+- Offline tests before the games: `test_attack_decision` 16/16, `test_threat_flags` 20/20, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38.
+
+Commands (the three ran in parallel; replays in `replays/m7-baseline-<race>/`, not in git):
+
+```bash
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race Protoss --build Air --map all --total 10 --game-seed 7000 --replays replays/m7-baseline-protoss
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race Terran  --build Air --map all --total 10 --game-seed 7100 --replays replays/m7-baseline-terran
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race Zerg    --build Air --map all --total 10 --game-seed 7200 --replays replays/m7-baseline-zerg
+```
+
+| Batch | Wins | Crashes / errors | probes@6 (min / median / max) |
+|---|---|---|---|
+| Protoss Air | **2/10** | 0 / 0 | 40 / 42 / 59 |
+| Terran Air | 9/10 | 0 / 0 | 54 / 57 / 60 |
+| Zerg Air | 10/10 | 0 / 0 | 56 / 64 / 66 |
+
+The "enemy capital ships" and "top killers" columns come from the saved replays' tracker events. They were read with Blizzard's s2protocol in a scratch environment; it is not a project dependency.
+
+**Protoss Air, VeryHard × 10, `--game-seed 7000`**
+
+| # | map | result | length | probes@6 | bases@6 | value lost/killed | flags (first raise) | enemy capital ships made (died) | top killers of our army |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Magannatha_v2 | Defeat | 15:37 | 45 | 2 | 9.7k/4.4k | PROXY@01:30 | Tempest 1 (0), Carrier 1 (0) | VoidRay 34, Stalker 14, Sentry 3 (of 55) |
+| 2 | Ultralove_v2 | Defeat | 12:56 | 40 | 1 | 9.4k/2.1k | PROXY@01:30,CANNON_RUSH@01:58 | Tempest 4 (0) | VoidRay 31, Stalker 15, Phoenix 3 (of 51) |
+| 3 | LeyLines_v3 | Defeat | 13:54 | 41 | 1 | 11.3k/3.2k | PROXY@01:30,CANNON_RUSH@01:56 | Tempest 6 (0), Carrier 5 (0) | Stalker 25, VoidRay 14, Tempest 10 (of 57) |
+| 4 | Torches_v4 | Victory | 11:40 | 56 | 2 | 4.5k/5.9k | - | - | VoidRay 14, Stalker 5, Probe 1 (of 20) |
+| 5 | Pylon_v4 | Victory | 10:53 | 59 | 3 | 1.6k/7.7k | - | Tempest 1 (1), Carrier 1 (1) | Stalker 4, VoidRay 2, Interceptor 1 (of 7) |
+| 6 | Persephone_v4 | Defeat | 15:24 | 40 | 1 | 8.8k/3.0k | PROXY@01:30 | Tempest 6 (0), Carrier 6 (0) | VoidRay 19, Tempest 14, Interceptor 8 (of 47) |
+| 7 | Incorporeal_v4 | Defeat | 14:49 | 43 | 1 | 19.3k/6.9k | PROXY@01:30 | Tempest 4 (0), Carrier 4 (0) | VoidRay 30, Interceptor 24, Tempest 24 (of 99) |
+| 8 | Magannatha_v2 | Defeat | 15:01 | 41 | 1 | 11.0k/3.4k | PROXY@01:30 | Tempest 4 (0) | VoidRay 39, Stalker 5, Tempest 5 (of 56) |
+| 9 | Ultralove_v2 | Defeat | 18:41 | 46 | 2 | 29.6k/12.7k | ONE_BASE_ALLIN@02:45 | Tempest 3 (0) | VoidRay 97, Immortal 23, Tempest 12 (of 144) |
+| 10 | LeyLines_v3 | Defeat | 14:51 | 40 | 1 | 16.6k/5.4k | PROXY@01:30 | Tempest 4 (0), Carrier 3 (0) | Interceptor 31, VoidRay 22, Tempest 15 (of 86) |
+
+**Terran Air, VeryHard × 10, `--game-seed 7100`**
+
+| # | map | result | length | probes@6 | bases@6 | value lost/killed | flags (first raise) | enemy capital ships made (died) | top killers of our army |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Magannatha_v2 | Victory | 10:31 | 59 | 2 | 1.9k/5.8k | - | Battlecruiser 2 (2) | VikingFighter 4, Battlecruiser 3, Sentry 3 (of 14) |
+| 2 | Ultralove_v2 | Defeat | 22:11 | 56 | 2 | 21.8k/10.5k | PROXY@01:30 | Battlecruiser 11 (1) | Battlecruiser 69, Marauder 18, VikingAssault 16 (of 125) |
+| 3 | LeyLines_v3 | Victory | 11:18 | 56 | 2 | 2.9k/7.0k | PROXY@01:30 | Battlecruiser 1 (1) | Marauder 7, VikingAssault 6, AutoTurret 3 (of 22) |
+| 4 | Torches_v4 | Victory | 11:35 | 54 | 2 | 3.3k/8.2k | PROXY@01:30 | Battlecruiser 3 (3) | Battlecruiser 14, Marauder 6, VikingAssault 4 (of 27) |
+| 5 | Pylon_v4 | Victory | 10:05 | 59 | 2 | 2.2k/6.2k | - | Battlecruiser 1 (1) | Battlecruiser 4, VikingFighter 2, Sentry 2 (of 14) |
+| 6 | Persephone_v4 | Victory | 12:57 | 55 | 2 | 5.5k/9.1k | PROXY@01:30 | Battlecruiser 4 (4) | Marauder 10, Battlecruiser 9, Marine 3 (of 32) |
+| 7 | Incorporeal_v4 | Victory | 10:53 | 59 | 2 | 2.8k/4.3k | ONE_BASE_ALLIN@02:45 | Battlecruiser 2 (2) | Battlecruiser 6, VikingAssault 4, VikingFighter 4 (of 16) |
+| 8 | Magannatha_v2 | Victory | 12:10 | 60 | 2 | 3.3k/6.0k | ONE_BASE_ALLIN@02:45 | Battlecruiser 2 (2) | Banshee 7, Battlecruiser 4, Marine 3 (of 20) |
+| 9 | Ultralove_v2 | Victory | 10:29 | 58 | 2 | 2.4k/5.0k | ONE_BASE_ALLIN@02:45 | - | VikingAssault 6, Marauder 5, VikingFighter 1 (of 13) |
+| 10 | LeyLines_v3 | Victory | 14:18 | 55 | 2 | 10.0k/11.7k | PROXY@01:30 | Battlecruiser 6 (6) | Battlecruiser 31, Marauder 14, VikingFighter 6 (of 59) |
+
+**Zerg Air, VeryHard × 10, `--game-seed 7200`**
+
+| # | map | result | length | probes@6 | bases@6 | value lost/killed | flags (first raise) | enemy capital ships made (died) | top killers of our army |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Magannatha_v2 | Victory | 09:55 | 63 | 3 | 1.7k/5.6k | - | - | Roach 5, Hydralisk 4, Mutalisk 4 (of 14) |
+| 2 | Ultralove_v2 | Victory | 10:20 | 65 | 3 | 1.5k/4.5k | - | - | Hydralisk 6, SpineCrawler 2, Roach 2 (of 13) |
+| 3 | LeyLines_v3 | Victory | 10:01 | 65 | 3 | 1.0k/5.0k | - | - | Roach 4, Hydralisk 4 (of 8) |
+| 4 | Torches_v4 | Victory | 10:40 | 58 | 3 | 1.3k/4.1k | POOL_12@01:31 | - | Roach 6, Hydralisk 3, Zergling 1 (of 10) |
+| 5 | Pylon_v4 | Victory | 10:25 | 57 | 3 | 1.0k/4.0k | POOL_12@01:25 | - | Roach 4, ? 1, Zergling 1 (of 8) |
+| 6 | Persephone_v4 | Victory | 10:25 | 56 | 3 | 1.4k/4.9k | POOL_12@01:30 | - | Mutalisk 3, Hydralisk 3, Roach 1 (of 8) |
+| 7 | Incorporeal_v4 | Victory | 09:59 | 65 | 3 | 0.7k/2.9k | - | - | Roach 2, Queen 1, SpineCrawler 1 (of 4) |
+| 8 | Magannatha_v2 | Victory | 10:07 | 57 | 3 | 1.2k/4.8k | POOL_12@01:30 | - | Roach 5, Hydralisk 3, Mutalisk 2 (of 10) |
+| 9 | Ultralove_v2 | Victory | 09:49 | 65 | 3 | 1.2k/5.3k | - | - | Hydralisk 4, Roach 3, Corruptor 1 (of 10) |
+| 10 | LeyLines_v3 | Victory | 09:55 | 66 | 3 | 1.0k/4.9k | - | - | Hydralisk 6, Zergling 1, Broodling 1 (of 8) |
+
+**Findings:**
+- **The Air build exposes what the M4/M5 VeryHard batches missed.** Those ran with `--build RandomBuild` and won 10/10 vs Protoss; the Protoss Air build wins 8/10 against the same code. The losses follow the ladder loss: our army value lost was 2.2-4.5× what it killed.
+- **Void Rays were our top killer in 7 of the 10 Protoss games** (Stalkers in 2, Carrier interceptors in 1). Tempests and/or Carriers were built in 9 of the 10, and they died only in game 5 (one Tempest, one Carrier; a win), the ladder pattern again.
+- **The PROXY flag (§4.4 row 10, "no Gateway by 1:30") was false in 7 of the 8 Protoss losses** and absent from both wins. This build opens Nexus first (~1:04) and puts down its first Gateway at 1:18-1:34 (Magannatha 1:33, LeyLines 1:34, Ultralove 1:18, Pylon 1:19; Torches 0:41, no flag), so at the 1:30 check its main often has none yet.
+  - The flag ends our opener and holds our natural, so the PROXY games had 40-45 probes at 6:00 and 1-2 bases, against 56-59 probes in the two wins.
+  - The flag expired by its phase rule at 5:30 every time ("no proxy structure known").
+  - It also fired in 5 of 10 Terran games, which were won.
+- **Terran's one loss was to Battlecruisers:** 11 made, 1 killed, and they killed 69 of our 125 units. In the 8 other games with Battlecruisers, every one died (1-6 per game).
+- **The VeryHard Zerg Air build never reached capital ships:** no Brood Lords, and every game was over by 10:40. So this batch doesn't test the Zerg capital-air response.
+
+### CheatInsane Air baselines (for the D11 targets vs Terran and Zerg)
+
+Same bot code as above (M6). The batches started before the Phase 0 commits, and their game records are version 2, which only the M6 code writes. The two batches ran in parallel; replays are in `replays/m7-baseline-<race>-insane/`, not in git.
+
+```bash
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty CheatInsane --race Terran --build Air --map all --total 10 --game-seed 7300 --replays replays/m7-baseline-terran-insane
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty CheatInsane --race Zerg   --build Air --map all --total 10 --game-seed 7400 --replays replays/m7-baseline-zerg-insane
+```
+
+| Batch | Wins | Crashes / errors | probes@6 (min / median / max) |
+|---|---|---|---|
+| Terran Air, CheatInsane | **2/10** | 0 / 0 | 55 / 58.5 / 61 |
+| Zerg Air, CheatInsane | 8/10 | 0 / 0 | 40 / 56 / 62 |
+
+**Terran Air, CheatInsane × 10, `--game-seed 7300`**
+
+| # | map | result | length | probes@6 | bases@6 | value lost/killed | flags (first raise, count) | enemy capital ships made (died) | top killers of our army |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Magannatha_v2 | Victory | 14:32 | 61 | 2 | 7.8k/16.3k | - | Battlecruiser 3 (3) | Marauder 13, VikingFighter 10, VikingAssault 6 (of 51) |
+| 2 | Ultralove_v2 | Defeat | 12:37 | 57 | 2 | 13.1k/3.3k | PROXY@01:30,ARMY_OUT_OF_POSITION@10:10 | Battlecruiser 4 (0) | Battlecruiser 25, Marauder 20, VikingAssault 20 (of 76) |
+| 3 | LeyLines_v3 | Defeat | 19:25 | 58 | 2 | 30.6k/21.4k | ARMY_OUT_OF_POSITION@05:13 (×6) | Battlecruiser 7 (3) | Marauder 43, Battlecruiser 26, VikingAssault 26 (of 157) |
+| 4 | Torches_v4 | Defeat | 17:20 | 57 | 2 | 23.1k/12.2k | ONE_BASE_ALLIN@02:45,ARMY_OUT_OF_POSITION@05:07 (×5) | Battlecruiser 9 (3) | Battlecruiser 44, VikingAssault 19, Marauder 16 (of 119) |
+| 5 | Pylon_v4 | Defeat | 21:03 | 59 | 2 | 30.8k/20.3k | ARMY_OUT_OF_POSITION@12:37 (×3) | Battlecruiser 9 (4) | Battlecruiser 61, Marauder 36, VikingAssault 18 (of 156) |
+| 6 | Persephone_v4 | Victory | 11:43 | 61 | 2 | 3.1k/9.0k | - | Battlecruiser 2 (2) | Marine 12, Marauder 5, Sentry 3 (of 26) |
+| 7 | Incorporeal_v4 | Defeat | 16:35 | 59 | 2 | 20.7k/5.8k | ONE_BASE_ALLIN@02:45,ARMY_OUT_OF_POSITION@10:55 (×3) | Battlecruiser 10 (3) | Battlecruiser 46, Marauder 25, VikingAssault 23 (of 108) |
+| 8 | Magannatha_v2 | Defeat | 19:55 | 59 | 2 | 32.0k/22.1k | ONE_BASE_ALLIN@02:45,ARMY_OUT_OF_POSITION@05:35 (×2) | Battlecruiser 9 (6) | Marauder 42, Battlecruiser 36, SiegeTank 27 (of 169) |
+| 9 | Ultralove_v2 | Defeat | 14:26 | 55 | 2 | 13.5k/5.3k | PROXY@01:30,ARMY_OUT_OF_POSITION@10:20 | Battlecruiser 7 (2) | Battlecruiser 38, Marauder 29, VikingAssault 4 (of 77) |
+| 10 | LeyLines_v3 | Defeat | 19:47 | 58 | 2 | 32.5k/17.6k | ARMY_OUT_OF_POSITION@12:17 (×2) | Battlecruiser 8 (4) | Marauder 68, Battlecruiser 32, VikingAssault 27 (of 175) |
+
+**Zerg Air, CheatInsane × 10, `--game-seed 7400`**
+
+| # | map | result | length | probes@6 | bases@6 | value lost/killed | flags (first raise, count) | enemy capital ships made (died) | top killers of our army |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Magannatha_v2 | Victory | 13:05 | 62 | 3 | 5.7k/13.6k | POOL_12@01:30 | - | SpineCrawler 14, Roach 12, Hydralisk 10 (of 43) |
+| 2 | Ultralove_v2 | Victory | 16:40 | 57 | 3 | 6.9k/24.4k | POOL_12@01:27 | BroodLord 3 (3) | Roach 10, Hydralisk 6, SpineCrawler 5 (of 40) |
+| 3 | LeyLines_v3 | Victory | 14:41 | 56 | 3 | 5.7k/16.7k | POOL_12@01:30 | BroodLord 1 (1) | Roach 14, Hydralisk 11, SpineCrawler 5 (of 37) |
+| 4 | Torches_v4 | Victory | 13:37 | 56 | 3 | 5.0k/12.7k | POOL_12@01:30 | BroodLord 2 (2) | Hydralisk 8, SpineCrawler 8, Roach 6 (of 32) |
+| 5 | Pylon_v4 | Defeat | 17:54 | 40 | 1 | 20.6k/25.4k | POOL_12@01:07,ARMY_OUT_OF_POSITION@08:15 (×5) | BroodLord 14 (6) | Roach 30, Hydralisk 24, BroodlingEscort 21 (of 106) |
+| 6 | Persephone_v4 | Victory | 20:25 | 57 | 3 | 19.1k/35.8k | POOL_12@01:35,ARMY_OUT_OF_POSITION@09:00 (×2) | BroodLord 9 (9) | Roach 30, Mutalisk 17, SpineCrawler 16 (of 122) |
+| 7 | Incorporeal_v4 | Victory | 15:31 | 55 | 3 | 6.3k/18.1k | POOL_12@01:27,ARMY_OUT_OF_POSITION@09:00 | BroodLord 2 (2), BroodLordCocoon 1 (1) | Roach 17, Hydralisk 11, SpineCrawler 10 (of 53) |
+| 8 | Magannatha_v2 | Victory | 17:10 | 53 | 3 | 11.2k/30.4k | POOL_12@01:29,ARMY_OUT_OF_POSITION@09:36 | BroodLord 5 (5) | Roach 30, SpineCrawler 11, Hydralisk 10 (of 83) |
+| 9 | Ultralove_v2 | Defeat | 33:12 | 56 | 3 | 34.1k/44.0k | POOL_12@01:25,ARMY_OUT_OF_POSITION@18:53 (×9) | BroodLord 9 (5) | Roach 42, LurkerMPBurrowed 28, BroodlingEscort 26 (of 181) |
+| 10 | LeyLines_v3 | Victory | 14:32 | 57 | 3 | 6.8k/20.0k | POOL_12@01:30,ARMY_OUT_OF_POSITION@07:49 | BroodLord 3 (3) | Roach 14, Hydralisk 10, SpineCrawler 10 (of 44) |
+
+(`BroodlingEscort` is a Brood Lord's attack: the broodlings it launches.)
+
+**Findings:**
+- **Terran: Battlecruisers decide the games.** They were made in all 10 games (2-10 each).
+  - In all 8 losses they were one of our army's two top killers (the top one in 5), and we killed 0-6 of the 4-10 made.
+  - In both wins every Battlecruiser died (3 and 2).
+  - ARMY_OUT_OF_POSITION fired in all 8 losses and in neither win.
+  - Our value lost was 1.4-4.0× what we killed in the losses.
+- **Zerg: Brood Lords are where the losses come from.** They were made in 9 of 10 games (1-14 each).
+  - In the 7 wins with Brood Lords, every one died.
+  - The 2 losses had 14 (6 died) and 9 (5 died); their broodlings were our third top killer in both.
+  - Game 5 also faced a real 12 pool (POOL_12@01:07) and was on 1 base with 40 probes at 6:00.
+  - Game 9 lasted 33 minutes, and burrowed Lurkers were our second top killer.
+- So these two batches test what the Phase 3 capital-air responses (K1-K3) are for. The VeryHard batches above don't, because VeryHard Terran makes few Battlecruisers and VeryHard Zerg makes no Brood Lords.
+
+## M7 acceptance evidence
+
+### Phase 0 + Phase 1 (M7_PLAN.md), run 2026-10-06
+
+Code under test: `07d4ddd`. It holds O1-O3, B1-B6 and `scripts/test_outranged.py`; the commits after it change only docs. All games ran in the cloud container, with the same set-up as the baseline. Up to four batches ran in parallel on 4 cores. Logs were kept outside the repo; replays are in `replays/m7-p1-<race>/`, not in git.
+
+**Summary**
+
+| Criterion (M7_PLAN.md) | Result |
+|---|---|
+| P0: one local game shows the three new line types | PASS |
+| P0: `check_game_log.py` passes | PASS: `RESULT PASS`, 181 records, 0 malformed, ./data 383 KB |
+| P0: M1 regression (Hard × 10, T/Z/P/Random) unchanged | PASS: 10/10, as on M6 |
+| P1: Air batches on the same seeds: `reinforce_after_retreat` = 0 | PASS: 0 in all 30 Air games (and 0 in every other game below) |
+| P1: Air batches on the same seeds: `lost_far` for HOLD lower than baseline | **FAIL as written**: 8 against 2. HOLD deaths overall fell from 45 to 17; see below |
+| P1: main re-scouts at least every ~90 s from 6:00 while an Observer is free | PASS as written; gaps remain while the only free Observer is on an expansion trip (see below) |
+| P1 (B6): no PROXY in the Nexus-first Protoss Air games | PASS: 0 of 7 (baseline 7 of 7) |
+| P1 (B6): `proxy_rax` still raises PROXY; correct flag 40/40 | PASS: correct flag 40/40; vs `proxy_rax`, PROXY was raised in game at 1:30 (games 1-2) and from memory from game 3 |
+| P1: M2/M3 cheese × 10 each (≥ 8/10, flags, no scout lost before 4:00) | **Not met for cannon rush**: worker rush, 12 pool and proxy rax 10/10 each; cannon rush **5/10**, then 8/10 on a rerun (Phase-0 code 9/10; A/B below). M3 parts pass: correct flag 40/40, and no scout lost before 4:00 in 9/10 (worker rush), 10/10 (cannon rush), 10/10 (12 pool) and 9/10 (proxy rax) games |
+| P1: M4 VeryHard × 10 per race (≥ 7 each) | PASS: Terran 10/10, Zerg 9/10, Protoss 10/10 |
+
+**Offline tests** (`poetry run python scripts/<name>.py`):
+
+| Script | Result |
+|---|---|
+| `test_m7_rules` (new) | 17/17 |
+| `test_attack_decision` | 16/16 |
+| `test_threat_flags` | 20/20 |
+| `test_m3_checks` | 14/14 |
+| `test_counterattack_rules` | 36/36 |
+| `test_opponent_memory` | 38/38 |
+
+The staged `test_outranged.py --case idle_hold` passed; it is B2's VERIFY, recorded under "M7 findings".
+
+**Phase 0: the new log lines.** One local game on `4a36da2` (O1-O3; "M7 findings"):
+
+```
+poetry run python scripts/run_matches.py --difficulty VeryHard --race Protoss --build Air --map PersephoneAIE_v4 --total 1 --game-seed 7500
+```
+
+- It logged 4 `ENGAGE`/`DEFEND` lines with the simulator's inputs, for example:
+  - `DEFEND 10:11: engage (level 10 >= 5) vs ZEALOT at (49, 73), 25 defenders (62 supply); vs 1 ZEALOT (100) | ours 8 STALKER 11 ADEPT 2 COLOSSUS 2 IMMORTAL 2 ZEALOT (4675)`
+- It logged 11 `INTEL first seen` lines, for example `INTEL first seen NEXUS at 01:06 (65, 149)`.
+- It logged 76 `UNIT lost` lines, for example `UNIT lost ADEPT at (54, 109) (09:44, fight 15 from its point)`.
+- Across the Phase 1 batches below, `INTEL first seen` caught capital ships as well: Tempest 9, Carrier 6, Battlecruiser 8, Brood Lord 1, Brood Lord cocoon 1.
+
+**Air batches, same seeds as the baseline**
+
+```
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race <Protoss|Terran|Zerg> --build Air --map all --total 10 --game-seed <7000|7100|7200> --replays replays/m7-p1-<race>
+```
+
+| Batch | Baseline (M6) | Phase 1 | D11 target (end of M7) | `reinforce_after_retreat` | probes@6 median (baseline → P1) |
+|---|---|---|---|---|---|
+| Protoss Air | 2/10 | **8/10** | ≥ 7/10 | 0 | 42 → 49 |
+| Terran Air | 9/10 | **10/10** (no Battlecruiser loss) | ≥ 9/10, no Battlecruiser loss | 0 | 57 → 59 |
+| Zerg Air | 10/10 | **10/10** | ≥ 9/10 | 0 | 64 → 62 |
+
+**The baseline's openers differ from Phase 1's, so the Protoss comparison was re-run with them matched.**
+- Citadel picks its opener from `./data/None-protoss.json`, which every no-id batch shares and updates. So the baseline played `C2_1GateExpand` in 7 games and Phase 1 played `C_2GateRobo` in 7.
+- To compare like with like, the Phase-0-only code (`4a36da2`: O1-O3 logging, otherwise M6) was run again on seed 7000. Each game was forced to the opener Phase 1 picked in it (a `git worktree` of `4a36da2` with the `ares-sc2` folder linked in, and the same Poetry environment). Forced openers don't write `./data`.
+
+```
+SC2PATH=$HOME/StarCraftII python scripts/run_matches.py --difficulty VeryHard --race Protoss --build Air --map all --game-seed 7000 --replays replays/m7-p0-protoss-paired --total 6 --opener C_2GateRobo
+... --start 7 --total 7 --opener C2_1GateExpand
+... --start 8 --total 8 --opener C_2GateRobo
+... --start 9 --total 10 --opener C2_1GateExpand
+```
+
+Each cell reads: result and length; probes/bases at 6:00; false PROXY; army value lost/killed; army units lost, with the HOLD deaths (deaths more than 12 from the point in brackets) and the RETREAT deaths.
+
+| # | map | opener (both) | Phase 0 code (`4a36da2`) | Phase 1 code (`07d4ddd`) |
+|---|---|---|---|---|
+| 1 | Magannatha_v2 | C_2GateRobo | Defeat 15:10; 45/2; PROXY@01:30; 12.1k/5.2k; 69 lost, hold 21 (1), retreat 9 | Victory 18:56; 47/2; -; 12.1k/18.0k; 60 lost, hold 0 (0), retreat 3 |
+| 2 | Ultralove_v2 | C_2GateRobo | Defeat 20:12; 39/1; PROXY@01:30; 22.4k/15.8k; 114 lost, hold 3 (1), retreat 40 | Victory 14:03; 48/2; -; 9.2k/12.8k; 49 lost, hold 0 (0), retreat 0 |
+| 3 | LeyLines_v3 | C_2GateRobo | Defeat 13:47; 41/1; PROXY@01:30; 11.2k/3.3k; 57 lost, hold 18 (0), retreat 12 | Victory 14:46; 49/2; -; 9.3k/14.0k; 42 lost, hold 0 (0), retreat 0 |
+| 4 | Torches_v4 | C_2GateRobo | Victory 11:52; 50/2; -; 4.5k/6.8k; 19 lost, hold 0 (0), retreat 0 | Victory 11:46; 50/2; -; 5.5k/6.3k; 29 lost, hold 0 (0), retreat 2 |
+| 5 | Pylon_v4 | C_2GateRobo | Victory 13:45; 51/2; -; 7.0k/11.4k; 33 lost, hold 0 (0), retreat 3 | Victory 14:55; 48/2; -; 6.5k/13.6k; 31 lost, hold 0 (0), retreat 0 |
+| 6 | Persephone_v4 | C_2GateRobo | Defeat 16:53; 40/1; PROXY@01:30; 21.4k/9.6k; 109 lost, hold 0 (0), retreat 32 | Defeat 15:24; 48/2; -; 18.1k/7.6k; 86 lost, hold 8 (6), retreat 12 |
+| 7 | Incorporeal_v4 | C2_1GateExpand | Victory 17:18; 43/1; PROXY@01:30; 17.6k/11.5k; 94 lost, hold 0 (0), retreat 23 | Victory 13:02; 58/3; -; 10.3k/11.2k; 50 lost, hold 0 (0), retreat 0 |
+| 8 | Magannatha_v2 | C_2GateRobo | Defeat 13:14; 40/1; PROXY@01:30; 8.9k/3.0k; 47 lost, hold 1 (0), retreat 4 | Defeat 20:28; 49/2; -; 17.7k/6.0k; 85 lost, hold 9 (2), retreat 12 |
+| 9 | Ultralove_v2 | C2_1GateExpand | Victory 10:42; 54/2; -; 3.2k/6.1k; 17 lost, hold 0 (0), retreat 0 | Victory 11:07; 57/2; -; 5.2k/6.5k; 27 lost, hold 0 (0), retreat 0 |
+| 10 | LeyLines_v3 | C2_1GateExpand | Defeat 17:19; 40/1; PROXY@01:30; 21.2k/9.6k; 106 lost, hold 2 (0), retreat 24 | Victory 12:04; 58/3; -; 3.8k/7.8k; 16 lost, hold 0 (0), retreat 0 |
+
+| Totals | Phase 0 | Phase 1 |
+|---|---|---|
+| Wins | 4/10 | 8/10 |
+| False PROXY@01:30 | 7 | 0 |
+| Army units lost | 664 | 473 |
+| HOLD deaths, all / farther than 12 from the point | 45 / 2 | 17 / 8 |
+| RETREAT deaths | 147 | 29 |
+| Main re-scouts sent from 6:00 | 30 (none in games 1 and 8) | 62 (4-11 in every game) |
+
+**B1 (retreats).** `reinforce_after_retreat` was 0 in all 120 Phase 1 games: 30 Air, 30 VeryHard, 10 Hard and 50 cheese (the 40 plus the cannon rush rerun). With the same openers, RETREAT deaths fell from 147 to 29.
+
+**B2/B3 and the HOLD criterion: missed as written.**
+- The plan asked for fewer HOLD deaths farther than `LOST_FAR_DISTANCE` (12) from the point. Phase 1 has 8, the Phase-0 code 2.
+- That metric was meant to catch units at the hold point being drawn out after an attacker. B2's in-game check showed that doesn't happen.
+- The HOLD losses the postmortem found are units dying at the hold point in an out-ranging army's reach. Those fell from 45 to 17, and none were in Phase 1's eight wins.
+- The 8 far HOLD deaths all came in Phase 1's two losses (games 6 and 8), during home fights against a mass air army.
+  - In game 6, the decision switched between engage, hold and last stand every 1-3 s from 10:31 to 12:47 (Void Rays, Carriers and Tempests).
+  - Stalkers that the switch left 14-23 from their point died walking back to it with a plain move, which is B2's behaviour.
+  - Phase 2's C1 (out-ranged units step to safety before shooting, and the hold point moves back) and C2 (defenders that can't hit the threat hold) target exactly this.
+  - Its staged case `hold_vs_tempest` checks that no unit dies beyond the leash.
+
+**B4 (main re-scouts) as measured** (Protoss Air, from 6:00):
+- 62 re-scouts went out (4-11 per game), against 30 on the Phase-0 code and 56 on the baseline (which had none after 6:00 in game 3).
+- Of the 62 intervals (6:00 to the first re-scout, then between re-scouts), 57 were at most 90 s; most were 60 s, the re-scout period.
+- The 5 longer gaps were 95-180 s:
+  - in 3 of them, the only free Observer was on an expansion trip;
+  - in the other 2, an Observer died and the next was free 20 s or 2:17 later.
+- Game 8 then had no free Observer from 14:32 to the end (20:28): one was on the home post and one was with the army.
+- **What remains:** right after each re-scout, the main was just seen, so the next expansion check takes the same Observer for 90-110 s. The main then goes unseen for up to ~2.5 minutes (the first ladder loss had 5:43-11:01). B4 as specified only stops an expansion check from starting while the re-scout is already due. This is put to the user; no change was made.
+
+**B5.** Hallucinations ran only against Terran: 25 in Terran Air, 32 in VeryHard Terran and 13 in the M1 batch's Terran games (one of them a Random opponent that was Terran). None ran against Protoss or Zerg.
+
+**B6 (expansion-first proxy check).**
+- In the 7 Protoss Air games where the enemy opened Nexus first (1, 2, 3, 6, 7, 8, 10; natural townhall seen at 1:04-1:07, no Gateway in the main at 1:30):
+  - the baseline and the Phase-0 code raised `PROXY@01:30` in all 7;
+  - Phase 1 logged `SCOUT proxy check at 01:30: 0 Gateways in the main, 20 workers seen, a townhall at their natural (expansion first)` and raised nothing.
+- In the other 3 games the main had a Gateway, so there was no flag on any code.
+- Against `proxy_rax`, the missing-production path still fires when the natural is empty: `FLAG raise PROXY (STRUCTURE, proxy_missing) at 1:30: no Barracks in the scouted main [ends opener]` (games 1-2, before memory pre-raises it).
+- The VeryHard Protoss batch's 10 proxy checks all found a Gateway.
+
+**Regressions**
+
+```
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty Hard --map all --total 10 --race Terran Zerg Protoss Random --game-seed 4000
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race <Terran|Zerg|Protoss> --map all --total 10 --game-seed 3000 --opponent-id m7p1-vh-<race>
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --opponent <bot> --map all --total 10 --seed 100 --game-seed 5000 --opponent-id m7p1-<bot>
+```
+
+| Batch | Wins | Correct flag | Games with no scout lost before 4:00 | `raa` | Notes |
+|---|---|---|---|---|---|
+| M1: Hard × 10 (T/Z/P/Random) | **10/10** (3/3, 3/3, 2/2, 2/2) | — | 10/10 | 0 | M6: 10/10 |
+| M4: VeryHard Terran | **10/10** | — | 10/10 | 0 | |
+| M4: VeryHard Zerg | **9/10** | — | 10/10 | 0 | The loss is Ley Lines game 3 (12 pool, then a 10-Roach push at 4:05; 8:46), lost on every M5 commit too; M5 was also 9/10 with this loss |
+| M4: VeryHard Protoss | **10/10** | — | 10/10 | 0 | |
+| M2/M3: worker rush | **10/10** | 10/10 | 9/10 | 0 | Game 6: the fallback main probe (sent at 2:30) was killed by a leftover worker-rush Drone at 3:28 |
+| M2/M3: cannon rush | **5/10** (2 losses, 3 ties at 60:00) | 10/10 | 10/10 | 0 | **Under the M2 bar.** Rerun 8/10; Phase-0 code 9/10 (A/B below) |
+| M2/M3: 12 pool | **10/10** | 10/10 | 10/10 | 0 | |
+| M2/M3: proxy rax | **10/10** | 10/10 | 9/10 | 0 | Game 3 (PROXY pre-raised from memory): the main probe checked the proxy spots and came home unscouted; the retry probe met the proxy Marines at 2:38 |
+
+**Cannon rush A/B.** After the 5/10, the same batch was run again on both codes in parallel, each with fresh opponent memory and no other batch running:
+
+```
+# Phase 0 (4a36da2, the worktree above)
+SC2PATH=$HOME/StarCraftII python scripts/run_matches.py --opponent cannon_rush --map all --total 10 --seed 100 --game-seed 5000 --opponent-id m7p0-cannon_rush
+# Phase 1 (07d4ddd), rerun
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --opponent cannon_rush --map all --total 10 --seed 100 --game-seed 5000 --opponent-id m7p1b-cannon_rush
+```
+
+| # | map | variant | Phase 0 | Phase 1, first run | Phase 1, rerun |
+|---|---|---|---|---|---|
+| 1 | Magannatha | natural | Victory 15:28 | Victory 12:09 | Victory 13:22 |
+| 2 | Ultralove | natural | Victory 15:25 | **Tie** (60:00; 11 HOLD deaths far from the point) | **Defeat** 12:43 |
+| 3 | Ley Lines | main | Victory 9:59 | Victory 9:43 | Victory 10:19 |
+| 4 | Torches | natural | Victory 9:31 | Victory 9:30 | Victory 10:38 |
+| 5 | Pylon | main | Victory 9:49 | **Tie** (60:00) | Victory 9:58 |
+| 6 | Persephone | main | Victory 9:42 | Victory 9:50 | Victory 9:27 |
+| 7 | Incorporeal | natural | Victory 10:48 | Victory 10:50 | Victory 10:41 |
+| 8 | Magannatha | natural | **Defeat** 11:47 (6 HOLD far) | **Tie** (60:00; 8 HOLD far) | **Defeat** 9:22 (9 HOLD far) |
+| 9 | Ultralove | main | Victory 9:42 | **Defeat** 31:13 | Victory 9:40 |
+| 10 | Ley Lines | main | Victory 10:20 | **Defeat** 9:49 | Victory 10:11 |
+| | | | **9/10** | **5/10** | **8/10** |
+
+- **The main-variant games are noise.** Games 5, 9 and 10 were lost or tied in the first run, with 24-25 probes and no townhall at 6:00, and won in the rerun with 53 probes. Same code, same seeds.
+- **The natural-variant losses share one mechanism**, the same in all three runs of game 8 and in the first run of game 2:
+  - The army's anchor is `_rally_point()`: our front base, moved toward the enemy. The CANNON_RUSH plan sets no hold point.
+  - When the natural Nexus completes (game 8: its cancel order at 3:14-3:17 came too late), the anchor moves from the main's front (135, 44) to the natural's front (114, 65).
+  - Every new unit then walks from the main past the rush Cannons at about (119, 35) and dies on the way: 6-9 per game between 3:47 and 5:28.
+  - The Phase-0 code loses game 8 the same way: its units attack-move and still die there. With B2's plain move they don't stop to shoot on the way. Among the natural-variant games, game 2 is the one the Phase-0 code won and Phase 1 didn't, in both runs.
+- **This anchor behaviour predates M7.** B2 makes the walk costlier. A fix is put to the user; no change was made.
+
+- The two scout losses happen in probe-scheduling code that M7 didn't change; M5 had none in 40 cheese games. The M3 bar (≥ 7/10 games per batch) holds.
+- No crashes and no caught errors in any of the 120 games, and every `ROW` has `log=ok`.
+
+**Notes**
+- **Load.** The cheese batches run two bots and two SC2 clients per game. With three of them in parallel (load ~12 on 4 cores), the M6 step guard fired 1-14 times per cheese game, and the worst step was 7.0 s (proxy rax game 6). In the Air batches it fired in 3 of 30 games (once or twice each).
+- **One non-proxy flag.** Protoss Air game 6 raised CANNON_RUSH at 2:05 from an enemy probe that stayed in our main for 10 s (UNIT evidence). It expired at 2:30 with the natural still taken ("expand=yes"); it is §4.4's existing rule, not a proxy.
+
+### Phase 1 additions B7 and B8 (user decisions D14-D16), run 2026-10-07
+
+Code under test:
+- **`703b084`:** B7 (the army holds the main ramp top while a rush Cannon stands near our main or natural) and B8 (the Observer expansion-trip gate).
+- **`d89b6ff`:** the B7 follow-up. `_safe` keeps the whole `HOLD_RADIUS` around a hold point out of finished Cannons' reach, and takes the least-covered step when none is clear. It came from the first two B7 cannon batches, where one game lost 32 holding units within 8 of the ramp hold point.
+- **Which batches ran on which:** cannon rush C and D and proxy rax ran on `d89b6ff`; everything else on `703b084`. The follow-up only changes anything when a finished enemy Cannon covers one of our hold points, so it doesn't affect the other batches.
+
+Three batches ran at a time on 4 cores. Logs were kept outside the repo; replays are in `replays/m7-p1b-<race>/`, not in git.
+
+**Summary**
+
+| Criterion (M7_PLAN.md Phase 1, with D14-D16) | Result |
+|---|---|
+| B7: cannon rush ≥ 8/10 on two runs | **PASS on `d89b6ff`: 9/10 and 9/10.** On `703b084`: 7/10 and 9/10, which led to the follow-up |
+| B7: no unit lost walking to a hold point past rush Cannons | **Nearly**: 2 per run, both in game 5 (main variant): a lone Zealot sent to clear the first Cannon walks back once home defense switches to hold. The Phase 1 runs had 22 and 10 |
+| B8: no gap over 90 s between main re-scouts from 6:00 while a free Observer exists | **PASS**: 76 re-scouts in the Protoss Air batch (Phase 1: 62). The two longer gaps had no free Observer (below) |
+| `reinforce_after_retreat` = 0 | **PASS**: 0 in every game below |
+| HOLD `lost_far` in the Air batches | Moved to Phase 2 (D16) |
+| D11 targets (end of M7, recorded for progress) | Terran Air 10/10 and Zerg Air 10/10 meet theirs. Protoss Air is 4/10 with free openers and 7/10 with Phase 1's openers; the Phase 1 code scored 8/10 and 6/10 the same two ways (see the variance table) |
+| M1: Hard × 10 | **PASS**: 10/10 |
+| M4: VeryHard × 10 per race (≥ 7) | **PASS**: Terran 9/10, Zerg 9/10, Protoss 9/10 |
+| M2/M3: cheese × 10 (≥ 8/10, correct flag, no scout lost before 4:00 in ≥ 7) | **PASS**: worker rush 10/10, 12 pool 10/10, proxy rax 8/10 (2 ties, below), cannon rush 9/10 and 9/10. Correct flag in every game. Scout criterion: worker rush 9/10 (game 6 again: the fallback main probe killed by a leftover Drone, at 3:09), the rest 10/10 |
+
+**Offline tests** (`poetry run python scripts/<name>.py`):
+- `test_m7_rules`: 33/33. It adds `rush_cannon_near`, `safe_hold_point`, `trip_seconds` and `observer_trip_ok`.
+- `test_attack_decision` 16/16, `test_threat_flags` 20/20, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38.
+- `check_game_log.py` after the batches: `RESULT PASS`, 200 records (the cap), 0 malformed.
+
+**Smoke games** (`703b084`, one game each):
+- Cannon rush game 8 (the natural-variant game every earlier run had lost or tied): the plan logged `hold=(128, 36)` at the ramp top, cleared the Cannons from 4:18 to 5:30, and won at 12:47.
+- Protoss Air game 1: the Observer re-scouted the enemy main every 60 s from 6:00 to the end (largest gap 61 s), and probes took the expansion trips.
+
+**B7: cannon rush, every run on the same seeds** (`--opponent cannon_rush --map all --total 10 --seed 100 --game-seed 5000`, each run with its own fresh opponent id; W/L/T = win/loss/tie at 60:00):
+
+| # | map | variant | Phase 0 | P1 run 1 | P1 run 2 | B7 A | B7 B | B7+safe C | B7+safe D |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Magannatha | natural | W | W | W | W | W | W | W |
+| 2 | Ultralove | natural | W | **T** | **L** | **L** | **T** | W | W |
+| 3 | LeyLines | main | W | W | W | W | W | W | W |
+| 4 | Torches | natural | W | W | W | W | W | W | W |
+| 5 | Pylon | main | W | **T** | W | **L** | W | **L** | **T** |
+| 6 | Persephone | main | W | W | W | W | W | W | W |
+| 7 | Incorporeal | natural | W | W | W | W | W | W | W |
+| 8 | Magannatha | natural | **L** | **T** | **L** | W | W | W | W |
+| 9 | Ultralove | main | W | **L** | W | **T** | W | W | W |
+| 10 | LeyLines | main | W | **L** | W | W | W | W | W |
+| | | wins | **9/10** | **5/10** | **8/10** | **7/10** | **9/10** | **9/10** | **9/10** |
+| | | HOLD deaths (farther than 12) | 9 (7) | 22 (22) | 11 (10) | 35 (7) | 55 (2) | 15 (2) | 12 (2) |
+
+Codes: Phase 0 `4a36da2`, Phase 1 `07d4ddd`, B7 `703b084`, B7 + `_safe` `d89b6ff`.
+
+- **Natural-variant games:** all 10 were won on `d89b6ff` (games 1, 2, 4, 7, 8 in both runs).
+  - Game 8 had been lost or tied in all three earlier runs: units sent to the natural's hold point walked past the rush Cannons.
+  - Game 2 had failed in every run since Phase 1.
+- **Main variant:** game 5 (Pylon) is lost or tied in 4 of 7 runs, on every code. The rush Cannons kill the main Nexus by about 3:30 with minerals at 5-10 from 2:30, and the main Nexus dies whatever the army's hold point. It is the known close case from M2.
+- **The `_safe` follow-up:** before it, run B lost 36 holding units in game 1. 32 died within 8 of the ramp hold point (128, 36), at about (125, 34), between 3:07 and 12:23.
+  - Holding units stand anywhere within `HOLD_RADIUS` (6) without moving, and fight only enemies within `HOLD_ENGAGE_RADIUS` (12) of the point. The nearest Cannon was out of the point's reach but in theirs, and beyond the 12.
+  - With the whole radius kept out of reach, HOLD deaths per run fell from 35 and 55 to 15 and 12.
+
+**B8: main re-scouts** (Protoss Air, seed 7000, from 6:00):
+- Phase 1 sent 62 main re-scouts; B8 sent 76.
+- Phase 1 had 5 intervals over 90 s, all because the only free Observer was on an expansion trip or had died. B8 had 2:
+  - game 6, 95 s: one re-scout trip took that long, and the next left the moment it returned;
+  - game 8, 5:44: the only Observer took the PvP home post when a Twilight Council was seen (§4.3), so none was free.
+- The cost: probes on expansion trips lost per 10 games went from 16 to 19 (22 in the opener-matched batch).
+- PvT, Terran Air × 10 (Phase 1 → B8): Observer expansion trips 26 → 2; probe expansion trips 16 → 45; Observer main re-scouts 26 → 42. The log shows the Observer kept for the re-scout 23 times, and Hallucinations ran 25 times, the same as before (B5).
+
+**Protoss Air variance.** The free-opener batch on `703b084` went 4/10, against Phase 1's 8/10, so both codes were run again with each game forced to the opener Phase 1 picked. This is the same method as the Phase 0 comparison: a `git worktree` of `07d4ddd` with `ares-sc2` linked in, run with the same Poetry environment's Python.
+
+```
+SC2PATH=$HOME/StarCraftII python scripts/run_matches.py --difficulty VeryHard --race Protoss --build Air --map all --game-seed 7000 --total 6 --opener C_2GateRobo
+... --start 7 --total 7 --opener C2_1GateExpand
+... --start 8 --total 8 --opener C_2GateRobo
+... --start 9 --total 10 --opener C2_1GateExpand
+```
+
+| Batch | Openers | Wins | Units lost | HOLD deaths | Probes lost on expansion trips |
+|---|---|---|---|---|---|
+| Phase 1 (`07d4ddd`), 2026-10-06 | free (picked these) | 8/10 | 475 | 17 | 16 |
+| Phase 1 (`07d4ddd`), rerun | forced, the same | 6/10 | 640 | 10 | 18 |
+| B7/B8 (`703b084`) | free (5 games differ) | 4/10 | 639 | 28 | 19 |
+| B7/B8 (`703b084`) | forced, the same | 7/10 | 714 | 23 | 22 |
+
+- **With the same openers, B7/B8 won 7/10 against the Phase 1 code's 6/10.** The 4/10 batch played a different opener in 5 games and won 2 of them; Phase 1 won all 5 of its own.
+- **The same code swings by about ±2 wins in 10 here** (Phase 1: 8 then 6). A 10-game Protoss Air batch can't show a change smaller than that. Phase 2's comparisons should use opener-matched pairs, or 20 games.
+- B7 never triggered in the Air games, which had no rush Cannons.
+
+**Regressions**
+
+```
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race <Terran|Zerg|Protoss> --build Air --map all --total 10 --game-seed <7100|7200|7000> --replays replays/m7-p1b-<race>
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race <Terran|Zerg|Protoss> --map all --total 10 --game-seed 3000 --opponent-id m7b8-vh-<race>
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty Hard --map all --total 10 --race Terran Zerg Protoss Random --game-seed 4000
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --opponent <bot> --map all --total 10 --seed 100 --game-seed 5000 --opponent-id m7b8-<bot>
+```
+
+The VeryHard Terran and Zerg batches were cut off at 2 hours, after game 8 and game 7 respectively. They were finished with `--start 9` and `--start 8`, keeping the same opponent ids.
+
+| Batch | Wins | Notes |
+|---|---|---|
+| Terran Air | **10/10** | |
+| Zerg Air | **10/10** | |
+| VeryHard Terran | **9/10** | Game 3 (Ley Lines; Phase 1 won it): ONE_BASE_ALLIN from ares's marauder-rush flag held us on one base, then a home fight lost at 9:30-10:00 |
+| VeryHard Zerg | **9/10** | Game 3 (Ley Lines), the 12-pool into Roach push lost on every commit since M5 |
+| VeryHard Protoss | **9/10** | Game 5 (Pylon; Phase 1 won it): 9 Stalkers and a Zealot hit our 6 units at 4:50, before anything B7 or B8 changes |
+| M1: Hard × 10 | **10/10** | |
+| Worker rush | **10/10** | Correct flag 10/10; game 6 lost its fallback main probe to a leftover Drone at 3:09, as in Phase 1 |
+| 12 pool | **10/10** | Correct flag 10/10 |
+| Proxy rax | **8/10** (2 ties at 60:00) | Correct flag 10/10. Phase 1 and M5 went 10/10 on these seeds; see below |
+
+No crashes and no caught errors in any of these games; every `ROW` has `log=ok` and `raa=0`.
+
+**The proxy-rax ties (games 8 and 9) are a stalemate that predates M7, now hit at the margin.**
+- In both, the Nexus builders died to the proxy Marines (game 8 at 8:43; game 9 at 3:56, 6:13 and 10:19), so we stayed on one base.
+- The PROXY flag never expired: the proxy Barracks was never killed, and the Observer's §5 evidence re-scouts every ~2 minutes never contradicted it.
+- With the plan holding the natural and the main mined out from about 14:00, supply peaked at 146 (game 8, 13:00) against the attack's 150 launch gate, so no attack ever went out (`engage=0/0/0`). Value was 3.8k lost against 16.6k killed in game 8.
+- The 40:00 structure hunt switched on and off as the Barracks came in and out of vision.
+- Phase 1's run of the same seeds had the same one-base state and the same PROXY flag. Its army reached 150 supply and attacked at 11:44 and 11:45, and it won both by 14:00 (in game 9 the flag expired at 12:15, when the Barracks was gone).
+- No probes were lost scouting in either run, and there are no Cannons, so neither B7 nor B8 is involved.
+- Put to the user as a finding; no change made.
+
+### B9 (user decision D17) and Phase 2 (C1-C5), run 2026-10-08
+
+**B9: clear known proxy production** (`2307de5`). Two proxy-rax runs on the same seeds, each with fresh opponent memory, plus VeryHard Terran (the matchup where PROXY can fire outside the cheese bot):
+
+```
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --opponent proxy_rax --map all --total 10 --seed 100 --game-seed 5000 --opponent-id m7b9<a|b>-proxy_rax
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race Terran --map all --total 10 --game-seed 3000 --opponent-id m7b9-vh-terran
+```
+
+| Batch | Wins | Notes |
+|---|---|---|
+| Proxy rax, run A | **10/10** | No ties; `DEFEND … clearing proxy BARRACKS` at 4:00-4:42 in 9 games; the PROXY flag expired in every game |
+| Proxy rax, run B | **10/10** | No ties; cleared at 3:54-4:37 in 9 games; games 3-10 won in 11:14-12:40 (12:14-14:04 before B9) |
+| VeryHard Terran | **10/10** | No PROXY flag and no proxy clear in any game: B9 doesn't fire outside real proxies |
+
+The two runs before B9 had tied games 8 and 9 at 60:00 (one base, the proxy Barracks never killed).
+
+**Phase 2 code.**
+- `5c61e4e` holds C1-C5.
+- `7cf384f` added the fallback hold-down, C4's logged hold reasons and the staged-test fixes.
+- `79fdd0e` limits C4's home-fight cooldown to fights worth `LAUNCH_HOME_FIGHT_MIN_FRACTION` (0.2) of the defenders. Without it, a 12-pool bot's trickle of 1-8 Zerglings every 15-20 s held a 200-supply army at home from 9:00 to 21:50, and the game tied. Cannon rush game 3 was held 8:22-17:50 the same way.
+- Batches marked † ran on `7cf384f`, the rest on `79fdd0e`. The difference only makes home-fight holds rarer.
+
+**Commands** (Phase 2; logs kept outside the repo, replays in `replays/m7-p2*-<race>/`, not in git):
+
+```
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race <Terran|Zerg|Protoss> --build Air --map all --total 10 --game-seed <7100|7200|7000> --replays replays/m7-p2-<race>
+SC2PATH=$HOME/StarCraftII python scripts/run_matches.py --difficulty VeryHard --race Protoss --build Air --map all --game-seed 7000 --start N --total N --opener <Phase 1's opener for game N>   # "forced", one call per game, as in the B7/B8 section
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty VeryHard --race <race> --map all --total 10 --game-seed 3000 --opponent-id m7p2-vh-<race>
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --difficulty Hard --map all --total 10 --race Terran Zerg Protoss Random --game-seed 4000
+SC2PATH=$HOME/StarCraftII poetry run python scripts/run_matches.py --opponent <bot> --map all --total 10 --seed 100 --game-seed 5000 --opponent-id m7p2-<bot>
+SC2PATH=$HOME/StarCraftII poetry run python scripts/test_engagement.py
+SC2PATH=$HOME/StarCraftII poetry run python scripts/test_outranged.py --case <idle_hold|hold_vs_tempest|committed>
+SC2PATH=$HOME/StarCraftII poetry run python scripts/test_counterattack.py
+```
+
+The `79fdd0e` reruns used the same arguments, with opponent ids `m7p2f-<bot>` / `m7p2f-vh-zerg` and `replays/m7-p2f-zerg`.
+
+**Summary**
+
+| Criterion (M7_PLAN.md) | Result |
+|---|---|
+| B9: proxy rax ≥ 8/10 on two runs, no tie (on `2307de5`) | **PASS**: 10/10 and 10/10, no tie; no false proxy clear in VeryHard Terran 10/10 |
+| Phase 2: Air ratio and launch-then-retreat-within-60-s count better than Phase 1 | **Not shown.** Protoss Air means improve (ratio 1.09 against 1.21; quick retreats 10.7 against 12), but stay inside the same code's run-to-run spread. Terran and Zerg Air were already at 0 quick retreats |
+| Phase 2: HOLD `lost_far` in the Air batches below Phase 1's 8 | **Mixed**: 3 and 0 in two Protoss Air runs, 14 in the third (mean 5.7) |
+| M1: Hard × 10 | **PASS** † 10/10 |
+| M2/M3: cheese × 10 (≥ 8/10, correct flag, no scout lost before 4:00) | **FAIL on proxy rax: 7/10 on `79fdd0e`** (2 losses, 1 tie; below); its flag 10/10 and scout 8/10 pass. Worker rush † 10/10, 12 pool 10/10, cannon rush 10/10 |
+| M4: VeryHard × 10 per race (≥ 7) | **PASS**: Terran † 10/10, Zerg 9/10, Protoss † 10/10 |
+| M5: staged counterattack 7/7 | **PASS** † |
+
+**Offline tests:**
+- `test_m7_rules` 57/57: C1 ranges with stand-in units, C2 eligibility, C3 `retreat_may_shoot`, C5 `outrange_penalty`, plus the Phase 0/1 cases.
+- `test_attack_decision` 23/23: the C4 cooldown, remembered-army, intel-wait and restart cases.
+- `test_threat_flags` 20/20, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38.
+
+**Staged tests** (`7cf384f`; one game per case, PylonAIE_v4):
+
+| Test | Result |
+|---|---|
+| `test_engagement.py` | PASS; the C5 rows are below |
+| `test_outranged.py --case idle_hold` (B2) | PASS: no Stalker drawn toward the Tempests (closest 10.7, limit 8.5); home defense held |
+| `test_outranged.py --case hold_vs_tempest` (C1) | PASS: 1 of 6 Stalkers died (6 of 6 in 13 s before C1); the defensive position moved 4.8 farther from the Tempests; home defense held |
+| `test_outranged.py --case committed` (C1) | PASS: home defense engaged (level 6), killed both Tempests, lost no Stalker |
+| `test_counterattack.py` (M5, all 7 cases) | **7/7 PASS**. The `merge` case switches the C4 gate off with the supply gate: its forced 20-supply launch can't pass the remembered-army check by design |
+
+C5 in the simulator (`Engagement.level`, most common of 20 calls; raw simulator level and penalty in brackets):
+
+| Scenario | Level (raw, penalty) | ares `can_win_fight` |
+|---|---|---|
+| 30 Stalkers + 4 Colossi vs 8 Tempests + 4 Zealots | 5 (9, -4) | 10 |
+| 30 Stalkers vs 8 Tempests | 5 (9, -4) | 10 |
+| 12 Stalkers vs 8 Tempests | 0 (4, -4) | 2 |
+| 12 Zealots vs 8 Tempests | 0 (4, -4) | 0 |
+| 12 Stalkers vs 4 Void Rays | 10 (10, -0) | 10 |
+| **12 Zealots vs 4 Void Rays** | **10 (10, -0)** | **10** |
+| 12 Stalkers vs 2 Carriers (no Interceptors) | 10 (10, -0) | 10 |
+
+**The last three rows show the weaponless-unit gap (see "M7 findings").** Void Rays, Carriers and Battlecruisers have no weapon in this game data. The simulator calls 12 Zealots against 4 Void Rays an emphatic win, and C1's rule and C5's penalty don't see them either.
+
+**Air batches** (Protoss: the Phase 1 code's runs as the baseline, since B7/B8 don't touch fights; "forced" means each game forced to the opener Phase 1 picked):
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Phase 1, free openers | 8/10 | 0.94 | 20 | 6 | 17 (8) | 29 | 475 |
+| Phase 1, forced | 6/10 | 1.23 | 26 | 16 | 10 (4) | 103 | 640 |
+| B7/B8, free | 4/10 | 1.56 | 21 | 12 | 28 (16) | 132 | 639 |
+| B7/B8, forced | 7/10 | 1.12 | 30 | 14 | 23 (8) | 112 | 714 |
+| **Phase 2 †, free** | 5/10 | 1.17 | 22 | 16 | 43 (3) | 66 | 721 |
+| **Phase 2 †, forced A** | 5/10 | 1.26 | 18 | 9 | 37 (14) | 73 | 562 |
+| **Phase 2 †, forced B** | 8/10 | 0.85 | 19 | 7 | 6 (0) | 22 | 570 |
+| Terran Air: P1 / B7-B8 / **Phase 2 †** | 10 / 10 / **10** | 0.42 / 0.45 / **0.38** | 10 / 10 / 10 | 0 / 0 / 0 | 0 / 0 / 0 | | |
+| Zerg Air: P1 / B7-B8 / **Phase 2 †** / **final** | 10 / 10 / **10** / **10** | 0.33 / 0.30 / **0.31** / **0.28** | 10 / 10 / 10 / 11 | 0 | 0 | 0 | |
+
+- **Protoss Air means, Phase 2 against the Phase 1 code:**
+  - value lost/killed 1.09 against 1.21;
+  - launches retreated within 60 s 10.7 against 12;
+  - HOLD deaths far from the point 5.7 against 9 (D16 asked for fewer than 8: two runs, 3 and 0, did; one, 14, didn't);
+  - RETREAT deaths 54 against 94.
+- All of these are better on average but inside the spread of the same code's runs (±2 wins, ratio 0.85-1.56). **The Phase 2 Air criterion is not shown to be met.**
+- The reason is in the logs. In the free batch, C4's remembered-army level read 8-10 at the launches that retreated within 60 s, because the remembered army was mostly Void Rays and Carriers, which the simulator sees as harmless (game 9: "remembered army level 10" against 10-12 Void Rays). Most of those retreats came from the value rule (below 40% of the start value) with the level still at 7.
+- **What C1-C4 did** across the three Protoss batches:
+  - 4-28 fallback steps per batch;
+  - 23-35 "nothing can hit it" holds (C2);
+  - 47-60 fight lines with an out-range penalty (C5);
+  - 18-28 launches held, mostly for intel (C4).
+- C4's waits made the Zerg Air games 1:33 longer on `7cf384f` (10:18 → 11:51), with no losses. On `79fdd0e` they average 10:26 again (`LAUNCH_HOME_FIGHT_MIN_FRACTION`).
+
+**Regressions**
+
+| Batch | Wins | Notes |
+|---|---|---|
+| M1: Hard × 10 † | **10/10** | |
+| M4: VeryHard Terran † | **10/10** | |
+| M4: VeryHard Zerg † / final | **9/10** / **9/10** | The usual Ley Lines game 3, both times |
+| M4: VeryHard Protoss † | **10/10** | |
+| M2/M3: worker rush † | **10/10** | Correct flag 10/10, no scout lost before 4:00 |
+| M2/M3: 12 pool (final) | **10/10** | Correct flag 10/10; every game won in 10:02-13:43; no launch held by a home fight. On `7cf384f`, game 2 tied at 60:00 (the home-fight cooldown above) |
+| M2/M3: cannon rush (final) | **10/10** | The first 10/10 on these seeds: game 5 (Pylon main variant) won at 9:50; 4 HOLD deaths, none far. On `7cf384f`: 4 of 6 played, games 3-4 took 16-20 min (home-fight holds), game 6 lost |
+| M2/M3: proxy rax (final) | **7/10** (2 losses, 1 tie) | Correct flag 10/10; no scout lost before 4:00 in 8/10. Below the ≥ 8/10 bar: see below |
+| M5: staged counterattack | **7/7** | |
+
+**The proxy-rax regression (`79fdd0e`, 7/10).** B9's two runs on `2307de5` (the code before Phase 2) won all 10 games, on the same seeds.
+- **Games 1 and 2 (lost at 7:45 and 8:09)** are the two games without opponent memory, where the army is 2-3 Zealots when the proxy Marines arrive at 2:37.
+  - Before Phase 2, both runs engaged at levels 9-10 (`vs 2-3 MARINE | ours 2-3 ZEALOT`), lost no probe, and won by 9:01.
+  - On `79fdd0e` the same fight reads `level 3 < 5 … vs 4 MARINE (200) | ours 2 ZEALOT (200); -4 out-ranged`: the raw simulator level is 7, and C5 subtracts 4.
+  - Per the spec (§4.5.2-4.5.3), a Marine (range 5) out-ranges a Zealot (melee) by more than `OUTRANGED_MARGIN` (2). So C5 penalises every fight between melee units and ranged ones. C1 also makes holding Zealots step out of Marine reach, and moves the hold point back (9 fallback steps in each game).
+  - The Marines then took the natural: 38 and 43 probes lost, and the Nexus builders killed.
+  - After the Zealots died, the remaining defenders were Sentries. A Sentry has no weapon in this game data (see "M7 findings"), so C2 left it out (`hold, nothing can hit it`: 10 and 8 times) and C1 stepped it away from every enemy. 7 Sentries died at hold, 6 of them 12-16 from the point.
+- **Games 3-7** (opponent memory pre-raises PROXY, so the plan builds more units early) were won at 12:36-14:21, with 0-1 out-range penalties and 0-1 fallback steps each.
+- **Game 8 tied at 60:00:** the one-base stalemate from the B7/B8 run's games 8 and 9.
+  - The proxy Barracks was cleared at 4:01, but no Nexus was ever started, although the plan read `expand=yes` from 2:47. Supply peaked at 133, under the 150-supply launch gate, and the main mined out from about 15:00.
+  - 37 units died at hold, none far: Adepts 4-8 from the ramp hold point, one at a time, from 9:00 to 26:42, with no home-defense threat logged.
+  - The B7/B8 run's game 8 (`703b084`, before Phase 2) lost 24 Adepts the same way and tied the same way. B9's runs won it at 11:50-13:02 on one base, after reaching 146-150 supply with no units lost.
+  - So game 8 predates Phase 2. It is not investigated further here.
+- Games 9 and 10 were won at 13:33 and 11:45, with the proxy cleared at 4:12 and 4:10 (1 out-range penalty and 1-2 fallback steps each).
+- The one earlier proxy-rax game on `7cf384f` (game 1, cut short when the code changed) was won only at 45:35. It shows the same `-4 out-ranged` holds with 2 Zealots against 4 Marines.
+- Elsewhere, Zealot-only home defenses were penalised 6 times in the `7cf384f` cannon-rush batch (against a Cannon or Stalkers) and 3 times in the Protoss Air batches (against Stalkers). The 12-pool, worker-rush and VeryHard batches had none.
+
+No crashes and no caught errors in any of these games; every `ROW` has `log=ok` and `raa=0`. `check_game_log.py` after the batches: `RESULT PASS`, 200 records (the cap), 0 malformed, `./data` 494 KB.
+
+**Open for the user:**
+- **The out-ranged rules and melee units (the proxy-rax regression above).** §4.5.2-4.5.3 call any enemy whose range beats ours by `OUTRANGED_MARGIN` an out-ranger, and say nothing about melee units. Against Marines, Zerglings excepted, every ranged unit out-ranges a Zealot by that much. So C1 makes holding Zealots step back from Marines, and C5 takes 4 levels off a Zealot defense against them. The spec needs a rule here, so this is put to the user.
+- **The weaponless-unit gap.** 12 army types have no weapon in this game data, among them the Void Ray, Carrier, Battlecruiser and our own Sentry.
+  - The simulator and C1/C5 don't see the enemy's: the Protoss Air and capital-air goals can't be measured fairly until they do.
+  - Our Sentries: C2 leaves them out of home fights, and C1 steps them away from every enemy.
+- The 38-minute stalled attack in the `7cf384f` 12-pool game 2 didn't happen again in two replays on `79fdd0e` (wins at 10:46 and 11:06). The ARMY status line now shows the attack squad's centre and its intents.
+
+### D18-D21 (user decisions, 2026-10-08): melee rule, weaponless units, the proxy stalemate, re-verified
+
+**Code under test:**
+- `4c39bbf`: C6 (D18) and C7 (D19).
+- `641cf24`: C8 (D20), the leash gap. It only changes a leashed hold point, which the Air batches don't use.
+- The Air batches ran on `4c39bbf`, from a `git worktree` pinned there. The other batches and the staged tests ran on `641cf24`, from another pinned worktree. Logs were kept outside the repo; replays are in `replays/m7-p2g-*`, not in git.
+
+**Summary**
+
+| Criterion | Result |
+|---|---|
+| D18: proxy rax ≥ 8/10 on two runs | **PASS: 10/10 and 10/10**, no tie. Games 1-2 won at 8:44-8:55; they were lost on `79fdd0e` |
+| Phase 2: Air ratio and launch-then-retreat-within-60-s count better than Phase 1 | **Better on both, inside the spread for the ratio.** Quick retreats per Protoss Air batch average 6.7 (Phase 1 code 12; Phase 2 before D18-D20 10.7). Ratio averages 1.03 (1.21; 1.09). Terran and Zerg Air: 0 quick retreats, as before |
+| Phase 2: HOLD `lost_far` in the Air batches below Phase 1's 8 | **FAIL: 24, 14 and 23** (Phase 2 before: 3, 14, 0). Most follow a home-defense flip from engage to hold (below) |
+| M1: Hard × 10 | **PASS**: 10/10 |
+| M2/M3: cheese × 10 (≥ 8/10, correct flag, no scout lost before 4:00 in ≥ 7) | **PASS**: proxy rax 10/10 twice, cannon rush 10/10, 12 pool 10/10, worker rush 10/10. Correct flag 50/50; scout criterion 9-10/10 in each |
+| M4: VeryHard × 10 per race (≥ 7) | **PASS**: Terran 9/10 (game 4, below), Zerg 9/10 (the usual Ley Lines game 3), Protoss 9/10 (game 5: 9 Stalkers and a Zealot hit our 6 units at 4:50, as in the B7/B8 run) |
+| M5: staged counterattack 7/7 | **PASS**: 7/7 |
+| D11 targets (end of M7, for progress) | Terran Air 10/10, Zerg Air 10/10. Protoss Air 6/10, 5/10, 6/10 (target ≥ 7) |
+
+**Offline tests** (`poetry run python scripts/<name>.py`):
+- `test_m7_rules`: 86/86. New: the melee cut-off (C6); `weapon_range` with ares's fallback on stand-ins of game-data-weaponless types (Void Ray 6, Carrier 11, Sentry 5, a Disruptor with none); `has_weapon`; C2 eligibility for weaponless own units; `value_level`; the `value cap` text.
+- `test_attack_decision` 23/23, `test_threat_flags` 20/20, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38.
+- `check_game_log.py` after the batches: `RESULT PASS`, 200 records (the cap), 0 malformed, `./data` 518 KB.
+
+**Staged tests** (`641cf24`, one game each):
+
+| Test | Result |
+|---|---|
+| `test_engagement.py` | PASS, with the D18/D19 rows (below) |
+| `test_outranged.py --case idle_hold` | PASS: no Stalker drawn toward the Tempests (closest 11.6, limit 8.5); home defense held |
+| `test_outranged.py --case hold_vs_tempest` | PASS: 1 of 6 Stalkers died; the defensive position moved 4.8 farther from the Tempests |
+| `test_outranged.py --case committed` | PASS: home defense engaged (level 6), killed both Tempests, lost 1 of 12 Stalkers |
+| `test_counterattack.py` (M5, all 7 cases) | **7/7 PASS** |
+
+`test_engagement.py` levels (most common of 20 calls). The second column is after the value cap and before the out-range penalty:
+
+| Scenario | Level | (capped, penalty) | Value cap | ares `can_win_fight` |
+|---|---|---|---|---|
+| 30 Stalkers + 4 Colossi vs 8 Tempests + 4 Zealots | 5 | (9, -4) | - | 10 |
+| 12 Zealots vs 8 Tempests | 0 | (4, -4) | - | 0 |
+| 12 Zealots vs 4 Void Rays | **0** | (4, -4) | 4 | 10 |
+| 12 Stalkers vs 4 Void Rays | **6** | (6, -0) | 6 | 10 |
+| 12 Stalkers vs 2 Carriers (no Interceptors) | **3** | (7, -4) | 7 | 10 |
+| 2 Zealots vs 4 Marines (defending) | **7** | (7, -0) | - | 6 |
+
+On `79fdd0e` the four bold rows read 10, 10, 10 and 3: the simulator saw no Void Ray or Carrier attack, and C5 took 4 levels off the Zealots against Marines.
+
+**D18: proxy rax** (`--opponent proxy_rax --map all --total 10 --seed 100 --game-seed 5000 --opponent-id m7p2h<a|b>-proxy_rax`):
+
+| Batch | Wins | Win times | Units lost | HOLD deaths | Probes lost |
+|---|---|---|---|---|---|
+| B9 run A (`2307de5`, before Phase 2) | 10/10 | mean 11:40 | 22 | 16 | 17 |
+| B9 run B (`2307de5`) | 10/10 | mean 11:20 | 9 | 2 | 23 |
+| Phase 2 (`79fdd0e`) | 7/10 (2 losses, 1 tie) | mean 13:00 (wins) | 69 | 51 | 139 |
+| **D18-D20 run A (`641cf24`)** | **10/10** | 8:44-13:13, mean 11:22 | 11 | 2 | 26 |
+| **D18-D20 run B (`641cf24`)** | **10/10** | 8:50-14:43, mean 11:46 | 19 | 7 | 38 |
+
+- Games 1 and 2 (no opponent memory) engage the first Marines with 2-3 Zealots at levels 8-9, with no out-range penalty, as B9's runs did. On `79fdd0e` the same fights read 3 (−4 out-ranged), the Zealots held and stepped back, and both games were lost.
+- B9 cleared the proxy Barracks at 3:51-5:00 in 9 games of each run. Game 4 (Torches) had no clear in either run, as in B9's runs.
+
+**D20: the one-base proxy stalemate** (`79fdd0e` game 8 tied at 60:00, as `703b084`'s games 8 and 9 had):
+- **Debug rerun** of game 8 (a throwaway worktree with extra log lines; not committed), with the same opponent memory.
+  - Every holding unit that died was shot by Marines 10.2-11.4 from the ramp hold point, with home defense's threat `None`. The leash is `ARMY_HOLD_LEASH` (8); holders stand up to `HOLD_RADIUS` (6) from the point, and a Marine reaches about 6 beyond that.
+  - Those Marines also re-confirmed ares's marine-rush PROXY and ONE_BASE_ALLIN flags (UNIT evidence, within `BRIDGE_HOME_RADIUS` of our bases), so the plans never expired.
+  - With the plans up, their unit production comes before the waiting Nexus: a Nexus order waited from 2:13 with minerals at 5-250 for the whole game.
+- **C8** (`641cf24`): at a leashed hold point, an enemy beyond the leash that has one of our holders in reach is a home threat. The squad simulates it like any other: engage as a group at the gate, else hold.
+- **Rerun of the stalled spawn with C8:** home defense engaged those Marines at level 10 from 2:48 on. No army unit was lost; the attack launched at 10:51 at 150 supply, and the game was won at 12:11. Before C8: 37 HOLD deaths and a 60:00 tie.
+- Both proxy runs on `641cf24`: 20/20, no tie.
+- **Still open (put to the user):** under the PROXY and ONE_BASE_ALLIN plans, the plan's units still come before the Nexus (§3 Defense > Economy). Every proxy-rax game stays on one base until 10:00 or later; the wins come from a one-base attack at 150 supply. §4.2 says only "skip the natural until 2 units are out".
+
+**D19: Air batches** (`4c39bbf`; Protoss with free openers, and twice with Phase 1's openers forced, as in the B7/B8 section):
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Phase 1 code, free / forced | 8 / 6 | 0.94 / 1.23 | 20 / 26 | 6 / 16 | 17 (8) / 10 (4) | 29 / 103 | 475 / 640 |
+| Phase 2 before D18-D20, free / A / B | 5 / 5 / 8 | 1.17 / 1.26 / 0.85 | 22 / 18 / 19 | 16 / 9 / 7 | 43 (3) / 37 (14) / 6 (0) | 66 / 73 / 22 | 721 / 562 / 570 |
+| **D19, free** | **6/10** | **0.90** | 12 | **5** | 81 (24) | 73 | 649 |
+| **D19, forced A** | **5/10** | **1.13** | 18 | **10** | 89 (14) | 104 | 671 |
+| **D19, forced B** | **6/10** | **1.06** | 14 | **5** | 71 (23) | 88 | 693 |
+| Terran Air (D19) | 10/10 | 0.35 | 10 | 0 | 1 (0) | 0 | 119 |
+| Zerg Air (D19) | 10/10 | 0.30 | 11 | 0 | 1 (0) | 0 | 128 |
+
+- **The cap works at launch time.** Before D19, every log line reporting the level against the remembered enemy army read 8-10. It now reads 5-10. Each Protoss Air batch logs 47-55 `launch held` lines (one per reason and wait), and quick retreats fell to 5, 10 and 5.
+- **Home defense flips.** Home defense has no hysteresis: it engages at ≥ 5 (≥ 4 under a Battery), and otherwise holds, at every evaluation. Against Void Ray and Tempest armies the capped level now sits near that gate, so a fight that starts at 5-7 flips to "hold" at 4 as soon as it turns slightly against us.
+  - The enemy is then at the defensive position. Holding units follow C1: they step out of the Tempests' reach without shooting, and the hold point steps back, while the Void Rays keep firing.
+  - Measured (`flips.py`, the HOLD deaths within 30 s of an engage → hold flip):
+
+| Batch | Engage → hold flips | of them with a value cap | HOLD deaths | … within 30 s of a flip |
+|---|---|---|---|---|
+| Phase 1 code, free / forced | 2 / 4 | 0 / 0 | 17 / 23 | 0 / 8 |
+| Phase 2 before D18-D20, free / A / B | 6 / 2 / 5 | 0 | 43 / 37 / 6 | 18 / 6 / 4 |
+| D19, free / A / B | 11 / 10 / 8 | 8 / 10 / 7 | 81 / 89 / 71 | 47 / 76 / 35 |
+
+  - Example, forced A game 9 at 12:10: `engage (level 5 >= 5) … value cap 6` became `hold (level 4 < 5) vs 7 VOIDRAY 3 TEMPEST 3 STALKER … value cap 5`, and 18 Stalkers and a Colossus died at hold within 10 s.
+- **Put to the user** (the spec has no rule for it): what home defense does once a fight it engaged turns.
+
+**Regressions** (`641cf24`):
+
+| Batch | Wins | Notes |
+|---|---|---|
+| M1: Hard × 10 | **10/10** | |
+| M4: VeryHard Terran | **9/10** | Game 4 (Torches; `7cf384f` won it) lost at 20:33 after four launches into sieged Siege Tanks, each retreating within 15-44 s. A side effect of D18 (below) |
+| M4: VeryHard Zerg | **9/10** | Game 3 (Ley Lines), lost on every commit since M5. The value cap fired once in the batch |
+| M4: VeryHard Protoss | **9/10** | Game 5 (Pylon): 9 Stalkers and a Zealot hit our 6 units at 4:50, as in the B7/B8 run |
+| M2/M3: worker rush | **10/10** | Correct flag 10/10, no scout lost before 4:00 |
+| M2/M3: 12 pool | **10/10** | All won in 9:43-14:02; correct flag 10/10 |
+| M2/M3: cannon rush | **10/10** | Correct flag 10/10. Games 1-2 took 17:13 and 18:47 on the other spawn, losing 89 units in the batch (49 on `79fdd0e`). The early clears rate 4 Stalkers against 3-4 Cannons at 9-10, as on `79fdd0e` |
+| M2/M3: proxy rax | **10/10, 10/10** | Above |
+
+No crashes and no caught errors; every `ROW` has `log=ok`, `err=0` and `raa=0`.
+
+**A side effect of D18 on C5.** C5 counts an enemy as out-ranging when it out-ranges every unit of ours able to hit it. A Zealot can hit a Siege Tank, and under D18 it is never out-ranged. So sieged tanks add nothing to the penalty while Zealots are in our army.
+- In the VeryHard Terran batch, 36 fight lines against sieged tanks had no penalty, 19 of them with Zealots on our side. None of the 20 penalised lines had Zealots.
+- That matches game 4: four launches whose remembered-army level read 8-10 against tank lines.
+- Put to the user.
+
+### D22-D25 (user decisions, 2026-10-09): home-defense hysteresis and melee units in the out-range share, verified
+
+**Code under test:** `f2bab76` (C9 and C10 on top of `641cf24`). Every batch ran from a `git worktree` pinned there; logs were kept outside the repo, and replays are in `replays/m7-p2i-*`, not in git. A container restart stopped proxy rax after 3 games, cannon rush and 12 pool after 1, and worker rush before its first; each was resumed with `--start` and the same opponent id.
+
+**Summary**
+
+| Criterion | Result |
+|---|---|
+| Phase 2: Air ratio and launch-then-retreat-within-60-s count better than Phase 1 | **PASS.** Protoss Air ratio averages **0.82** over three batches (Phase 1 + B7/B8 code 1.21; D18-D20 1.03). Quick retreats are **5** in each (12; 6.7). Terran and Zerg Air: 10/10 each, 0 quick retreats, ratio 0.47 and 0.25 |
+| Phase 2: HOLD `lost_far` in the Air batches below Phase 1's 8 | **Not met: 21, 6 and 14.** 40 of the 41 are in lost games (details below) |
+| D11 target: Protoss Air VeryHard ≥ 7/10 | **7/10, 9/10 and 7/10**: met in every batch for the first time (Phase 1 + B7/B8 code 8, 6, 4, 7; D18-D20 6, 5, 6) |
+| D23: Siege Tanks count again against Stalkers + Zealots | **PASS**: `test_engagement.py`, and VeryHard Terran 10/10 (game 4, lost on `641cf24`, won at 11:08) |
+| M1: Hard × 10 | **PASS**: 10/10 |
+| M2/M3: cheese × 10 (≥ 8/10, correct flag, no scout lost before 4:00 in ≥ 7) | **PASS**: proxy rax 10/10, cannon rush 9/10, 12 pool 10/10, worker rush 10/10. Correct flag 40/40; scout criterion 8-10/10 in each |
+| M4: VeryHard × 10 per race (≥ 7) | **PASS**: Terran 10/10, Zerg 9/10, Protoss 9/10 |
+| M5: staged counterattack 7/7 | **PASS**: 7/7 |
+
+**Offline tests:**
+- `test_m7_rules` 96/96. It adds `home_engages` (start at the gate; once engaged, fight on above `DEFEND_DISENGAGE_AT`) and `outranges_hitters` (a sieged tank against Stalkers + Zealots counts; against Zealots alone it doesn't; neither do Marines).
+- `test_attack_decision` 23/23, `test_threat_flags` 20/20, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38.
+- `check_game_log.py` after the batches: `RESULT PASS`, 200 records (the cap), 0 malformed, `./data` 515 KB.
+
+**Staged tests** (`f2bab76`, one game each):
+
+| Test | Result |
+|---|---|
+| `test_engagement.py` | PASS, with the D23 tank rows (below) |
+| `test_outranged.py --case idle_hold` | PASS: no Stalker drawn toward the Tempests (closest 11.6, limit 8.5); home defense held |
+| `test_outranged.py --case hold_vs_tempest` | PASS: 1 of 6 Stalkers died; the defensive position moved 4.8 farther from the Tempests |
+| `test_outranged.py --case committed` | PASS: home defense engaged at level 6 and stayed engaged (`engaged (level 6 > 2)`); both Tempests killed, 1 of 12 Stalkers lost |
+| `test_counterattack.py` (M5, all 7 cases) | **7/7 PASS** |
+
+`test_engagement.py`, the D23 rows (most common of 20 calls; the rest as in the D18-D21 section):
+
+| Scenario | Level | (capped, penalty) | ares `can_win_fight` |
+|---|---|---|---|
+| 12 Stalkers + 6 Zealots vs 4 sieged Siege Tanks | **5** | (9, -4) | 10 |
+| 12 Zealots vs 4 sieged Siege Tanks | 8 | (8, -0) | 10 |
+| 2 Zealots vs 4 Marines (defending) | 7 | (7, -0) | 6 |
+
+**Protoss Air** (`--difficulty VeryHard --race Protoss --build Air --map all --game-seed 7000`; free openers, and twice with Phase 1's openers forced, as before):
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Phase 1 + B7/B8 code (4 batches, mean) | 6.3 | 1.21 | 24 | 12 | 20 (9) | 94 | 617 |
+| D18-D20 (`4c39bbf`), free / A / B | 6 / 5 / 6 | 0.90 / 1.13 / 1.06 | 12 / 18 / 14 | 5 / 10 / 5 | 81 (24) / 89 (14) / 71 (23) | 73 / 104 / 88 | 649 / 671 / 693 |
+| **D22-D23, free** | **7/10** | **0.93** | 13 | **5** | 44 (21) | 48 | 663 |
+| **D22-D23, forced A** | **9/10** | **0.64** | 15 | **5** | 13 (6) | 22 | 474 |
+| **D22-D23, forced B** | **7/10** | **0.89** | 14 | **5** | 42 (14) | 70 | 626 |
+
+- **The flips are gone.** Engage → hold flips per batch went from 11, 10 and 8 to 1, 0 and 0. Each batch logged 54-69 `engaged (level N > 2)` lines (fighting on below the gate) and 1-7 disengages (`home fight lost (level N)`). The value cap still holds launches: 49-52 `launch held` lines per batch.
+- **Where the far HOLD deaths are now.** After a disengage, the defensive position falls back `HOLD_FALLBACK_STEPS` at once. Units still walking back to it die more than 12 from the new point.
+  - Free batch: all 21 in its three losses (games 6, 8, 10), 11 of them within 40 s of a disengage.
+  - Run A: all 6 in its one loss, after its one disengage.
+  - Run B: 13 of its 14 in its three losses, 8 within 40 s of a disengage.
+  - In the 23 won games of the three batches: 1 far HOLD death.
+- **Not shown:** whether 7-9/10 holds across more seeds. Run-to-run spread on the same code is about ±2 wins (Phase 1: 8 then 6).
+
+**VeryHard Terran** (`f2bab76`): **10/10**, all won in 10:06-12:32. Game 4 (Torches), lost on `641cf24` to launches into tank lines, was won at 11:08.
+
+**Regressions** (`f2bab76`):
+
+| Batch | Wins | Notes |
+|---|---|---|
+| M1: Hard × 10 | **10/10** | 7 disengages in the batch, every game won |
+| M4: VeryHard Terran | **10/10** | Above |
+| M4: VeryHard Zerg | **9/10** | Game 3 (Ley Lines), lost on every commit since M5 |
+| M4: VeryHard Protoss | **9/10** | Game 5 (Pylon), lost on `641cf24` and in the B7/B8 run, was won. Game 8 (Magannatha; won on `641cf24`) was lost at 8:42. At 4:54, 6 units engaged a lone Stalker at level 10; 8 Stalkers and a Zealot joined, and C9 kept the squad fighting at levels 4 and 3 until it was down to 2 units. Before C9 it would have held at 4:55. This is a cost of D22 |
+| M2/M3: proxy rax | **10/10** | All won in 8:49-12:51; correct flag 10/10; no scout lost before 4:00 in 8/10 |
+| M2/M3: cannon rush | **9/10** | Game 5 (Pylon, main variant): the rush Cannons killed the main Nexus before 4:00, as in 4 of 7 earlier runs. 62 units lost in the batch (89 on `641cf24`); correct flag 10/10 |
+| M2/M3: 12 pool | **10/10** | All won in 9:55-13:54; correct flag 10/10 |
+| M2/M3: worker rush | **10/10** | Correct flag 10/10; no scout lost before 4:00 |
+| Terran Air | **10/10** | Value lost/killed 0.47 (earlier runs 0.35-0.45); 0 quick retreats |
+| Zerg Air | **10/10** | Value lost/killed 0.25; games average 10:39 |
+
+No crashes and no caught errors; every `ROW` has `log=ok`, `err=0` and `raa=0`.
+
+### D26 (user decision to try, 2026-10-10): pull back as a retreat after a lost home fight — reverted
+
+**Change tried** (`f7aed30`): after a disengage (C9), DEFEND units farther than `RETREAT_DONE_RADIUS` from the fallen-back defensive position got RETREAT intent for `HOLD_FALLBACK_KEEP_S`. RETREAT paths home around danger and shoots only when faster. Before, they walked back as holders. The aim was the far HOLD deaths: 40 of 41 on `f2bab76` were in lost games, mostly units walking back to the moved position.
+
+**Batches** (same seeds and openers as the `f2bab76` batches, from a worktree pinned at `f7aed30`; `afterdis.py` counts army units lost within 40 s after a disengage):
+
+| Batch | Wins | Value lost / killed | Quick retreats | HOLD deaths (far) | RETREAT deaths | Units lost | Disengages | Lost within 40 s of one |
+|---|---|---|---|---|---|---|---|---|
+| `f2bab76`, free / A / B | 7 / 9 / 7 | 0.93 / 0.64 / 0.89 | 5 / 5 / 5 | 44 (21) / 13 (6) / 42 (14) | 48 / 22 / 70 | 663 / 474 / 626 | 7 / 1 / 5 | 99 / 9 / 58 |
+| **`f7aed30`, free / A / B** | **3 / 7 / 6** | **1.48 / 0.92 / 1.10** | 10 / 7 / 5 | 111 (49) / 28 (4) / 42 (10) | 152 / 80 / 111 | 859 / 711 / 620 | 10 / 6 / 6 | 145 / 84 / 116 |
+
+- **Worse on every measure but the relabelled one.**
+  - Wins fell from 23 to 16 of 30. In the free batch every game had the same opener on both codes; `f7aed30` lost games 1, 5, 7 and 9, which `f2bab76` won, and won none that it lost.
+  - Units lost per disengage didn't fall: 14.5, 14.0 and 19.3, against 14.1, 9.0 and 11.6.
+  - Far HOLD deaths fell in two batches (4 and 10), partly because units dying on the way back now count as RETREAT deaths. In the free batch they rose to 49, 30 of them in game 5.
+- M1 Hard × 10 on `f7aed30`: 10/10 (4 disengages). VeryHard Protoss, VeryHard Zerg and cannon rush were stopped part-way once the Air batches showed the regression.
+- **Reverted** to `f2bab76`'s behaviour (the revert commit leaves `bot/` and `scripts/` identical to `f2bab76`; `test_m7_rules` 96/96). D26 is recorded in M7_PLAN as tried and reverted. The `f2bab76` evidence above stands for Phase 2.
+
+### Phase 3 (K1-K3, user decision D28), run 2026-10-11
+
+**Code under test:** `26d98a4`: K1 upgrade chains and timed Twilight / Templar Archives, K2 Blink (with the `ace729d` counting fix), K3 High Templar / Storm / Archons with the Templar floor (`71c50ef`), and D28 (E1's float rule: Zealots only while gas-starved). Every batch ran from a `git worktree` pinned there, 4 games at a time. Logs are kept outside the repo; replays are in `replays/m7-p3c-*`, not in git. A first full run on `ace729d` was stopped part-way once it showed no Templar in 6 of 10 VeryHard Zerg games (details under "K3 build findings" and D28).
+
+**Summary**
+
+| Criterion | Result |
+|---|---|
+| Blink researched by its schedule time in every P/T game; Charge then Blink vs Z | **PASS** in every game that reached the Twilight. Vs T: Blink started 6:10-6:22 (Twilight 5:30). Vs P: 5:00-6:35. Vs Z: Charge 5:33-6:38, then Blink 7:13-8:25. The games that didn't research it ended first: VeryHard Terran game 3 at 7:49 and VeryHard Protoss game 8 at 11:26 (Twilight placed, no research before the loss) |
+| Storms cast in VeryHard Zerg games | **PASS**: 3-26 Storms in each of the 9 won games, 89 in all. Storm started 6:55-9:11. Zerg Air: 3-7 in every game |
+| Archons vs bio-heavy built-in Terran and Zealot-heavy built-in Protoss; none from the air switch | **PASS**: VeryHard Terran 2-10 Archons in all 9 games that reached 6:00; VeryHard Protoss 1-4 in 5 of 10. The air switch isn't built yet (E3). A few Archons came in Air games from the same bio and Zealot switches: Terran Air 1 game, Protoss Air 1-2 games per batch |
+| VeryHard Terran and Protoss × 10 stay at 10/10 | **Not met: 9/10 and 9/10.** Protoss game 8 (Magannatha) was also lost on Phase 2's code. Terran game 3 (Ley Lines, one-base all-in at 3:27) was lost on both Phase 3 commits and won on Phase 2's. In controlled reruns of that game (same opener, fresh opponent id, same load) Phase 2's code won 3/3 and `26d98a4` won 2/3 (details below) |
+| Air batches (same seeds) better than Phase 2 | **PASS for Protoss and Terran Air; Zerg Air ratio worse.** Protoss Air 10/10, 9/10, 10/10 (Phase 2: 7, 9, 7) at value lost/killed 0.42, 0.49, 0.43 (0.93, 0.64, 0.89). Terran Air 10/10 at 0.17 (0.47). Zerg Air 10/10 at 0.39 (0.25) |
+| VeryHard Zerg × 10 at least 9/10 | **PASS**: 9/10. Game 3 (Ley Lines) has been lost on every commit since M5 |
+| M1 Hard × 10 | **PASS**: 10/10 |
+| M2/M3 cheese × 10 (≥ 8/10, correct flag, no scout lost before 4:00 in ≥ 7) | **PASS**: proxy rax 10/10, cannon rush 8/10, 12 pool 10/10, worker rush 10/10. Correct flag 40/40; scout criterion 9-10/10 in each |
+| M5 staged counterattack 7/7 | **PASS** |
+
+**Offline tests:** `test_m7_rules` 170/170 (adds the K1-K3 and D28 rules: `next_upgrades`, Blink rules and counting, enemy mix and the Archon switches, `unit_proportions`, `templar_floor`, `morph_pairs`, `gas_starved`), `test_attack_decision` 23/23, `test_threat_flags` 20/20, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38. `check_game_log.py` on the batch worktree: `RESULT PASS`, 200 records (the cap), 0 malformed, `./data` 511 KB.
+
+**Staged tests** (`26d98a4`, one game each): `test_outranged.py` idle_hold, hold_vs_tempest and committed PASS (as in Phase 2); `test_engagement.py` PASS; `test_counterattack.py` 7/7; `test_blink.py` PASS (Tempests: 14 blink-ins; Stalkers: 17 blink-backs); `test_templar.py` 5/5 PASS (storm, own_units, morph_spent, morph_excess, morph_all). Earlier runs of the last two on the same rules: without Blink, the Tempest case lost 2 Stalkers (0 with Blink) and the Stalker case 4 (0 with); the storm case cast 2-4 Storms with no unit of ours inside, which caught 2-12 enemy units in all.
+
+**VeryHard** (`--map all --total 10 --game-seed 3000`):
+
+| Race | Wins | Losses | Storms / Archons |
+|---|---|---|---|
+| Zerg | 9/10 | game 3 (Ley Lines, 9:23) | Storms 3-26 per won game; Archons 1-11 |
+| Terran | 9/10 | game 3 (Ley Lines, 7:49) | Archons 2-10 |
+| Protoss | 9/10 | game 8 (Magannatha, 11:26) | Archons in 5 games |
+
+**Terran game 3.** The Terran's marine-marauder push at 4:08 meets 3 Stalkers, an Adept and a Zealot. Up to 4:15 both codes play the same game step for step (same build, same losses). On Phase 2's code the Batteries and Stalkers then killed the rest of the push; on Phase 3's the Stalkers died, the natural fell and the game was lost on one base. Reruns of the game, 4 at a time:
+
+| Code | Runs | Won |
+|---|---|---|
+| `f2bab76` (Phase 2) | batch + 3 reruns | 4/4 |
+| `ace729d`, `26d98a4` (Phase 3) | 2 batches + 3 reruns | 2/5 |
+
+The rerun loss (11:51) shows what the Phase 3 code does on one base. The natural fell to the all-in at 5:30. The timed Twilight Council went down at 6:43 and Blink started at 8:17, while 65 probes on one base kept minerals near 0 and 500-750 gas banked. Army supply was 6 at 6:00 and 34 at 9:00; a 3,500-value push at 9:24 killed it. Phase 2 had no timed Twilight. The two cannon-rush losses look the same: on one base under the cannon plan, the Forge (5:00), Twilight (5:30) and Blink or +1 research went ahead, and army supply fell from 14 to 2 and from 18 to 12 between 5:00 and 8:00 (Phase 2 in the same games: 12 to 18, 12 to 32). In 2 reruns each of that cannon game, both codes won 2/2. The timed tech steps wait only for `DefensePlan.hold_tech`, which the cannon plan never sets (the Robo is needed vs Cannons) and the one-base all-in plan lifts at `DEFENSE_TECH_AFTER_SUPPLY`. **Open for a user decision (not changed):** whether the K1 timed steps (Twilight, Templar Archives) and their research should also wait while we hold fewer than 2 bases.
+
+**Cannon rush:** game 1 (Magannatha, natural variant) lost at 10:00. Game 8 (same map and variant) is recorded as a tie at 59:59, but everything was gone by 16:30 except one 2-supply unit. Both had the timed tech above. Phase 2 won both (12:54, 12:49).
+
+**Air** (Protoss: `--build Air --map all --game-seed 7000`, free openers, and twice with Phase 1's openers forced; Terran 7100, Zerg 7200):
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Phase 2, free / A / B | 7 / 9 / 7 | 0.93 / 0.64 / 0.89 | 13 / 15 / 14 | 5 / 5 / 5 | 44 (21) / 13 (6) / 42 (14) | 48 / 22 / 70 | 663 / 474 / 626 |
+| **Phase 3, free** | **10/10** | **0.42** | 14 | 3 | 2 (0) | 19 | 299 |
+| **Phase 3, forced A** | **9/10** | **0.49** | 17 | 6 | 33 (13) | 48 | 433 |
+| **Phase 3, forced B** | **10/10** | **0.43** | 13 | 1 | 10 (7) | 18 | 361 |
+| Terran Air (Phase 2 / 3) | 10 / 10 | 0.47 / **0.17** | 10 / 10 | 0 / 0 | 0 / 0 | 0 / 0 | 180 / 92 |
+| Zerg Air (Phase 2 / 3) | 10 / 10 | 0.25 / **0.39** | 11 / 13 | 0 / 1 | 0 / 2 | 0 / 2 | 101 / 241 |
+
+**Blinks** (confirmed, by kind back/in/finish): VeryHard Zerg 0-24 / 0-12 / 21-155 per game; Protoss Air up to 235 back and 427 finish in a 20:52 game, and 61 in in another. Most are finish blinks in won fights: before the `ace729d` fix the count was 235-330 per game, most of it orders that never went off.
+
+**D28 (gas-starved float):** every batch logs `PRODUCTION … gas-starved on/off`. Vs Z the float now leaves gas for Templar, Storm and Blink (Storm 6:55-9:11; before D28: 6:59-13:01, and in a smoke game not before 12:36). Minerals still bank (4,000-7,000 by 10:00 in long Zerg games): production capacity, not gas, is the limit there (E1's 4th base and sink are Phase 4).
+
+No crashes and no caught errors; every `ROW` has `log=ok`, `err=0` and `raa=0`.
+
+### Phase 3 re-run with D29 (user decision 2026-10-11), run 2026-10-11
+
+**Code under test:** `f2084c6` (`26d98a4` plus D29: the timed Twilight Council / Templar Archives, the tech-up toward Templar and research at those buildings wait for 2 finished Nexuses). Same batches, seeds and 4-at-a-time load as the `26d98a4` run, from a worktree pinned at `f2084c6`; replays in `replays/m7-p3d-*`. A container restart at about 07:10 stopped four batches part-way. They were resumed with `--start` and the same seeds and opponent ids: paired A from game 4, Zerg Air from 9, 12 pool from 4, VeryHard Protoss from game 1 (no game had finished).
+
+**Summary**
+
+| Criterion | Result |
+|---|---|
+| Blink by its schedule time in every P/T game; Charge then Blink vs Z | **PASS**: vs T Blink 6:11-6:50 in all 10; vs P 6:07-6:45 in all 10; vs Z Charge then Blink in all 9 won VeryHard games. On one base the Twilight now waits: VeryHard Zerg game 5 placed it at 7:54 (Blink 10:40) |
+| Storms cast in VeryHard Zerg games | **PASS**: 2-21 Storms in each of the 9 won games. Zerg Air: Storms in 9 of 10 |
+| Archons vs bio-heavy Terran and Zealot-heavy Protoss; none from the air switch | **PASS**: VeryHard Terran 2-6 in all 10; VeryHard Protoss 1-6 in 7 of 10 (the air switch isn't built, E3) |
+| VeryHard Terran and Protoss × 10 at 10/10 | **PASS: 10/10 and 10/10.** Terran game 3 (Ley Lines; lost on both earlier Phase 3 runs) won at 11:31; Protoss game 8 (Magannatha; lost on Phase 2's code and both earlier runs) won at 11:37 |
+| Air batches (same seeds) better than Phase 2 | **Protoss and Terran Air: PASS. Zerg Air: NOT MET** (9/10 at 0.58, Phase 2 10/10 at 0.25; below) |
+| VeryHard Zerg × 10 at least 9/10 | **PASS**: 9/10 (game 3, Ley Lines, lost on every commit since M5) |
+| M1 Hard × 10 | **PASS**: 10/10 |
+| M2/M3 cheese × 10 | **PASS**: proxy rax 10/10, cannon rush 8/10, 12 pool 10/10, worker rush 10/10. Correct flag 40/40; no scout lost before 4:00 in 9-10 of each |
+| M5 staged counterattack 7/7 | **PASS** |
+
+**Air:**
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Phase 2, Protoss free / A / B | 7 / 9 / 7 | 0.93 / 0.64 / 0.89 | 13 / 15 / 14 | 5 / 5 / 5 | 44 (21) / 13 (6) / 42 (14) | 48 / 22 / 70 | 663 / 474 / 626 |
+| **D29, Protoss free / A / B** | **9 / 9 / 8** | **0.46 / 0.51 / 0.58** | 11 / 14 / 14 | 2 / 4 / 6 | 32 (11) / 18 (5) / 23 (6) | 9 / 49 / 42 | 265 / 413 / 399 |
+| Terran Air, Phase 2 / D29 | 10 / 10 | 0.47 / **0.25** | 10 / 10 | 0 / 0 | 0 / 2 (0) | 0 / 0 | 180 / 117 |
+| Zerg Air, Phase 2 / D29 | 10 / **9** | 0.25 / **0.58** | 11 / 15 | 0 / 2 | 0 / 16 (3) | 0 / 38 | 101 / 309 |
+
+**Zerg Air, why it is worse.** The loss is game 2 (Ultralove, 26:35) to Brood Lords, Corruptors, Hydralisks and Roaches: two retreats (15:22, 17:47), then the army was caught away from home at 20:37. Zealots, which can't hit air, averaged 17.9 per launch in this batch against 9.6 in Phase 2's. D28's float makes Zealots while gas-starved (logged "gas-starved on" 32 times in that game). The `26d98a4` run, which already had D28, was at 10/10 with ratio 0.39. The air switch that shifts the mix toward Stalkers against air (E3) is Phase 4.
+
+**Offline tests:** `test_m7_rules` 176/176 (adds D29's `tech_waits`), `test_attack_decision` 23/23, `test_threat_flags` 20/20, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38. `check_game_log.py`: `RESULT PASS`, 200 records, 0 malformed, `./data` 516 KB.
+
+**Staged tests** (`f2084c6`): `test_outranged.py` 3/3 PASS, `test_engagement.py` PASS, `test_counterattack.py` 7/7, `test_templar.py` 5/5 PASS (storm: 3 Storms, none on our units, 5 enemy units inside them). `test_blink.py` PASS: Tempests 15 blink-ins, though this run traded the same as without Blink (1 lost, 2 of 3 Tempests killed, both games); Stalkers 19 blink-backs, 0 lost (4 without).
+
+**Cannon rush:** games 2 (Ultralove, natural variant, 11:35) and 9 (Ultralove, main variant, 8:04) lost, both new (`26d98a4` lost games 1 and 8). Correct flag in both.
+
+No crashes and no caught errors; every `ROW` has `log=ok`, `err=0` and `raa=0`.
+
+### D30 (no Zealot-only float against an air army), Air batches re-run 2026-10-11
+
+**Code under test:** `7c6d8dc` (`f2084c6` plus D30). Same seeds and openers, 4 at a time; replays in `replays/m7-d30-*`.
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Zerg Air: Phase 2 / `f2084c6` / **D30** | 10 / 9 / **10** | 0.25 / 0.58 / **0.28** | 11 / 15 / 12 | 0 / 2 / 0 | 0 / 16 (3) / 0 | 0 / 38 / 2 | 101 / 309 / 180 |
+| Protoss Air free: `f2084c6` / **D30** | 9 / **10** | 0.46 / **0.42** | 11 / 19 | 2 / 7 | 32 (11) / 5 (0) | 9 / 31 | 265 / 329 |
+| Protoss Air forced A | 9 / **10** | 0.51 / **0.35** | 14 / 14 | 4 / 4 | 18 (5) / 2 (0) | 49 / 12 | 413 / 267 |
+| Protoss Air forced B | 8 / **7** | 0.58 / **0.62** | 14 / 17 | 6 / 8 | 23 (6) / 28 (8) | 42 / 85 | 399 / 421 |
+| Terran Air | 10 / **10** | 0.25 / **0.21** | 10 / 10 | 0 / 0 | 2 (0) / 2 (0) | 0 / 0 | 117 / 103 |
+| VeryHard Zerg | 9 / **9** | | | | | | |
+
+- The air switch turned on in Zerg Air games (15 times in the batch). Zealots per launch went from 17.9 to 14.7 (Phase 2: 9.6). The float still makes Zealots while the enemy army isn't air-heavy (early, and between air waves).
+- Forced B went from 8/10 to 7/10; the run-to-run spread on the same code is about ±2 wins.
+- VeryHard Zerg's loss is game 3 (Ley Lines), as on every commit since M5.
+
+### E0: equal-value groups against capital ships (staged, run 2026-10-11)
+
+`scripts/test_air_counters.py` on `233d4ac`, PylonAIE_v4, 5 runs per pair (game seeds 1001-1005), both sides with every upgrade. The enemy (scripted) comes at our defensive position: 6 Tempests that kite (step back while reloading), 4 Battlecruisers, 4 Brood Lords + 4 Corruptors, or 8 Void Rays. Our candidate group gets the same game-data value (whole units), and after every army step FIGHT intent toward the enemy group's centre, so it chases and fights with Citadel's micro (kiting, Blink, E3's Tempest / Void Ray targeting and Prismatic Alignment). The mass-Void-Ray lane was killed for memory after 23 games (one test process grew to 1.8 GB); its last 7 games ran in fresh processes.
+
+Wins of 5, then mean value traded (killed / lost; 99 = nothing lost):
+
+| Candidate | vs Tempests (kiting) | vs Battlecruisers | vs Brood Lords + Corruptors | vs mass Void Rays |
+|---|---|---|---|---|
+| Void Rays | **0/5**, 0.25 | 4/5, 1.67 | **5/5, 99** (11 s) | 5/5, 2.26 |
+| Tempests | 3/5, 2.10 | **5/5, 99** | **5/5, 99** (38 s) | **0/5**, 0.51 |
+| Stalkers (no Blink) | 0/5, 0.59 | 5/5, 1.61 | 0/5, 0.40 | 5/5, 2.21 |
+| Blink Stalkers | 2/5, 1.28 | 5/5, 5.60 | 3/5, 2.05 | **5/5, about 83** (lost 0-1 Stalker) |
+| Stalkers + Void Rays | 3/5, 1.70 | 5/5, 6.93 | 5/5, 32.6 | 5/5, 2.40 |
+| Stalkers + Tempests | **5/5, 2.25** | 5/5, 4.00 | 5/5, 3.30 | 5/5, 1.86 |
+
+What it sets (E3, `constants.CAPITAL_AIR_ADD_PCT`):
+- **Vs Protoss (Tempests): Tempests, not §4.5.1's expected Void Rays.** Void Rays lost every game to kiting Tempests; Stalkers + Tempests won every game. With the mix's Stalkers that is the Stalkers + Tempests group.
+- **Vs Terran (Battlecruisers): Tempests**: no loss in any game.
+- **Vs Zerg (Brood Lords + Corruptors): Void Rays**: no loss, and done in 11 s against the Tempests' 38 s. Corruptors' bonus is against massive units, which Tempests are and Void Rays aren't.
+- **Mass Void Rays (D13, a user decision):** Blink Stalkers beat them with at most one loss; Tempests lost every game. So the numbers say Void Ray masses should not trigger the Tempest / Void Ray response: the air switch's Stalker share is the better answer. Left as it is (Void Rays aren't capital ships, so they only raise the Stalker share); for the user to confirm.
+- Not tested: Carriers (not an E0 case); vs P with a Carrier seen the mix adds more Tempests, per §4.5.1.
+
+### Phase 4 (E0-E3), run 2026-10-11/12
+
+**Code under test:** `df54f97` (E1 4th base, E2 AIR_HARASS / CAPITAL_AIR detection and the mineral-line plan, E3 mix selection and Tempest / Void Ray micro, E0's shares), on top of Phase 3 + D30. Every batch from a worktree pinned there, 4 at a time; replays in `replays/m7-p4-*`.
+
+**Summary (M7's acceptance, M7_PLAN Phase 4)**
+
+| Criterion | Result |
+|---|---|
+| VeryHard Air (same seeds): Protoss ≥ 7, Terran ≥ 9 with no loss to Battlecruisers, Zerg ≥ 9 | **PASS**: Protoss 10/10 (forced openers 9/10 and 10/10), Terran 10/10 (no loss), Zerg 9/10 |
+| CheatInsane Air: Terran ≥ 7/10, Zerg ≥ 9/10 | **Terran PASS: 9/10** (baseline 2/10). **Zerg NOT MET: 2/10** (baseline 8/10); bisected below: it started before Phase 4 |
+| Unspent minerals at 10:00 well below the postmortem's 2,670 | **NOT MET in three batches** (means): Zerg Air 3,452, CheatInsane Zerg 3,760, VeryHard Terran 2,832. Below in the rest (754-2,090). The 4th base was wanted at 7:30-10:00 in most long games, but the bank didn't fall (Phase 2: VeryHard Terran 1,644, Zerg Air 2,702) |
+| M1 Hard × 10 | **PASS**: 10/10 |
+| M2/M3 cheese × 10 (≥ 8/10, correct flag, scout criterion) | proxy rax 10/10, 12 pool 10/10, worker rush 10/10: **PASS**. **Cannon rush 7/10, then 9/10 in a second batch** (16/20; below). Correct flag 50/50; no scout lost before 4:00 in 9-10 of each |
+| M4 VeryHard × 10 (≥ 7 each) | **PASS**: Zerg 9/10, Terran 9/10, Protoss 10/10 |
+| M5 staged counterattack 7/7 | **PASS** |
+
+**Offline tests:** `test_m7_rules` 215/215, `test_attack_decision` 23/23, `test_threat_flags` 31/31 (adds CAPITAL_AIR WARNING / ACTIVE expiry and AIR_HARASS satisfied), `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38. `check_game_log.py`: `RESULT PASS` (record version 7), 200 records, 0 malformed, `./data` 635 KB.
+
+**Staged tests** (`df54f97`): outranged 3/3, engagement PASS, counterattack 7/7, Blink PASS, Templar 5/5. E0 above.
+
+**Air:**
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Protoss Air free / A / B | 10 / 9 / 10 | 0.35 / 0.43 / 0.40 | 13 / 11 / 16 | 2 / 1 / 2 | 1 (0) / 11 (6) / 2 (0) | 15 / 23 / 20 | 256 / 345 / 283 |
+| Terran Air | 10/10 | 0.16 | 11 | 1 | 0 | 2 | 75 |
+| Zerg Air | 9/10 | 0.57 | 20 | 7 | 14 (1) | 56 | 418 |
+| CheatInsane Terran Air | 9/10 | 0.37 | 17 | 6 | 29 (12) | 34 | 447 |
+| CheatInsane Zerg Air | **2/10** | 0.66 | 18 | 13 | 80 (18) | 233 | 878 |
+
+Phase 4 features in the batches: AIR_HARASS raised from a Starport Tech Lab, Stargate or Spire, with a Pylon, Cannon and Battery placed at each mineral line and "satisfied" logged; CAPITAL_AIR WARNING from a Fusion Core / Greater Spire / Fleet Beacon and ACTIVE from Battlecruisers (700) and Brood Lords (550-1,100); the mix went normal → air switch → capital air and back; a 4th base in most long games. Smoke games (one each, before the batches): VeryHard Zerg, Protoss and Terran Air and CheatInsane Terran Air all won, the last at 16:46 against Battlecruisers.
+
+**CheatInsane Zerg Air, bisected** (seed 7400, all 10 maps, same load):
+
+| Code | Wins | Value lost / killed | At 10:00 (mean): supply / army supply / bases / unspent minerals |
+|---|---|---|---|
+| Baseline M6 (`8036973`) | 8/10 | 0.50 | 168 / 101 / 2.9 / 1,858 |
+| Phase 2 (`f2bab76`) | 4/10 | 0.81 | 169 / 101 / 3.0 / 2,122 |
+| Phase 3 (`f2084c6`) | 0/10 | 1.22 | 108 / 44 / 2.1 / 2,047 |
+| D30 (`7c6d8dc`) | 1/10 | 0.71 | (not computed) |
+| Phase 4 (`df54f97`) | 2/10 | 0.66 | 134 / 63 / 2.6 / 3,760 |
+
+- **Phase 2 (8 → 4) changed the fights, not the economy:** at 10:00 its army was as big as the baseline's (101 supply). The baseline won with one launch at 13-15 minutes; Phase 2's armies fought more at home (21 launches, 13 retreated within 60 s, 66 HOLD deaths).
+- **Phase 3 (4 → 0) changed production:** at 10:00 the army was 44 supply on 2.1 bases. Our units in fights from 9:00 to 11:00 averaged 2.4 Stalkers per fight (Phase 2: 21.3). The Zerg mix gained Templar (casters and the Archon share) and Zealots (the D28 float while gas-starved); against Mutalisks and Corruptors those don't stop the air, and gas went to Templar and Storm before Stalkers.
+- D30 and Phase 4 got some of it back (14.7 Stalkers per fight, 63 army supply), not enough: 1/10 and 2/10. Phase 4's own changes are not the cause (D30 1/10, Phase 4 2/10).
+
+**Cannon rush:** 7/10. Games 5 (Pylon) and 9 (Ultralove) are the main variant: the rush Cannons killed the main Nexus by about 3:30 while single Zealots were sent at a Cannon one at a time (game 5 was lost in 4 of 7 runs before M7; game 9 was also lost on `f2084c6`). Game 8 (Magannatha, natural variant) was lost at 14:31. No Phase 3 or 4 code acts before 5:00 in these games (the timed tech starts at 5:00; the new flags need air tech, which this opponent doesn't build). The cannon batches since Phase 3 went 8, 8, 7. **Second batch** (same code, seeds and order, a fresh opponent id; a container restart after game 1, resumed with `--start 2`): **9/10**, losing only game 5 (Pylon, main variant) again; correct flag 10/10, no scout lost before 4:00 in 10/10. Together 16/20.
+
+### D32-D34 re-run (user decisions 2026-10-12), run 2026-10-12
+
+**Code under test:** `ce4c719` (`df54f97` plus D32: vs an air-heavy Zerg the Templar / Archon shares go to Stalkers, and the Templar Archives step and Storm research wait; D33: Void Ray masses stay out of capital air; D34: extra Gateways as a mineral sink, also after `PRODUCTION_CONTROLLER_START_S`). The full Phase 4 set, same seeds and openers, from a worktree pinned at `ce4c719`, 4 at a time; replays in `replays/m7-p4b-*`.
+
+**Summary (M7's acceptance, M7_PLAN Phase 4)**
+
+| Criterion | Phase 4 (`df54f97`) | D32-D34 (`ce4c719`) |
+|---|---|---|
+| VeryHard Air: Protoss ≥ 7, Terran ≥ 9 with no loss to Battlecruisers, Zerg ≥ 9 | 10 (forced 9, 10) / 10 / 9 | **PASS**: 10 (forced 10, 10) / 10 (no loss) / **10** |
+| CheatInsane Air: Terran ≥ 7/10 | 9/10 | **PASS: 8/10**. Both losses (games 6 and 9, 32:04 and 32:52) were against Battlecruisers (peak 2,100 and 4,200 value) after we had killed more than we lost (58k / 37k, 60k / 35k) |
+| CheatInsane Air: Zerg ≥ 9/10 | 2/10 | **NOT MET: 3/10** (below) |
+| Unspent minerals at 10:00 below the postmortem's 2,670 | three batches above (2,832-3,760) | **PASS**: every batch below (means 94-2,471; below) |
+| M1 Hard × 10 | 10/10 | **PASS**: 10/10 |
+| M2/M3 cheese × 10 (≥ 8/10, correct flag, scout criterion) | 10 / 7, then 9 / 10 / 10 | **PASS**: proxy rax 10/10, cannon rush 9/10 + 1 tie, 12 pool 10/10, worker rush 10/10. Correct flag 40/40; no scout lost before 4:00 in 10, 10, 10 and 9 of 10 |
+| M4 VeryHard × 10 (≥ 7 each) | 9 / 9 / 10 | **PASS**: Zerg 9/10, Terran 10/10, Protoss 10/10 |
+| M5 staged counterattack 7/7 | PASS | **PASS** |
+
+**Offline tests:** `test_m7_rules` 223/223 (adds D32's `air_zerg_shares` / `templar_tech_wanted` and D34's `extra_gateway`), `test_attack_decision` 23/23, `test_threat_flags` 31/31, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38. `check_game_log.py` (in the worktree): `RESULT PASS`, 200 records, 0 malformed, `./data` 662 KB.
+
+**Staged tests** (`ce4c719`): outranged 3/3 PASS, engagement PASS, counterattack 7/7, Blink PASS (Tempests: 14 blink-ins, 0 lost against 2 lost without Blink; Stalkers: 18 blink-backs, 0 lost against 5), Templar 5/5 PASS (storm: 2 Storms, none on our units, 5 enemy units inside them).
+
+**Air:**
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Protoss Air free / A / B, Phase 4 | 10 / 9 / 10 | 0.35 / 0.43 / 0.40 | 13 / 11 / 16 | 2 / 1 / 2 | 1 (0) / 11 (6) / 2 (0) | 15 / 23 / 20 | 256 / 345 / 283 |
+| **Protoss Air free / A / B, D32-D34** | **10 / 10 / 10** | **0.28 / 0.32 / 0.38** | 13 / 16 / 14 | 2 / 5 / 3 | 1 (0) / 0 / 0 | 10 / 17 / 23 | 169 / 251 / 279 |
+| Terran Air, Phase 4 / D32-D34 | 10 / 10 | 0.16 / 0.22 | 11 / 13 | 1 / 0 | 0 / 0 | 2 / 0 | 75 / 130 |
+| Zerg Air, Phase 4 / D32-D34 | 9 / **10** | 0.57 / **0.28** | 20 / 11 | 7 / 0 | 14 (1) / 0 | 56 / 6 | 418 / 153 |
+| CheatInsane Terran Air, Phase 4 / D32-D34 | 9 / 8 | 0.37 / 0.42 | 17 / 28 | 6 / 16 | 29 (12) / 27 (10) | 34 / 62 | 447 / 727 |
+| CheatInsane Zerg Air, Phase 4 / D32-D34 | 2 / **3** | 0.66 / 0.76 | 18 / 21 | 13 / 13 | 80 (18) / 97 (25) | 233 / 257 | 878 / 1,094 |
+
+**D32 in the games.** The air switch turned on vs Zerg in VeryHard Zerg (4 times), Zerg Air (12) and CheatInsane Zerg Air (25). While it is on, no Templar Archives step and no Storm: the Archives went down when it turned off (CheatInsane Zerg game 3: switch off 9:05, Archives 9:10; game 7: off 14:19, Archives 14:19). Zerg Air went from 9/10 at 0.57 to 10/10 at 0.28, back to Phase 2's 0.25.
+
+**D33 in the games.** No `INTEL capital air ACTIVE` line names a Void Ray, though enemy Void Rays were in fights in 8 of 10 Protoss Air games and 8 of 10 paired A games, up to 12 at once. The ACTIVE lines name Battlecruisers (29), Tempests (23), Brood Lords (16), Brood Lord cocoons (10) and Carriers (2).
+
+**D34 (unspent minerals at 10:00, mean / median / max; Phase 4 mean in brackets):**
+
+| Batch | Unspent | Extra-Gateway orders (first at) |
+|---|---|---|
+| VeryHard Zerg / Terran / Protoss | 1,719 [2,090] / 1,976 [2,832] / 1,389 [1,271] | 62 / 43 / 33 (5:30-11:11) |
+| Protoss / Terran / Zerg Air | 1,622 [1,821] / 965 [1,406] / 2,116 [3,452] | 39 / 28 / 41 |
+| CheatInsane Terran / Zerg Air | 1,039 [1,086] / 2,471 [3,760] (median 3,036, max 4,235) | 127 / 140 |
+| Paired A / B, M1 Hard | 1,023 [1,042] / 885 [1,093] / 1,778 [1,664] | 45 / 50 / 38 |
+| Proxy rax / cannon rush / 12 pool / worker rush | 94 / 1,254 / 265 / 1,633 | |
+
+- **Not every order builds a Gateway.** An order that comes with the same Gateway count as the one before means the last order didn't start a Gateway (or a Gateway died in between): 72 of 140 orders in CheatInsane Zerg Air, 39 of 127 in CheatInsane Terran Air, 13 of 41 in Zerg Air, 0-12 in the rest. In CheatInsane Zerg game 6 (a win) the bank reached 10,330 at 25:31 with orders every 20 s at 14 Gateways. ares's `BuildStructure` returns without building when `request_building_placement` finds no placement (for Protoss it asks for one inside Pylon power) or no worker. Which of the two happens here is not checked; D34 adds no Pylon for new Gateways. The criterion (at 10:00) is met, but after about 15:00 the sink stops in long games.
+
+**CheatInsane Zerg Air, 3/10** (wins: games 4, 6, 7). At 10:00 (mean): supply 150, army supply 79, 2.6 bases, minerals 2,466, gas 182 (Phase 4: 134 / 63 / 2.6 / 3,760). About 14 Stalkers per fight from 9:00 to 11:00 (Phase 4: 14.7; Phase 2: 21.3). The bigger army is mostly minerals; gas stays the limit on Stalkers. The fights are as Phase 2's: 21 launches, 13 retreated within 60 s, 97 HOLD deaths (25 far), 257 RETREAT deaths.
+
+The air switch (one share threshold for on and off, `AIR_SWITCH_SHARE` 0.30, `AIR_SWITCH_HOLD_S` 60) turned off when the enemy's air share went just below 0.30 (logged at 0.24-0.29 in 8 of the 25 offs). Time with the switch on, per game:
+
+| Game | Result | Length | Switch on |
+|---|---|---|---|
+| 1 | Defeat | 15:48 | 528 s (56 %) |
+| 2 | Defeat | 29:56 | 472 s (26 %) |
+| 3 | Defeat | 15:30 | 269 s (29 %) |
+| 4 | **Victory** | 23:45 | 737 s (52 %) |
+| 5 | Defeat | 13:13 | 96 s (12 %) |
+| 6 | **Victory** | 26:12 | 745 s (47 %) |
+| 7 | **Victory** | 23:04 | 896 s (65 %) |
+| 8 | Defeat | 22:04 | 451 s (34 %) |
+| 9 | Defeat | 17:34 | 489 s (46 %) |
+| 10 | Defeat | 16:11 | 347 s (36 %) |
+
+The three wins had the switch on for 47-65 % of the game, the losses 12-56 %; with 10 games that is a correlation, not a cause.
+
+No crashes and no caught bot errors; every `ROW` has `log=ok`, `err=0` and `raa=0` (150 games). The `Connection already closed` lines in some logs come at game end after `kill_switch` (also in the Phase 4 run).
+
+### D35-D37 (user decisions 2026-10-13)
+
+**D35 VERIFY (ares placement, `ares-sc2` at `8730865`):**
+- `BuildStructure.execute` (`behaviors/macro/build_structure.py`) returns False, building nothing, when `mediator.request_building_placement(...)` returns None or `mediator.select_worker(...)` finds no worker. For a Protoss structure other than a Pylon it asks with `within_psionic_matrix=True`; `production` defaults to True and `find_alternative` to True.
+- `PlacementManager.request_building_placement` (`managers/placement_manager.py:305`) takes `reserve_placement` (default True: marks the spot `worker_on_route`). With `within_psionic_matrix=True`, `_find_potential_placements_at_base` keeps only spots that are `available`, not `worker_on_route`, `can_place_structure`, and covered by a ready Pylon (`cy_pylon_matrix_covers`, `pylon_build_progress` 1.0). With `find_alternative`, the other bases are tried nearest the asked base first, under the same filter. So "no powered Gateway spot free" is exactly that request returning None; asking with `reserve_placement=False` changes nothing.
+- Placements per base (`_find_placements_for_base_location` calls, line ~1084): production Pylon 2x2s on a 7x7 stride first, then 3x3s on a 3x3 stride, then extra 2x2s; max distance 22 from the main's location, 16 elsewhere. `UnpoweredPlacementStrategy` (`managers/utils/placement_strategy.py`) for a Pylon with `production=True` takes an `optimal_pylon`, then the `production_pylon` closest to `closest_to`; with `production=False` (and no wall/static-defence flags) the non-custom spot closest to `closest_to`. D35 asks with `production=False`, for the free 2x2 nearest the unpowered Gateway spot.
+- `mediator.get_own_expansions` (a property; `TerrainManager.own_expansions`) is every expansion by path distance from our main, **without the main itself** (`_calculate_expansion_path_distances` skips locations within `EXPANSION_GAP_THRESHOLD` of it). D35 puts `start_location` first.
+- `on_building_started` marks a placement unavailable only when the structure's position equals it, so a Pylon placed through `BuildStructure` (a placement point) is booked.
+- **`MacroPlan.execute`** (`behaviors/macro/macro_plan.py`) is `return any(macro.execute(ai, config, mediator) for macro in self.macros)`: it stops at the first behavior that returns True. Citadel's plan (`main._register_macro_plan`) puts production last, and D34's `BuildStructure` came after the unit spenders, for one step. In the staged test (`scripts/test_gateway_space.py`, before the fix) 8 orders gave 4 Gateways with powered spots free (the order count repeated at 4, 5 and 7 Gateways); that is most of the "72 of 140" in CheatInsane Zerg Air.
+- `BuildingManager.build_with_specific_worker` adds the worker to `building_tracker` and `building_counter[type] += 1` (`managers/building_manager.py:671-681`); the counter goes down when the structure has started or the worker died. So `get_building_counter[GATEWAY]` plus unfinished Gateways covers an order from worker assignment to completion, and `BuildStructure` given every step makes no second order meanwhile (`max_on_route` 1 via `not_started_but_in_building_tracker`).
+
+**D35/D36 staged and offline tests** (`dcf32bc`): `test_m7_rules` 234/234 (adds `gateway_space` and the air switch's off share), `test_attack_decision` 23/23, `test_threat_flags` 31/31, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38. `scripts/test_gateway_space.py` (PersephoneAIE_v4, invulnerable idle Zerg, fast build and +5,000 minerals for Citadel from 5:00, its army units removed every 20 s):
+- Before the persistence fix, 8 extra-Gateway orders gave 4 Gateways with powered spots free (the order count repeated at 4, 5 and 7 Gateways).
+- `plain`: **PASS**, 20 Gateways + Warp Gates at 13:19 from 17 orders, every order one Gateway; no Pylon for space was needed (the supply Pylons powered enough spots).
+- `no_power` (the first 8 free powered spots filled with debug Gateways at 5:00; cap raised to 30 for the test): **PASS**, 11 Gateways after the fill, 9 Pylons for Gateway space, each spot that had its 2 tries passed over ((72, 39) → (69, 41) → (66, 55), then Gateways again). Filling every powered spot (16-17 at the top spawn) left a free powered spot where a worker never managed to build, in 3 of 3 runs; that is why the fill stops at 8 (the bottom spawn's 8-9 worked in 4 of 4).
+
+**D37, round 1** (CheatInsane Zerg Air, seed 7400, all 10 maps, 4 at a time; worktrees `~/wt_d37_*`; the switched-back code is `scratchpad/d37/switch_back.py`'s edits, saved as patches next to the logs, never committed):
+
+| Code | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths | RETREAT deaths | At 10:00: supply / army / bases / minerals / gas |
+|---|---|---|---|---|---|---|---|
+| Phase 1's end (`2307de5`) | **8/10** | 0.56 | 21 | 4 | 16 | 87 | 173 / 106 / 3.0 / 1,884 / 234 |
+| D35/D36 (`dcf32bc`) | **2/10** | 0.65 | 26 | 14 | 98 | 197 | 148 / 75 / 2.8 / 2,279 / 142 |
+| `dcf32bc`, all six Phase 2 groups switched back | **6/10** | 0.58 | 42 | 21 | 29 | 249 | 156 / 85 / 2.9 / 2,107 / 152 |
+| `dcf32bc`, C3 (retreat fire) switched back | 3/10 | 0.72 | 25 | 15 | 77 | 244 | 149 / 78 / 2.7 / 1,939 / 164 |
+
+- Phase 1's end wins as often as the M6 baseline (8/10): the drop came with Phase 2's fight rules and Phase 3's production, as bisected before.
+- With all six groups switched back, 2 → 6 wins and HOLD deaths 98 → 29. C3 alone changes nothing (3/10). The army at 10:00 is still 75-85 supply against Phase 1's 106.
+- D35 in these games: 2 of 57 extra-Gateway orders came without a new Gateway (`ce4c719`: 72 of 140). D36: the air switch was on 58 % of the game time (`ce4c719`: 40 %); 2/10 against 3/10 is within the ±2 spread.
+- In the D35/D36 batch, 79 of 126 DEFEND holds had C5's out-range penalty (-1 to -3), and some holds came at level 8-9 from C9's re-engagement wait ("no new engagement until …").
+
+**D37, rounds 2-3, and a repeat of C4** (same batch, seed and load; `scripts/m7_d37_switch_back.py` groups on `dcf32bc`). A container restart stopped the after-home-fight run after 9 games and the C4 repeat after 5; both were finished with `--start` from the same worktrees (their `./data` kept). A duplicated queue had started the first round-3 lanes in worktrees it then recreated; those runs were stopped after about 30 minutes and started again from fresh worktrees (logs of the stopped runs kept in `~/m7_d37/r3_bad`, not counted).
+
+| Code (all `dcf32bc` but the first) | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths | RETREAT deaths | First launch (median) | Games won, first launch before 9:00 / later | Launches held by home fight / remembered army / intel |
+|---|---|---|---|---|---|---|---|---|---|
+| Phase 1's end (`2307de5`) | **8/10** | 0.56 | 21 | 4 | 16 | 87 | 7:51 | 8/9, 0/1 | (no C4) |
+| D35/D36, nothing switched back | **2/10** | 0.65 | 26 | 14 | 98 | 197 | 9:25 | 2/3, 0/7 | 14 / 15 / 30 |
+| All six groups switched back | 6/10 | 0.58 | 42 | 21 | 29 | 249 | 8:43 | 5/5, 1/5 | (no C4) |
+| C1 step-out switched back | 5/10 | 0.51 | 29 | 16 | 57 | 162 | 9:44 | 1/2, 4/8 | 18 / 33 / 43 |
+| HOLD (C1 fallback + C9) | 3/10 | 0.67 | 32 | 19 | 75 | 286 | 9:21 | 1/3, 2/7 | 21 / 28 / 42 |
+| C2 (eligibility) | 4/10 | 0.54 | 23 | 11 | 57 | 197 | 9:24 | 2/3, 2/7 | 15 / 18 / 32 |
+| C3 (retreat fire) | 3/10 | 0.72 | 25 | 15 | 77 | 244 | 9:11 | 1/3, 2/7 | 14 / 12 / 32 |
+| **C4 (launch gate)** | **8/10** | **0.45** | 32 | 19 | 11 | 133 | 8:32 | 6/7, 2/3 | (none) |
+| **C4, repeat** | **6/10** | 0.49 | 34 | 12 | 27 | 165 | 8:47 | 4/5, 2/5 | (none) |
+| C5 (out-range penalty) | 6/10 | 0.52 | 28 | 15 | 30 | 164 | 9:36 | 1/2, 5/8 | 12 / 12 / 30 |
+| C4, intel wait only | 6/10 | 0.49 | 29 | 10 | 35 | 146 | 8:55 | 3/5, 3/5 | 12 / 11 / (off) |
+| C4, remembered-army gate only | 5/10 | 0.59 | 25 | 9 | 50 | 191 | 8:50 | 2/6, 3/4 | 10 / (off) / 17 |
+| C4, home-fight wait only | 4/10 | 0.64 | 24 | 10 | 64 | 230 | 9:48 | 2/3, 2/7 | (off) / 25 / 30 |
+
+What it shows:
+- **C4 is the Phase 2 rule that costs these games**: with it switched back, 8/10 and 6/10 (14/20) against 2/10 here, 3/10 on `ce4c719` and 2/10 on `df54f97` (7/30 on the three commits with it). HOLD deaths 98 → 11 and 27.
+- **Its three parts each hold the launch on their own**: with any one switched back the other two still held 21-35 times per batch, and the first launch stayed at 8:50-9:48 (4-6/10). Only with all three off did the first launch come at 8:32-8:47.
+- **An early first launch wins** against this opponent: over the 11 `dcf32bc` batches, 28 of 45 games with the first launch before 9:00 were won (62 %) against 27 of 69 later (39 %); Phase 1's end launched first at a median 7:51. CheatInsane's economy outgrows ours while the army waits (the reference's two wins were the two games where C4 held nothing).
+- The other groups move it by 0-4 wins (within the ±2 spread but for C5 and C1 step-out at 5-6/10). C3 changes nothing.
+- The armies at 10:00 are 73-88 supply in every `dcf32bc` variant against Phase 1's 106: the Phase 3/4 production changes (Templar tech, Storm, Blink and the timed tech) still cost army size, which may be the rest of the gap.
+- C4 was built (Phase 2, D21) against launches into stale intel and home fights; switching it back is a decision for the user, with the batches it was built for (Protoss Air VeryHard, the cheese batches) to re-run.
+
+**D35/D36 regression check** (`dcf32bc`, clean worktree `~/wt_d36`, same seeds and opponent id scheme as the `ce4c719` run):
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | Unspent at 10:00 (mean) | Extra-Gateway orders / repeats | Air switch on |
+|---|---|---|---|---|---|---|---|
+| Zerg Air, `ce4c719` / **`dcf32bc`** | 10 / **10** | 0.28 / 0.32 | 11 / 11 | 0 / 0 | 2,116 / **1,586** | 41 / 13 → **33 / 0** | (not measured) / 31 % |
+| VeryHard Zerg, `ce4c719` / **`dcf32bc`** | 9 / **9** | | | | 1,719 / 1,714 | 62 / 5 → **61 / 0** | 10 % |
+
+VeryHard Zerg's loss is game 3 (Ley Lines, 9:40), as on every commit since M5. Every `ROW` has `log=ok`, `err=0`, `raa=0` (20 games).
+
+### D38: C4 removed (user decision 2026-10-15), full batch set run 2026-10-15
+
+**Code under test:** `9b63cd8` (`dcf32bc`'s D35/D36 plus D38: `attack_decision.py`, `test_attack_decision.py` and `test_counterattack.py` back to Phase 1's; `army.py` without the remembered-army level, the intel freshness, the home-fight time and the Observer's look; no `LAUNCH_*` constants). Its bot code differs from D37's "C4 switched back" worktree only in no longer running the discarded remembered-army simulation (`diff -r ~/wt_d37_c4/bot ~/wt_d38/bot`). The Phase 4 batch set, same seeds and openers, fresh opponent ids (`m7d38-*`), from a worktree pinned at `9b63cd8`, 4 at a time; logs `~/m7_d38`, replays `replays/m7-d38-*`.
+
+**Summary (M7's acceptance, M7_PLAN Phase 4)**
+
+| Criterion | `ce4c719` (D32-D34) | **`9b63cd8` (D38)** |
+|---|---|---|
+| VeryHard Air: Protoss ≥ 7, Terran ≥ 9 with no loss to Battlecruisers, Zerg ≥ 9 | 10 (forced 10, 10) / 10 / 10 | **PASS**: 10 (forced 9, 10) / 10 (no loss) / 10 |
+| CheatInsane Air: Terran ≥ 7/10 | 8/10 | **PASS: 10/10** |
+| CheatInsane Air: Zerg ≥ 9/10 | 3/10 | **NOT MET: 5/10.** The same code (C4 off) went 8/10 and 6/10 in D37: 19/30 over three runs, against 7/30 on the three commits with C4 |
+| Unspent minerals at 10:00 below 2,670 | every batch below | **PASS**: every batch below (means 95-2,049) |
+| M1 Hard × 10 | 10/10 | **PASS**: 10/10 |
+| M2/M3 cheese × 10 (≥ 8/10, correct flag, scout criterion) | 10 / 9 + tie / 10 / 10 | **PASS**: proxy rax 10/10, cannon rush 9/10, 12 pool 10/10, worker rush 10/10. Correct flag 40/40; no scout lost before 4:00 in 10, 10, 10 and 9 of 10 |
+| M4 VeryHard × 10 (≥ 7 each) | 9 / 10 / 10 | **PASS**: Zerg 9/10, Terran 10/10, Protoss 9/10 |
+| M5 staged counterattack 7/7 | PASS | **PASS** (trigger + recall 4/4, merge, in_position, early) |
+
+**Offline tests:** `test_m7_rules` 234/234, `test_attack_decision` 16/16 (Phase 1's cases; C4's 7 are gone), `test_threat_flags` 31/31, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38. `check_game_log.py` (in the worktree): `RESULT PASS`, 163 records, 0 malformed, `./data` 458 KB.
+
+**Staged tests** (`9b63cd8`): outranged 3/3 PASS, engagement PASS, counterattack 7/7, Blink PASS, Templar 5/5 PASS, `test_gateway_space.py` PASS (`plain`: 20 Gateways at 11:59 from 17 orders, 4 Pylons for space; `no_power`: 19 Gateways built after the fill, 6 Pylons for space).
+
+**Air:**
+
+| Batch | Wins | Value lost / killed | Launches | … retreated within 60 s | HOLD deaths (far) | RETREAT deaths | Units lost |
+|---|---|---|---|---|---|---|---|
+| Protoss Air free / A / B, `ce4c719` | 10 / 10 / 10 | 0.28 / 0.32 / 0.38 | 13 / 16 / 14 | 2 / 5 / 3 | 1 (0) / 0 / 0 | 10 / 17 / 23 | 169 / 251 / 279 |
+| **Protoss Air free / A / B, `9b63cd8`** | **10 / 9 / 10** | **0.45 / 0.57 / 0.38** | 28 / 31 / 22 | **12 / 19 / 10** | 3 (0) / 10 (0) / 0 | 37 / 50 / 29 | 352 / 417 / 243 |
+| Terran Air, `ce4c719` / `9b63cd8` | 10 / 10 | 0.22 / 0.22 | 13 / 14 | 0 / 3 | 0 / 1 (0) | 0 / 3 | 130 / 109 |
+| Zerg Air, `ce4c719` / `9b63cd8` | 10 / 10 | 0.28 / 0.23 | 11 / 11 | 0 / 0 | 0 / 0 | 6 / 0 | 153 / 104 |
+| CheatInsane Terran Air, `ce4c719` / `9b63cd8` | 8 / **10** | 0.42 / 0.35 | 28 / 29 | 16 / 14 | 27 (10) / 17 (2) | 62 / 39 | 727 / 412 |
+| CheatInsane Zerg Air, `ce4c719` / `9b63cd8` | 3 / **5** | 0.76 / 0.81 | 21 / 37 | 13 / 24 | 97 (25) / 53 (17) | 257 / 221 | 1,094 / 816 |
+
+- **What C4 bought:** against VeryHard Protoss Air the armies now launch about twice as often and retreat within 60 s 10-19 times per batch (`ce4c719`: 2-5), at value lost / killed 0.38-0.57 (0.28-0.38). Phase 1's code, which C4 was built against, had 1.21 and 12 in the Protoss Air batch; the wins held (10, 9 and 10 of 10).
+- **CheatInsane Zerg Air:** the first launch at a median 8:19, but 2 of 7 early launches won (D37's two C4-off runs: 6/7 and 4/5); 24 of 37 launches retreated within 60 s. Losses: games 1, 2, 3, 6, 9 (Magannatha, Ultralove twice, Ley Lines, Persephone).
+- **Losses elsewhere:** VeryHard Zerg game 3 (Ley Lines, 10:33), as on every commit since M5. VeryHard Protoss game 5 (Pylon, 10:07): an early Stalker attack at 4:50-5:32 beat the home defense, and at 8:00 the bot was on one base with 2 army supply and 21 probes lost, before any launch (none is possible under 150 supply), so not C4's. Cannon rush game 5 (Pylon, main variant, 9:54), the game lost on most commits since Phase 3. Paired A game 8 (Magannatha, 22:03).
+
+No crashes and no caught bot errors; every `ROW` has `log=ok`, `err=0` and `raa=0` (150 games).
+
+**M7 accepted (user decision D39, 2026-10-15)** on this run, with the CheatInsane Zerg Air target unmet (5/10; target 9/10) and deferred. The ladder criterion (no crash or time-out in the first 20 games after the upload) is still open: it follows the M7 upload (M6 passed its 20 ladder games on 2026-10-06).

@@ -12,6 +12,10 @@ the returned `Decision`. No game objects, so scripts/test_attack_decision.py tes
   <= FLIP_ANYWAY_AT (§4.5.2). The value rule is not held back by it (Citadel: units dying is not
   simulator noise, and an enemy out of sight, e.g. sieged tanks, reads as an empty fight).
 - `recall` (Defense > Main attack, §3) ends an attack without the relaunch wait.
+- M7 D38: no further launch gates. C4's (no launch soon after a home fight, a second simulation
+  against the remembered enemy army, a wait for fresh intel) held the first launch back by about a
+  minute and lost CheatInsane Zerg Air games (2/10 with it; 8/10 and 6/10 without, VERIFY_NOTES
+  "D35-D37").
 - §4.7: from END_GAME_FROM_S, no launch while our army value is below the enemy's ("a tie is
   better than a loss; if we are behind, keep defending"); from END_GAME_ATTACK_FROM_S,
   ATTACK_START drops to END_GAME_ATTACK_START while our value is >= END_GAME_VALUE_RATIO x theirs.

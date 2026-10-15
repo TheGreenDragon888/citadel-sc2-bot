@@ -36,7 +36,16 @@ TOP: dict[str, tuple] = {
     "startup_ms": (int, float, type(None)), "step_ms": (dict,), "preraised": (list,),
 }
 # added in a later record version: key -> (first version with it, type(s))
-SINCE: dict[str, tuple[int, tuple]] = {"errors": (2, (dict,)), "errors_first": (2, (dict,))}
+SINCE: dict[str, tuple[int, tuple]] = {
+    "errors": (2, (dict,)), "errors_first": (2, (dict,)),
+    "tech_seen": (3, (list,)), "lost_by_intent": (3, (dict,)), "lost_far": (3, (dict,)),  # M7
+    "reinforce_after_retreat": (4, (int,)), "rescouts": (4, (list,)),  # M7 Phase 1
+    "blinks": (5, (dict,)),  # M7 Phase 3
+    "storms": (6, (int,)), "archons": (6, (int,)),  # M7 K3
+    "capital_air": (7, (dict,)), "mix_changes": (7, (list,)), "fourth_base_at": (7, (int, float, type(None))),  # M7 Phase 4
+}
+# entries' keys added in a later record version: list name -> (first version, keys) (M7: version 3)
+ENTRY_SINCE: dict[str, tuple[int, tuple[str, ...]]] = {"engage": (3, ("own_value", "enemy_value"))}
 NESTED: dict[str, tuple[str, ...]] = {
     "probes": ("4:00", "6:00", "8:00"),
     "bases": ("6:00", "10:00"),
@@ -70,6 +79,8 @@ def problems(record: Any) -> list[str]:
         if isinstance(value, dict):
             out += [f"missing {key}.{k}" for k in subkeys if k not in value]
     for name, keys in (("flags", FLAG_KEYS), ("engage", ENGAGE_KEYS), ("counterattacks", COUNTER_KEYS)):
+        if name in ENTRY_SINCE and record.get("version", 1) >= ENTRY_SINCE[name][0]:
+            keys = keys + ENTRY_SINCE[name][1]
         for i, entry in enumerate(record.get(name) or []):
             missing = [k for k in keys if not isinstance(entry, dict) or k not in entry]
             if missing:

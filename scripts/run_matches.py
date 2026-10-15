@@ -272,6 +272,33 @@ def logged(game_id: Optional[str]) -> bool:
     return False
 
 
+def m7_cell(telemetry, army=None) -> Optional[str]:
+    """M7 telemetry (docs/M7_PLAN.md): army units lost far from their point (by intent) of all lost;
+    reinforcements sent out in a retreat's tick (B1, must be 0); main re-scouts (B4)."""
+    if telemetry is None or not hasattr(telemetry, "lost_far"):
+        return None
+    far = telemetry.lost_far
+    by_intent = ",".join(f"{mode}:{n}" for mode, n in sorted(far.items()))
+    cell = f"far={sum(far.values())}" + (f"({by_intent})" if by_intent else "") + f"/{sum(telemetry.lost_by_intent.values())}"
+    if army is not None and hasattr(army, "reinforce_after_retreat"):
+        cell += f" raa={army.reinforce_after_retreat}"
+    cell += f" rescouts={sum(1 for r in telemetry.scouts if r.task == 'rescout')}"
+    if army is not None and hasattr(army, "blink"):
+        b = army.blink.counts
+        cell += f" blinks={b['back']}/{b['in']}/{b['finish']}"  # M7 K2: back/in/finish
+    if army is not None and hasattr(army, "templar"):
+        t = army.templar.counts
+        cell += f" storms={t['storms']} archon={t['archons']}"  # M7 K3
+    bot = getattr(army, "bot", None) if army is not None else None
+    production = getattr(bot, "production", None)
+    if production is not None and hasattr(production, "mode_changes"):
+        # M7 Phase 4: mix modes reached (n/a/c: normal, air switch, capital air), 4th base time
+        modes = "".join(sorted({m[0] for _, m in production.mode_changes})) or "-"
+        fourth = getattr(getattr(bot, "executor", None), "fourth_base_at", None)
+        cell += f" mix={modes} base4={'-' if fourth is None else int(fourth)}"
+    return cell
+
+
 def format_row(r: dict) -> str:
     """One game's summary row (also printed as `ROW ...` right after the game)."""
     line = (
@@ -289,6 +316,8 @@ def format_row(r: dict) -> str:
         line += f"  scouts={r['scouts_lost']}/{r['scout_tasks']}"
     if r["flag_ok"] is not None:
         line += f"  flag={'ok' if r['flag_ok'] else 'MISS'} ({r['flag_why']})"
+    if r.get("m7") is not None:
+        line += f"  m7: {r['m7']}"
     line += f"  flags={r['flags'] or '-'}"
     return line + (f"  {r['error']}" if r["error"] else "")
 
@@ -375,7 +404,7 @@ def main() -> int:
         army = getattr(bot, "army", None)
         engage = None
         if army is not None:
-            actions = Counter(action for _, action, _, _ in army.decisions)
+            actions = Counter(d.action for d in army.decisions)
             engage = f"{actions['launch']}/{actions['retreat']}/{actions['recall']}"
         value = step = None
         if telemetry is not None:
@@ -427,6 +456,7 @@ def main() -> int:
                 "game_s": game_seconds,
                 "real_s": time.perf_counter() - started,
                 "error": error,
+                "m7": m7_cell(telemetry, army),
             }
         )
         print(f"ROW {format_row(rows[-1])}", flush=True)

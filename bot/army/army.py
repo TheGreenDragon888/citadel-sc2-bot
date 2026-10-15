@@ -8,7 +8,8 @@ Home defense (DEFEND squad; Defense > Main attack, §3):
 - A home threat is the enemy nearest one of our bases (townhalls and the natural spot) within
   ARMY_DEFEND_RADIUS: army units; lone workers within ARMY_WORKER_THREAT_RADIUS; enemy structures
   (proxy Pylons, Cannons) once the squad can take them (M2 rules, now on the simulator). With the
-  defense plan's leash, only enemies near its hold point or inside our main.
+  defense plan's leash, only enemies near its hold point or inside our main. With no other threat,
+  a known proxy production structure while PROXY is active, once the squad can take it (M7 B9).
 - The squad fights it if the enemy is inside our main or at the defensive position (nowhere to
   fall back to), at >= DEFEND_ENGAGE when the fight is within a ready Shield Battery's reach
   (§4.5.2: batteries are not simulated), or at >= ATTACK_CONTINUE elsewhere; otherwise it holds
@@ -32,7 +33,7 @@ DECISION_EVERY_STEPS, half a period after the main attack decision; a main attac
 HARASS squad in.
 """
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, NamedTuple, Optional
 
 from ares.consts import TOWNHALL_TYPES, EngagementResult, UnitRole, UnitTreeQueryType
 from loguru import logger
@@ -41,6 +42,8 @@ from sc2.position import Point2
 from sc2.unit import Unit
 
 from bot.army import micro
+from bot.army.blink import BlinkState
+from bot.army.templar import TemplarController, TemplarOrder
 from bot.army.attack_decision import ATTACK, AttackDecision, Decision
 from bot.army.counterattack import Counterattack
 from bot.army.engagement import (
@@ -48,9 +51,11 @@ from bot.army.engagement import (
     WE_DEFEND,
     WORKERS,
     Engagement,
+    FightInputs,
     is_fighter,
 )
 from bot.army.squads import Role, Squads
+from bot.intel.threat_flags import Threat
 from bot.constants import (
     ARMY_CLEAR_STRUCTURES_SUPPLY,
     ARMY_DEFEND_RADIUS,
@@ -66,15 +71,24 @@ from bot.constants import (
     BATTERY_COVER_RADIUS,
     CLEAR_STATIC_LEVEL,
     DECISION_EVERY_STEPS,
+    DEFEND_DISENGAGE_AT,
     DEFEND_ENGAGE,
+    ENGAGE_ENEMY_RADIUS,
     ENGAGE_STATIC_RADIUS,
     HOLD_ENGAGE_RADIUS,
+    HOLD_FALLBACK_KEEP_S,
+    HOLD_FALLBACK_MEMORY_S,
+    HOLD_FALLBACK_STEP,
+    HOLD_FALLBACK_STEPS,
     HOLD_RADIUS,
     HUNT_GRID_STEP,
     HUNT_VISIT_RADIUS,
     MAIN_RADIUS,
     MICRO_RADIUS,
+    MIN_STATE_SECONDS,
     OBSERVER_WITH_ARMY_FROM_S,
+    OUTRANGED_REACH_BUFFER,
+    PROXY_CLEAR_SUPPLY,
     REGROUP_FRACTION,
     REINFORCE_JOIN_RADIUS,
     REINFORCE_MIN_SUPPLY,
@@ -113,6 +127,28 @@ NOT_TARGETS: frozenset[UnitTypeId] = frozenset(
 FIGHT, HOLD, RETREAT, MOVE, HARASS = "fight", "hold", "retreat", "move", "harass"
 
 
+def _mmss(seconds: float) -> str:
+    return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
+
+
+def home_engages(level: int, needed: int, engaged: bool, disengage_at: int) -> bool:
+    """M7 C9 (§4.5.2, D22): whether the DEFEND squad fights a home threat outside the defensive
+    position: at `needed` or above to start, and once `engaged` until the level is at most
+    `disengage_at` (pure)."""
+    return level > disengage_at if engaged else level >= needed
+
+
+class DecisionRecord(NamedTuple):
+    """One main-attack decision for §8: its level, and the fight values the level came from (M7)."""
+
+    t: float
+    action: str
+    level: int
+    reason: str
+    own_value: Optional[float] = None
+    enemy_value: Optional[float] = None
+
+
 class Army:
     def __init__(self, bot: "AresBot", endgame: Optional["EndGame"] = None, flags: Optional["FlagStore"] = None):
         self.bot = bot
@@ -120,6 +156,7 @@ class Army:
         self.engagement = Engagement(bot)
         self.decision = AttackDecision()
         self.squads = Squads(bot)
+        self.flags = flags
         self.counter = Counterattack(bot, self, flags)  # §4.6
         # set by CitadelBot each army tick
         self.held_tags: set[int] = set()  # the wall-gap holder (other modules control it)
@@ -136,12 +173,25 @@ class Army:
         self.threat: Optional[Point2] = None
         self.home_level: int = -1  # the DEFEND squad's level against the home threat (-1: not simulated)
         self._defend_state: str = ""
+        # M7 C2: the DEFEND units that can hit the evaluated threat group (None: all of them)
+        self._defend_tags: Optional[set[int]] = None
+        self._fallback_steps: int = 0  # M7 C1: steps the defensive position moved back
+        self._fallback_keep_until: float = 0.0  # M7 C1: ... kept back until then
+        self._home_engaged: bool = False  # M7 C9: the squad chose to fight the current home threat
+        self._home_reengage_at: float = 0.0  # M7 C9: no new home engagement (outside the position) before this
+        self.blink = BlinkState()  # M7 K2: blink-in waves, this step's ready Stalkers, blinks by kind
+        self.templar = TemplarController(bot)  # M7 K3: Storm, Templar positions, Archon morphs
         # main attack
         self.target: Optional[Point2] = None
         self._target_tag: Optional[int] = None
         self.attack_center: Optional[Point2] = None
         self.last_level: Optional[int] = None
-        self.decisions: list[tuple[float, str, int, str]] = []  # (time, action, level, reason) for §8
+        self.decisions: list[DecisionRecord] = []  # §8
+        # the fight inputs behind the last main-attack and home-defense levels (M7 §8)
+        self._attack_inputs: Optional[FightInputs] = None
+        self._home_inputs: Optional[FightInputs] = None
+        # M7 B1 regression metric: reinforcements sent out in the tick of a retreat or recall (must stay 0)
+        self.reinforce_after_retreat: int = 0
         self._hunt_points: list[Point2] = []
         self._visited: set[Point2] = set()
         self._last_status: float = 0.0
@@ -174,6 +224,7 @@ class Army:
     def forget(self, tag: int) -> None:
         self.squads.forget(tag)
         self.intents.pop(tag, None)
+        self.templar.forget(tag)
         if tag == self.observer_tag:
             self.observer_tag = None
 
@@ -187,7 +238,7 @@ class Army:
             and u.build_progress == 1  # not while warping in
         ]
         self.squads.update(army, self.scout_tags, self.held_tags)
-        self.anchor = self.hold_point if self.hold_point is not None else self._rally_point()
+        self.anchor = self._fallback_anchor(self.hold_point if self.hold_point is not None else self._rally_point())
         self._claim_observer()
         if iteration % DECISION_EVERY_STEPS == 0:
             self._decide()
@@ -226,12 +277,16 @@ class Army:
                 self._log(
                     Decision(self.decision.state, "recall", f"home threat at {self.threat.rounded} the DEFEND squad can't hold"),
                     self.home_level,
+                    inputs=self._home_inputs,
                 )
                 self._retreat_attack_squad()
                 return
         if self.decision.state == ATTACK:
             self._evaluate_attack(attackers)
-            self._reinforce(defenders)
+            # a retreat decided just now sends no one out (M7 B1: at 9:32 of the first ladder loss,
+            # a group left for the old fight in the retreat's own tick and died there)
+            if self.decision.state == ATTACK:
+                self._reinforce(defenders)
         elif self.threat is None and bot.supply_used >= ATTACK_START_SUPPLY and defenders:
             self._evaluate_launch(defenders)
 
@@ -241,6 +296,7 @@ class Army:
         target = self._attack_target(center, candidates)
         enemy = self.engagement.attack_inputs(center, target)
         level = self.engagement.level(candidates, enemy, ENEMY_DEFENDS)
+        self._attack_inputs = self.engagement.last_inputs
         self.last_level = level
         decision = self.decision.evaluate(bot.time, level, bot.supply_used, self.engagement.value(candidates), self._value_ratio())
         if decision.action == "launch":
@@ -248,7 +304,10 @@ class Army:
             self.target = target
             for u in candidates:
                 self.intents.pop(u.tag, None)
-            self._log(decision, level, f"{len(candidates)} units, {self._supply(candidates):g} supply -> {target.rounded}")
+            self._log(
+                decision, level, f"{len(candidates)} units, {self._supply(candidates):g} supply -> {target.rounded}",
+                inputs=self._attack_inputs,
+            )
             self.counter.merge()  # §4.6: the main attack absorbs a counterattack
 
     def _evaluate_attack(self, attackers: list[Unit]) -> None:
@@ -259,10 +318,12 @@ class Army:
             level = 0
             enemy_value = 0.0
             target = self.target
+            self._attack_inputs = None
         else:
             target = self._attack_target(center, attackers)
             enemy = self.engagement.attack_inputs(center, target)
             level = self.engagement.level(attackers, enemy, ENEMY_DEFENDS)
+            self._attack_inputs = self.engagement.last_inputs
             enemy_value = self.engagement.value(enemy)
         self.target = target
         self.last_level = level
@@ -270,12 +331,13 @@ class Army:
             bot.time, level, bot.supply_used, self.engagement.value(attackers), self._value_ratio()
         )
         if decision.action == "retreat":
-            self._log(decision, level, f"{len(attackers)} units left, enemy value near {enemy_value:.0f}")
+            self._log(decision, level, f"{len(attackers)} units left, enemy value near {enemy_value:.0f}", inputs=self._attack_inputs)
             self._retreat_attack_squad()
 
     def _retreat_attack_squad(self) -> None:
         self.send_home(self.squads.tags(Role.ATTACK) | self.squads.tags(Role.REINFORCE))
         self._target_tag = None
+        self.attack_center = None  # M7 B1: nothing may rally to the old fight
 
     def _reinforce(self, defenders: list[Unit]) -> None:
         """§4.5.2: new units go out in groups of >= REINFORCE_MIN_SUPPLY, never one by one."""
@@ -305,9 +367,18 @@ class Army:
             self.squads.assign([u.tag for u in ready], Role.REINFORCE)
             for u in ready:
                 self.intents.pop(u.tag, None)
+            last = self.decisions[-1] if self.decisions else None
+            if last is not None and last.t == self.bot.time and last.action in ("retreat", "recall"):
+                self.reinforce_after_retreat += 1
             logger.info(f"ARMY reinforcements out at {self.bot.time_formatted}: {len(ready)} units, {self._supply(ready):g} supply")
 
     # -- home defense ----------------------------------------------------------------------------
+
+    @staticmethod
+    def _able(defenders: list[Unit], enemies: list[Unit]) -> list[Unit]:
+        """M7 C2: the defenders that can hit at least one of `enemies` (game data, else ares's range),
+        and those with no weapon from either source, which keep their pre-M7 behaviour (D19)."""
+        return [u for u in defenders if not micro.has_weapon(u) or any(micro.can_hit(u, e) for e in enemies)]
 
     def _homes(self) -> list[Point2]:
         # our townhalls, and the natural spot even before it has one (it is ours to hold)
@@ -337,11 +408,20 @@ class Army:
         """Sets `threat` (the home threat's position, if any) and `defend_target` (where the
         DEFEND squad fights, or None to hold the defensive position)."""
         found = self._home_threat(defenders)
+        if found is None:
+            self._home_engaged = False  # M7 C9: that fight is over
         self.threat = found.position if found is not None else None
         self.defend_target = None
         self.home_level = -1
+        self._home_inputs = None
+        self._defend_tags = None
         state = "none"
-        if found is not None:
+        if found is None and (proxy := self._proxy_clear(defenders)) is not None:
+            found, level, self._home_inputs = proxy
+            self.threat = self.defend_target = found.position
+            self.home_level = level
+            state = f"clearing proxy {found.type_id.name} (level {level})"
+        elif found is not None:
             if found.is_structure or found.type_id in WORKERS:
                 # static defense covering the target, and the units around it, fight for it
                 # (M4 cannon_rush Ultralove: the Cannons around a Pylon near our base were just
@@ -349,22 +429,50 @@ class Army:
                 # (a Cannon target is part of its own guard)
                 guard = self.engagement.static_defense_near(found.position) + self.engagement.enemies_near([found.position])
                 level = self.engagement.level(defenders, guard, ENEMY_DEFENDS) if guard else int(EngagementResult.VICTORY_EMPHATIC)
+                self._home_inputs = self.engagement.last_inputs if guard else None
                 self.home_level = level
                 if level >= CLEAR_STATIC_LEVEL:
                     self.defend_target, state = found.position, f"clearing {found.type_id.name} (level {level})"
                 else:
                     state = f"hold, {found.type_id.name} covered (level {level} < {CLEAR_STATIC_LEVEL})"
             elif self._inside_main(found.position) or found.distance_to(self.anchor) <= ARMY_HOLD_LEASH:
-                self.defend_target, state = found.position, "last stand (main or defensive position)"
+                # M7 C2: only units that can hit the group answer it; the others hold
+                group = self.engagement.enemies_near([found.position]) or [found]
+                able = self._able(defenders, group)
+                if able:
+                    self.defend_target, state = found.position, "last stand (main or defensive position)"
+                    self._defend_tags = {u.tag for u in able}
+                else:
+                    state = "hold, nothing can hit it (main or defensive position)"
             else:
                 enemy = self.engagement.enemies_near([found.position]) + self.engagement.static_defense_near(found.position)
-                level = self.engagement.level(defenders + self.own_cannons_near(found.position), enemy, WE_DEFEND)
+                # M7 C2 (§4.5.2): only units that can hit something in the group answer it, and only
+                # they count in its simulation
+                able = self._able(defenders, enemy or [found])
+                self._defend_tags = {u.tag for u in able}
+                level = self.engagement.level(able + self.own_cannons_near(found.position), enemy, WE_DEFEND)
+                self._home_inputs = self.engagement.last_inputs
                 self.home_level = level
                 covered = self._covered_by_battery(found.position)
                 needed = DEFEND_ENGAGE if covered else ATTACK_CONTINUE
-                if level >= needed:
+                now = self.bot.time
+                # M7 C9 (D22): engaged, the squad fights on until DEFEND_DISENGAGE_AT; fights against
+                # Void Ray armies flipped to holding mid-fight, and holders stepped away from the
+                # Tempests without shooting (35-76 HOLD deaths per test batch within 30 s of a flip)
+                engages = home_engages(level, needed, self._home_engaged, DEFEND_DISENGAGE_AT)
+                if engages and not self._home_engaged and now < self._home_reengage_at:
+                    state = f"hold (level {level}; no new engagement until {_mmss(self._home_reengage_at)})"
+                elif engages:
                     self.defend_target = found.position
-                    state = f"engage (level {level} >= {needed}{', batteries' if covered else ''})"
+                    if self._home_engaged:
+                        state = f"engaged (level {level} > {DEFEND_DISENGAGE_AT})"
+                    else:
+                        state = f"engage (level {level} >= {needed}{', batteries' if covered else ''})"
+                    self._home_engaged = True
+                elif self._home_engaged:
+                    self._home_engaged = False
+                    self._disengage(now, level)
+                    state = f"disengage (level {level} <= {DEFEND_DISENGAGE_AT})"
                 else:
                     state = f"hold (level {level} < {needed}{', batteries' if covered else ''})"
         if state != self._defend_state:
@@ -374,7 +482,20 @@ class Army:
                     f"DEFEND {self.bot.time_formatted}: {state}"
                     + (f" vs {found.type_id.name} at {found.position.rounded}" if found is not None else "")
                     + f", {len(defenders)} defenders ({self._supply(defenders):g} supply)"
+                    + (f"; {self._home_inputs.text()}" if self._home_inputs is not None else "")
                 )
+
+    def _disengage(self, now: float, level: int) -> None:
+        """M7 C9 (D22): a home fight the squad chose is lost: the defensive position falls back all
+        HOLD_FALLBACK_STEPS at once (for HOLD_FALLBACK_KEEP_S, through `_fallback_anchor`), and no new
+        engagement outside it starts for MIN_STATE_SECONDS."""
+        self._fallback_steps = HOLD_FALLBACK_STEPS
+        self._fallback_keep_until = now + HOLD_FALLBACK_KEEP_S
+        self._home_reengage_at = now + MIN_STATE_SECONDS
+        logger.info(
+            f"ARMY {self.bot.time_formatted} home fight lost (level {level}): hold point back "
+            f"{HOLD_FALLBACK_STEPS} steps, no new engagement until {_mmss(self._home_reengage_at)}"
+        )
 
     def _home_threat(self, defenders: list[Unit]) -> Optional[Unit]:
         """The enemy nearest one of our bases (M2 rules): army units within ARMY_DEFEND_RADIUS;
@@ -382,7 +503,7 @@ class Army:
         left behind is the army's); enemy structures once the squad has ARMY_CLEAR_STRUCTURES_SUPPLY
         and beats the finished Cannons near our bases and the units around them at
         CLEAR_STATIC_LEVEL, and before that a finished Cannon that can hit one of our townhalls once
-        the squad beats the Cannons covering it (and those units) at that level. With the leash, only enemies near the hold point or inside the main."""
+        the squad beats the Cannons covering it (and those units) at that level. With the leash, only enemies near the hold point, inside the main, or (M7 C8) shooting our units at the hold point."""
         bot = self.bot
         homes = self._homes()
         cannons = [
@@ -397,6 +518,12 @@ class Army:
             not cannons or self.engagement.level(defenders, cannons + guards, ENEMY_DEFENDS) >= CLEAR_STATIC_LEVEL
         )
         candidates = [e for e in bot.enemy_units if not e.is_memory]
+        # M7 C8 (D20): the units standing at a leashed hold point, which an enemy beyond the leash
+        # can still shoot (holders stand up to HOLD_RADIUS from it; a Marine reaches ~6 farther)
+        holders = (
+            [u for u in defenders if u.distance_to(self.hold_point) <= HOLD_RADIUS + 1.0]
+            if self.hold_point is not None and self.leash is not None else []
+        )
         if strong_enough:
             # snapshots too: Cannons at our natural out of vision were never attacked in an M2
             # test game that tied at 60:00; the engine drops a snapshot once its spot is seen empty
@@ -420,7 +547,14 @@ class Army:
             ):
                 continue
             if self.hold_point is not None and self.leash is not None:
-                if not self._inside_main(enemy.position) and enemy.distance_to(self.hold_point) > self.leash:
+                # beyond the leash only an enemy shooting our holders counts: in proxy-rax test
+                # games Marines below the ramp picked off 24-37 holding Adepts one at a time, and
+                # their presence kept the PROXY plan (and one base) up for 60 minutes
+                if (
+                    not self._inside_main(enemy.position)
+                    and enemy.distance_to(self.hold_point) > self.leash
+                    and not self._reaches_any(enemy, holders)
+                ):
                     continue
             radius = ARMY_WORKER_THREAT_RADIUS if is_worker else ARMY_DEFEND_RADIUS
             for home in homes:
@@ -428,6 +562,36 @@ class Army:
                 if d < radius and (best is None or d < best[0]):
                     best = (d, enemy)
         return best[1] if best is not None else None
+
+    @staticmethod
+    def _reaches_any(enemy: Unit, units: list[Unit]) -> bool:
+        """`enemy` has one of `units` within its reach (+ OUTRANGED_REACH_BUFFER)."""
+        for u in units:
+            r = micro.reach(enemy, u)
+            if r is not None and enemy.distance_to(u) <= r + OUTRANGED_REACH_BUFFER:
+                return True
+        return False
+
+    def _proxy_clear(self, defenders: list[Unit]) -> Optional[tuple[Unit, int, Optional[FightInputs]]]:
+        """M7 B9 (D17): while PROXY is active, the known proxy production structure nearest our
+        natural (the proxy_structure flag's evidence) and the level against what guards it, if the
+        DEFEND squad has PROXY_CLEAR_SUPPLY and beats that at CLEAR_STATIC_LEVEL. Only then is it a
+        home threat: one the squad holds against would stop launches and reinforcements. In two
+        test games the PROXY plan held one base for 60 minutes under the launch gate's supply while
+        the proxy Barracks stood."""
+        flag = self.flags.get(Threat.PROXY, "proxy_structure") if self.flags is not None else None
+        if flag is None or self._supply(defenders) < PROXY_CLEAR_SUPPLY:
+            return None
+        structures = [s for s in self.bot.enemy_structures if s.tag in flag.evidence_tags]
+        if not structures:
+            return None
+        nat = self.bot.mediator.get_own_nat
+        target = min(structures, key=lambda s: s.distance_to(nat))
+        guard = self.engagement.static_defense_near(target.position) + self.engagement.enemies_near([target.position])
+        if not guard:
+            return target, int(EngagementResult.VICTORY_EMPHATIC), None
+        level = self.engagement.level(defenders, guard, ENEMY_DEFENDS)
+        return (target, level, self.engagement.last_inputs) if level >= CLEAR_STATIC_LEVEL else None
 
     def _sieging(self, cannons: list[Unit]) -> list[Unit]:
         """Visible finished Cannons that can hit one of our ready townhalls."""
@@ -463,7 +627,7 @@ class Army:
         grounded = [s for s in bot.enemy_structures if not s.is_flying]
         townhalls = [s for s in grounded if s.type_id in TOWNHALL_TYPES]
         pool = townhalls or grounded
-        if not pool and self.endgame is not None and self.endgame.hunting and any(u.can_attack_air for u in units):
+        if not pool and self.endgame is not None and self.endgame.hunting and any(micro.can_hit_layer(u, True) for u in units):
             # §4.7: lifted Terran buildings, for the units that can shoot up
             pool = [s for s in bot.enemy_structures if s.is_flying]
         if pool:
@@ -529,11 +693,16 @@ class Army:
 
     def _set_intents(self) -> None:
         anchor = self.anchor
+        if self.decision.state != ATTACK and (stray := self.squads.tags(Role.REINFORCE)):
+            # reinforcements exist only while the attack is on (§4.5.2, M7 B1)
+            self.send_home(stray)
         for u in self.squads.units(Role.DEFEND):
             intent = self.intents.get(u.tag)
             if intent is not None and intent[0] == RETREAT and u.distance_to(anchor) > RETREAT_DONE_RADIUS:
                 self.intents[u.tag] = (RETREAT, anchor)
-            elif self.defend_target is not None and is_fighter(u):
+            elif self.defend_target is not None and is_fighter(u) and (
+                self._defend_tags is None or u.tag in self._defend_tags
+            ):
                 self.intents[u.tag] = (FIGHT, self.defend_target)
             elif intent is not None and intent[0] == FIGHT and u.distance_to(anchor) > HOLD_ENGAGE_RADIUS:
                 # a home fight turned bad: fall back, not attack-move back through the enemy
@@ -571,6 +740,48 @@ class Army:
             where = self.attack_center if self.decision.state == ATTACK and self.attack_center is not None else anchor
             self.intents[self.observer_tag] = (MOVE, where)
 
+    def _fallback_anchor(self, anchor: Point2) -> Point2:
+        """M7 C1 (§4.5.3): while enemies that out-range every DEFEND unit type (seen within
+        HOLD_FALLBACK_MEMORY_S) have the defensive position in reach and home defense isn't
+        fighting, the position steps toward our main, HOLD_FALLBACK_STEP at a time, at most
+        HOLD_FALLBACK_STEPS times, and stays back for HOLD_FALLBACK_KEEP_S after that was last
+        needed (in the staged test the restored position walked the units back into the Tempests'
+        reach every 15 s). Logged when the number of steps changes."""
+        base = anchor
+        steps = 0
+        # one DEFEND unit per type; types with no weapon from either source keep their pre-M7
+        # behaviour (D19)
+        kinds = [u for u in {u.type_id: u for u in self.fighters(Role.DEFEND)}.values() if micro.has_weapon(u)]
+        if self.defend_target is None and kinds:
+            longest = max(max(micro.weapon_range(u, False) or 0.0, micro.weapon_range(u, True) or 0.0) for u in kinds)
+            covers = []
+            for e in self.bot.mediator.get_cached_enemy_army:
+                if e.age > HOLD_FALLBACK_MEMORY_S or e.distance_to(anchor) > longest + 30:
+                    continue
+                if all(micro.outranges(e, u) for u in kinds):
+                    reaches = [r for u in kinds if (r := micro.reach(e, u)) is not None]
+                    if reaches:
+                        covers.append((e.position, max(reaches) + OUTRANGED_REACH_BUFFER))
+            while steps < HOLD_FALLBACK_STEPS and any(p.distance_to(anchor) <= r for p, r in covers):
+                anchor = anchor.towards(self.bot.start_location, HOLD_FALLBACK_STEP)
+                steps += 1
+        now = self.bot.time
+        needed = steps
+        if now < self._fallback_keep_until and self.defend_target is None:
+            steps = max(steps, self._fallback_steps)
+        if needed:
+            self._fallback_keep_until = now + HOLD_FALLBACK_KEEP_S
+        anchor = base
+        for _ in range(steps):
+            anchor = anchor.towards(self.bot.start_location, HOLD_FALLBACK_STEP)
+        if steps != self._fallback_steps:
+            self._fallback_steps = steps
+            logger.info(
+                f"ARMY {self.bot.time_formatted} hold point back to {anchor.rounded} ({steps} of {HOLD_FALLBACK_STEPS} steps)"
+                if steps else f"ARMY {self.bot.time_formatted} hold point restored to {anchor.rounded}"
+            )
+        return anchor
+
     def _claim_observer(self) -> None:
         """§4.3: from OBSERVER_WITH_ARMY_FROM_S one Observer travels with the army."""
         bot = self.bot
@@ -598,6 +809,7 @@ class Army:
             if role != Role.SCOUT and (u := get(tag)) is not None
         ]
         if not units:
+            self.templar.step([])
             return
         near_lists = bot.mediator.get_units_in_range(
             start_points=[u.position for u in units], distances=MICRO_RADIUS, query_tree=UnitTreeQueryType.AllEnemy
@@ -608,6 +820,8 @@ class Army:
                 [e for tag in group if (e := get(tag)) is not None and not e.is_memory]
                 for group in self.counter.goals
             ]
+        self.blink.refresh([u for u in units if u.type_id == UnitTypeId.STALKER], bot.time)
+        templar: list[tuple[Unit, list[Unit], Point2, bool]] = []
         for unit, near in zip(units, near_lists):
             mode, point = self.intents.get(unit.tag, (HOLD, self.anchor))
             own_tick = (iteration + unit.tag) % ARMY_EVERY_STEPS == 0 or unit.is_idle
@@ -615,34 +829,84 @@ class Army:
                 if own_tick:
                     micro.keep_safe(bot, unit, point)
                 continue
+            if unit.type_id == UnitTypeId.HIGHTEMPLAR:
+                # M7 K3: Templar are run by the TemplarController after everyone else
+                templar.append((unit, [e for e in near if not e.is_memory and e.type_id not in NOT_TARGETS], point, own_tick))
+                continue
             visible = [e for e in near if not e.is_memory and e.type_id not in NOT_TARGETS]
+            if mode in (HOLD, MOVE, RETREAT) and unit.tag in self.blink.ready_tags:
+                # M7 K2 (§4.5.3): Blink first: retreating Stalkers blink away when threatened, the
+                # others blink back on low shields (before the out-ranged step below)
+                if mode == RETREAT and micro.blink_away(bot, unit, visible, point, self.blink):
+                    continue
+                if micro.try_blink_back(bot, unit, visible, self.blink):
+                    continue
+            if mode in (HOLD, MOVE, RETREAT) and micro.out_rangers(unit, visible):
+                # M7 C1 (§4.5.3): not committed to a fight, so out of the out-rangers' reach first
+                # (Stalkers holding at the natural died in place to Tempests in the first ladder loss)
+                if not own_tick or micro.step_out(bot, unit):
+                    continue
             if mode == HARASS:
-                micro.harass(bot, unit, visible, point, goals, own_tick)
+                micro.harass(bot, unit, visible, point, goals, own_tick, blink=self.blink)
                 continue
             if mode == RETREAT:
-                if own_tick or unit.weapon_cooldown == 0:
-                    micro.retreat(bot, unit, visible, point, move_now=own_tick)
+                if own_tick or unit.weapon_cooldown == 0 or unit.tag in self.blink.ready_tags:
+                    micro.retreat(bot, unit, visible, point, move_now=own_tick, blink=self.blink)
                 continue
             if mode == MOVE:
                 # walking out to the squad: fight only what can fight back
-                visible = [e for e in visible if e.can_attack_ground or e.can_attack_air]
+                visible = [e for e in visible if micro.has_weapon(e)]
             elif mode == HOLD:
                 radius = self.leash if (self.leash is not None and point == self.hold_point) else HOLD_ENGAGE_RADIUS
                 visible = [e for e in visible if e.distance_to(point) <= radius or self._inside_main(e.position)]
+            elif self.squads.roles.get(unit.tag) == Role.DEFEND:
+                # a home fight is against the group it evaluated, not whatever each unit sees (M7 B3,
+                # §4.5.2: a Stalker ran at Tempests while the squad fought a Zealot elsewhere)
+                visible = [e for e in visible if e.distance_to(point) <= ENGAGE_ENEMY_RADIUS]
             if visible:
-                micro.fight(bot, unit, visible, point)
+                # M7 K2: blink back for everyone; blink in and to finish only in a fight the squad chose
+                level = self.home_level if self.squads.roles.get(unit.tag) == Role.DEFEND else (self.last_level or -1)
+                micro.fight(bot, unit, visible, point, blink=self.blink, committed=mode == FIGHT, level=level)
             elif own_tick and (mode != HOLD or unit.distance_to(point) > HOLD_RADIUS):
-                micro.move(unit, point, attack=mode != MOVE)
+                # only a fight is walked to with an attack-move: units going back to their hold
+                # point move, so the engine doesn't send them after whatever shoots them (M7 B2)
+                micro.move(unit, point, attack=mode == FIGHT)
+        self.templar.step([TemplarOrder(u, near, self._squad_centre(u, point), tick) for u, near, point, tick in templar])
+
+    def _squad_centre(self, unit: Unit, fallback: Point2) -> Point2:
+        """The centre of the fighters in `unit`'s squad (not its Templar or Observers), or
+        `fallback` (its intent point) when it has none."""
+        role = self.squads.roles.get(unit.tag)
+        mates = [
+            u.position for u in self.squads.units(role)
+            if u.type_id != UnitTypeId.HIGHTEMPLAR and u.type_id not in SUPPORT
+        ] if role is not None else []
+        return Point2.center(mates) if mates else fallback
 
     # -- logging ---------------------------------------------------------------------------------
 
-    def _log(self, decision: Decision, level: int, detail: str = "") -> None:
+    def _log(self, decision: Decision, level: int, detail: str = "", inputs: Optional[FightInputs] = None) -> None:
+        """`inputs`: the fight the level came from, logged and kept for §8 (M7)."""
         now = self.bot.time
-        self.decisions.append((now, decision.action, level, decision.reason))
+        self.decisions.append(
+            DecisionRecord(
+                now, decision.action, level, decision.reason,
+                inputs.own_value if inputs is not None else None,
+                inputs.enemy_value if inputs is not None else None,
+            )
+        )
         logger.info(
             f"ENGAGE {self.bot.time_formatted} {decision.action} level={level} ({decision.reason})"
             + (f": {detail}" if detail else "")
+            + (f"; {inputs.text()}" if inputs is not None else "")
         )
+
+    def _intent_counts(self) -> str:
+        """How many army units have each intent, for the status line."""
+        counts: dict[str, int] = {}
+        for mode, _ in self.intents.values():
+            counts[mode] = counts.get(mode, 0) + 1
+        return ",".join(f"{k}:{v}" for k, v in sorted(counts.items())) or "-"
 
     def _status(self) -> None:
         bot = self.bot
@@ -654,9 +918,14 @@ class Army:
             units = self.squads.units(role)
             if units:
                 parts.append(f"{role.value}={len(units)}/{self._supply(units):g}")
+        center = (
+            f"attack_center={self.attack_center.rounded} "
+            if self.attack_center is not None and self.decision.state == ATTACK else ""
+        )
         logger.info(
             f"ARMY {bot.time_formatted} state={self.decision.state} {' '.join(parts) or 'no units'} "
-            f"anchor={self.anchor.rounded} target={self.target.rounded if self.target else '-'} "
+            f"anchor={self.anchor.rounded} target={self.target.rounded if self.target else '-'} {center}"
+            f"intents={self._intent_counts()} "
             f"level={self.last_level if self.last_level is not None else '-'} defend={self._defend_state} "
             f"counter={self.counter.state}"
             + (f" (enemy army: {self.counter.position.last.why})" if self.counter.position.last is not None else "")

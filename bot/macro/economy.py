@@ -21,6 +21,7 @@ from bot.constants import (
     CHRONO_AFTER_WARPGATE,
     GAS_FLOAT_HIGH,
     GAS_FLOAT_LOW,
+    FOURTH_BASE_EXTRA_PROBES,
     MAX_BASES,
     PROBE_TARGET,
     PROBES_HELD_SPARE,
@@ -107,15 +108,15 @@ class Economy:
             long_distance_mine=long_distance,
         )
 
-    def worker_behavior(self, expansion_allowed: bool = True) -> BuildWorkers:
+    def worker_behavior(self, expansion_allowed: bool = True, bases_cap: int = MAX_BASES) -> BuildWorkers:
         """Probes to PROBE_TARGET (§1). While a threat plan forbids expanding, only to
         PROBES_PER_HELD_BASE per ready base plus PROBES_HELD_SPARE: probes past saturation
         took the minerals the Gateways needed in cannon-rush test games (60 probes on one base,
-        idle Warp Gates)."""
-        target = PROBE_TARGET
+        idle Warp Gates). M7 E1: with a 4th base wanted, FOURTH_BASE_EXTRA_PROBES more."""
+        target = PROBE_TARGET + (FOURTH_BASE_EXTRA_PROBES if bases_cap > MAX_BASES else 0)
         if not expansion_allowed:
             bases = max(1, len(self.bot.ready_townhalls))
-            target = min(PROBE_TARGET, PROBES_PER_HELD_BASE * bases + PROBES_HELD_SPARE)
+            target = min(target, PROBES_PER_HELD_BASE * bases + PROBES_HELD_SPARE)
         return BuildWorkers(to_count=target)
 
     @staticmethod
@@ -129,7 +130,7 @@ class Economy:
         `prioritize=True` returns True while the Nexus can't be afforded, so a MacroPlan keeps
         the minerals for it instead of spending them on the behaviors after it.
         """
-        return ExpansionController(to_count=min(to_count, MAX_BASES), prioritize=prioritize)
+        return ExpansionController(to_count=min(to_count, MAX_BASES + 1), prioritize=prioritize)  # M7 E1: 4th
 
     async def chrono(self, gateways_first: bool = False) -> None:
         """Cast one chrono per call on the §4.1 target, if a Nexus has the energy for it.
