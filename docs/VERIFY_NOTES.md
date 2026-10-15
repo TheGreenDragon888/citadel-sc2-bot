@@ -2885,3 +2885,5 @@ VeryHard Zerg's loss is game 3 (Ley Lines, 9:40), as on every commit since M5. E
 No crashes and no caught bot errors; every `ROW` has `log=ok`, `err=0` and `raa=0` (150 games).
 
 **M7 accepted (user decision D39, 2026-10-15)** on this run, with the CheatInsane Zerg Air target unmet (5/10; target 9/10) and deferred. The ladder criterion (no crash or time-out in the first 20 games after the upload) is still open: it follows the M7 upload (M6 passed its 20 ladder games on 2026-10-06).
+
+**M7 pre-upload checks (2026-10-15)**: zip md5 `650fd9eccae6124f81b25af38db6d527` (content hash `4b9cacf8...`, Python 3.12.3, 260 files); error guard 15/15; `ladder_env_test.py` 10 matches, RESULT PASS (Citadel won 8; lost the mirror and twelve_pool on Ley Lines at 6:40, which won twice when rerun). Details in STATUS.md, "M7 checks before the upload".
