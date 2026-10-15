@@ -963,15 +963,6 @@ HOLD_FALLBACK_STEP: float = 3.0
 HOLD_FALLBACK_STEPS: int = 4
 HOLD_FALLBACK_MEMORY_S: float = 10.0
 HOLD_FALLBACK_KEEP_S: float = 30.0  # ... and once back, it stays back this long after it was last needed
-# C4 launch gate: no launch within LAUNCH_AFTER_DEFEND_S of a home fight; the level against the
-# remembered enemy army (fighters seen within LAUNCH_CACHE_MAX_AGE_S) must pass the gate too; at
-# least LAUNCH_INTEL_FRESH_FRACTION of its value seen within OUT_OF_POSITION_FRESH_S, else the
-# army's Observer looks first and the launch waits at most LAUNCH_INTEL_WAIT_S
-LAUNCH_AFTER_DEFEND_S: float = 30.0
-LAUNCH_HOME_FIGHT_MIN_FRACTION: float = 0.2  # ... a home fight counts when the enemy group is worth this share of the defenders
-LAUNCH_CACHE_MAX_AGE_S: float = 90.0
-LAUNCH_INTEL_FRESH_FRACTION: float = 0.5
-LAUNCH_INTEL_WAIT_S: float = 45.0
 # C5 (§4.5.2, built because the Phase 1 fight logs showed it): levels off a fight's level per
 # whole share of enemy value that out-ranges every unit of ours able to hit it, or that none can hit
 OUTRANGE_PENALTY_PER_SHARE: float = 4.0
