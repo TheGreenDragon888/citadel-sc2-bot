@@ -171,6 +171,21 @@ The ladder keeps playing the uploaded zip; `ladder_watch.py` lists every game si
 whenever someone wants to look. Before any later upload: rerun the M6 checks above (including
 `ladder_env_test.py`), rebuild on Python 3.12, and count 20 games from the new upload.
 
+## M7 checks before the upload (bot code 9b63cd8, `main` at d4d3e7a, 2026-10-15)
+
+| Check | Result |
+|---|---|
+| Branches | every branch merged into `main` (d4d3e7a) and fast-forwarded to it; bot code identical to 9b63cd8, the full batch set's (VERIFY_NOTES "D38") |
+| Zip | `publish/Citadel.zip` built on Python 3.12.3: 260 files, 9,892,451 bytes, content hash `4b9cacf8074af3b678c1c4d742c5053ad124f16a2bb0dcbcfbec0d99329ddabf`, md5 `650fd9eccae6124f81b25af38db6d527`; `run.py`, `ladder.py`, `config.yml` at the top level; `cython_extensions/bootstrap.cpython-312-...so`; no `data/` or `scripts/` |
+| Error guard (`test_error_guard.py`) | 15/15 |
+| Offline tests | `test_m7_rules` 234/234, `test_attack_decision` 16/16, `test_threat_flags` 31/31, `test_m3_checks` 14/14, `test_counterattack_rules` 36/36, `test_opponent_memory` 38/38 |
+| M1 Hard × 10 | 10/10 (D38 batch set, same bot code) |
+| Ladder environment (`ladder_env_test.py`, 10 matches, 7 maps) | **RESULT PASS**: no Citadel crash, time-out, initialization error or error; startup 455-1,760 ms; METRIC game line in 10/10; no traceback outside the error guard; WORKER_RUSH pre-raised in the third worker-rush game; `./data` 15 files, 22 KB. Citadel lost match 9 (the mirror) and match 10 (twelve_pool on Ley Lines, 6:40: the natural Nexus went down at 1:19, 5 s before POOL_12 was raised, and single units died in the wall gap); match 10 rerun twice alone: won both (9:58, 11:58) |
+| Saved data from M6's ladder games | `bot/memory/`, `bot/data_files.py`, `protoss_builds.yml`, `config.yml`, `run.py` and `ladder.py` unchanged since the M6 upload (4d53ca5); the game-log writer keeps old lines as text, so M6's bot data loads as before |
+| AI Arena API | `UPLOAD_API_TOKEN` and `UPLOAD_BOT_ID` are set in this environment; `ladder_watch.py` reads the bot (id 1358): `bot_data_enabled=True`, M6's zip md5 `07db06fe...`, 263 ladder games, 0 with a Citadel crash, time-out or initialization failure |
+
+**After the upload:** `poetry run python scripts/ladder_watch.py` must print `bot_data_enabled=True` and zip md5 `650fd9eccae6124f81b25af38db6d527`; it then lists only the games after the new upload (by `bot_zip_updated`), and its last line counts the first 20 (labelled "M6 acceptance"; the rule is the same for M7).
+
 ## How M6 was finished (record)
 
 The environment variables `UPLOAD_API_TOKEN` (the AI Arena API token) and `UPLOAD_BOT_ID` (the
