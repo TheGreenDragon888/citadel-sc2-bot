@@ -15,8 +15,11 @@ variables `scripts/upload_to_ai_arena.py` uses). The endpoints are from aiarena-
   owner can download it), saved to ladder_logs/<match>.zip and searched for Citadel's lines
   (STARTUP, METRIC game, the M6 error guard's `ERROR in`, tracebacks).
 
-Prints one row per game (oldest first, games after the latest zip upload unless --since-match) and
-the M6 acceptance line: no Crash, TimeOut or initialization failure by Citadel in the first N games.
+Prints one row per game (oldest first, games started after the latest zip upload unless
+--since-match) and the acceptance line (M6, and M7 for its upload): no Crash, TimeOut or
+initialization failure by Citadel in the first N games. A match runs the zip the arena client
+fetches when it starts, so a match created in a round that began before the upload but started
+after it runs the new zip and counts.
 Reads only; never changes anything on AI Arena.
 """
 
@@ -121,7 +124,8 @@ def main() -> int:
         if args.since_match is not None and part["match"] < args.since_match:
             continue
         match = api.get(f"matches/{part['match']}/")
-        if args.since_match is None and uploaded and match.get("created") and match["created"] < uploaded:
+        started = match.get("started") or match.get("created")
+        if args.since_match is None and uploaded and started and started < uploaded:
             continue  # played by an earlier upload
         if part.get("result") in (None, "", "none") and part.get("result_cause") is None:
             continue  # not finished yet
@@ -162,7 +166,7 @@ def main() -> int:
         )
         if scan is not None:
             print(
-                f"  startup={scan['startup_ms']}ms metric={'ok' if scan['record'] else 'MISSING'} "
+                f"  startup={scan['startup_ms']}ms metric={'ok' if scan['record'] else 'MISSING'} v={record.get('version', '-')} "
                 f"step={step.get('mean')}/{step.get('p99')}/{step.get('max')} guard={step.get('guard_activations')} "
                 f"errors={scan['guarded']} tracebacks={scan['tracebacks']} pre={','.join(record.get('preraised') or []) or '-'}",
                 end="",
@@ -171,7 +175,7 @@ def main() -> int:
     counted = min(played, args.first)
     done = counted >= args.first
     print(
-        f"M6 acceptance: {counted}/{args.first} games so far, {failures} with a Citadel crash/timeout/initialization failure: "
+        f"Acceptance since the upload: {counted}/{args.first} games so far, {failures} with a Citadel crash/timeout/initialization failure: "
         + ("PASS" if done and not failures else "FAIL" if failures else "WAITING")
     )
     print(f"(checked {datetime.now().strftime('%Y-%m-%d %H:%M')}; logs in {LOG_DIR.relative_to(ROOT)}/)")

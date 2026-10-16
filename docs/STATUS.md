@@ -184,7 +184,9 @@ whenever someone wants to look. Before any later upload: rerun the M6 checks abo
 | Saved data from M6's ladder games | `bot/memory/`, `bot/data_files.py`, `protoss_builds.yml`, `config.yml`, `run.py` and `ladder.py` unchanged since the M6 upload (4d53ca5); the game-log writer keeps old lines as text, so M6's bot data loads as before |
 | AI Arena API | `UPLOAD_API_TOKEN` and `UPLOAD_BOT_ID` are set in this environment; `ladder_watch.py` reads the bot (id 1358): `bot_data_enabled=True`, M6's zip md5 `07db06fe...`, 263 ladder games, 0 with a Citadel crash, time-out or initialization failure |
 
-**After the upload:** `poetry run python scripts/ladder_watch.py` must print `bot_data_enabled=True` and zip md5 `650fd9eccae6124f81b25af38db6d527`; it then lists only the games after the new upload (by `bot_zip_updated`), and its last line counts the first 20 (labelled "M6 acceptance"; the rule is the same for M7).
+**Uploaded** by the user on 2026-10-16 16:01:41 UTC. `ladder_watch.py` (16:04 UTC): `bot_data_enabled=True zip md5 650fd9eccae6124f81b25af38db6d527`; Citadel active in competition 37 ("Sc2 AI Arena 2026 Pre-Season 2", open), Elo 1643, 288 matches before. Round 92 began at 10:26 UTC, before the upload; its matches that start after 16:01:41 run the new zip, so the watcher now counts by a match's start time (it used its creation time) and prints the game record's version (`v=7` is M7's code; M6's was `v=2`).
+
+**After the upload:** `poetry run python scripts/ladder_watch.py` must print `bot_data_enabled=True` and zip md5 `650fd9eccae6124f81b25af38db6d527`; it then lists only the games after the new upload (by `bot_zip_updated`), and its last line counts the first 20 ("Acceptance since the upload").
 
 ## How M6 was finished (record)
 
