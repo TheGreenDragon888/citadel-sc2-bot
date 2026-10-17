@@ -282,7 +282,7 @@ Commit: `M7 kickoff: DESIGN.md for the user's M7 decisions`. **Stop for your rev
   - The three VeryHard Air batches (same seeds) meet D11's targets: Protoss ≥ 7/10, Terran ≥ 9/10 with no loss to Battlecruisers, Zerg ≥ 9/10. The CheatInsane Terran/Zerg Air batches meet the targets set from their baseline.
   - Unspent minerals at 10:00 well below the postmortem's 2,670.
   - All regressions hold: M1; M2/M3; M4 (≥ 7 each); M5 7/7.
-  - No crash or time-out in the first 20 ladder games after the final upload.
+  - No crash or time-out in the first 20 ladder games after the final upload. **PASS (2026-10-17):** the M7 zip's first 20 ladder games, 0 Citadel crash, time-out or initialization failure (VERIFY_NOTES "M7 ladder games").
 
 ---
 

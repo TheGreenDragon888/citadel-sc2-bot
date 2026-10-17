@@ -2887,3 +2887,41 @@ No crashes and no caught bot errors; every `ROW` has `log=ok`, `err=0` and `raa=
 **M7 accepted (user decision D39, 2026-10-15)** on this run, with the CheatInsane Zerg Air target unmet (5/10; target 9/10) and deferred. The ladder criterion (no crash or time-out in the first 20 games after the upload) is still open: it follows the M7 upload (M6 passed its 20 ladder games on 2026-10-06).
 
 **M7 pre-upload checks (2026-10-15)**: zip md5 `650fd9eccae6124f81b25af38db6d527` (content hash `4b9cacf8...`, Python 3.12.3, 260 files); error guard 15/15; `ladder_env_test.py` 10 matches, RESULT PASS (Citadel won 8; lost the mirror and twelve_pool on Ley Lines at 6:40, which won twice when rerun). Details in STATUS.md, "M7 checks before the upload".
+
+### M7 ladder games (2026-10-16/17)
+
+**Ladder games** (`poetry run python scripts/ladder_watch.py`, checked 2026-10-17 14:26 UTC): the M7 zip (md5 `650fd9eccae6124f81b25af38db6d527`, bot code 9b63cd8) was uploaded by the user on 2026-10-16 16:01:41 UTC to the same bot (id 1358) with `bot_data_enabled=True`, still in competition 37 ("Sc2 AI Arena 2026 Pre-Season 2"). Round 92 had begun at 10:26 UTC; its matches that started after the upload ran the new zip (`v=7` in every counted game's record), and the rest came in round 93 (from 2026-10-17 01:44 UTC). Rows in match-id order, as the watcher counts them; the acceptance counts the first 20 played.
+
+| # | Match | Opponent (race) | Map | Citadel | Length | Startup | Step mean/p99/max (ms) | AI Arena avg step | Guard on | Errors / tracebacks | Record v | Pre-raised |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 5050752 | sludgement2-revived (Z) | PersephoneAIE_v4 | Loss | 8.3min | 681ms | 4.79/17.5/101.0 | 6.0ms | 0 | 0 / 0 | 7 | - |
+| 2 | 5050882 | zergid0 (Z) | IncorporealAIE_v4 | Tie | 60.0min | 480ms | - (no METRIC game line: the arena closed the game at 60:00) | 6.3ms | - | 0 / 0 | - | POOL_12 (memory) |
+| 3 | 5051274 | Molly (T) | LeyLinesAIE_v3 | Win | 23.1min | 885ms | 8.41/35.5/130.9 | 10.3ms | 0 | 0 / 0 | 7 | PROXY |
+| 4 | 5051340 | Slenderina (P) | LeyLinesAIE_v3 | Win | 13.3min | 701ms | 4.43/16.8/69.7 | 8.5ms | 0 | 0 / 0 | 7 | - |
+| - | 5051673 | dantalion (P) | PersephoneAIE_v4 | not played: initialization_failure (opponent's bot timeout; no result for either) | - | 629ms | - | - | - | - | - | - |
+| 5 | 5051677 | norman (P) | TorchesAIE_v4 | Loss | 9.7min | 951ms | 6.59/24.6/109.7 | 8.8ms | 0 | 0 / 0 | 7 | - |
+| 6 | 5051680 | Thssprtssbt2 (P) | UltraloveAIE_v2 | Loss | 11.2min | 920ms | 5.56/18.2/88.2 | 8.9ms | 0 | 0 / 0 | 7 | - |
+| 7 | 5051681 | Thssprtssbt (P) | TorchesAIE_v4 | Loss | 8.6min | 683ms | 4.49/14.3/104.2 | 5.8ms | 0 | 0 / 0 | 7 | PROXY |
+| 8 | 5052149 | dantalion (P) | MagannathaAIE_v2 | Win | 15.8min | 679ms | 5.86/27.9/88.1 | 11.3ms | 0 | 0 / 0 | 7 | ONE_BASE_ALLIN |
+| 9 | 5052250 | spudde (T) | IncorporealAIE_v4 | Win | 14.4min | 475ms | 8.17/39.3/111.7 | 13.1ms | 0 | 0 / 0 | 7 | - |
+| 10 | 5052412 | Nothing (P) | LeyLinesAIE_v3 | Loss | 13.5min | 836ms | 4.36/14.2/89.3 | 8.6ms | 0 | 0 / 0 | 7 | - |
+| 11 | 5052446 | sludgement2-revived (Z) | IncorporealAIE_v4 | Loss | 13.1min | 510ms | 6.85/25.3/134.2 | 7.8ms | 0 | 0 / 0 | 7 | - |
+| 12 | 5052579 | Molly (T) | LeyLinesAIE_v3 | Win | 25.2min | 727ms | 9.19/37.2/109.9 | 12.5ms | 0 | 0 / 0 | 7 | PROXY |
+| 13 | 5052839 | Slenderina (P) | PersephoneAIE_v4 | Win | 14.2min | 713ms | 5.32/21.1/68.6 | 8.9ms | 0 | 0 / 0 | 7 | - |
+| 14 | 5052980 | teancum (P) | IncorporealAIE_v4 | Win | 16.1min | 419ms | 4.96/20.6/89.3 | 7.3ms | 0 | 0 / 0 | 7 | CANNON_RUSH,PROXY |
+| 15 | 5052991 | ANI_dev (T) | UltraloveAIE_v2 | Loss | 16.4min | 856ms | 8.43/32.7/97.2 | 10.7ms | 0 | 0 / 0 | 7 | - |
+| 16 | 5053070 | MetaScoreCritic1212VI (P) | TorchesAIE_v4 | Win | 15.3min | 823ms | 6.65/29.7/101.4 | 13.5ms | 0 | 0 / 0 | 7 | - |
+| 17 | 5053131 | CodexExplorer (P) | TorchesAIE_v4 | Loss | 22.0min | 806ms | 11.1/39.9/133.6 | 14.2ms | 0 | 0 / 0 | 7 | - |
+| 18 | 5053164 | Top_Forty (P) | LeyLinesAIE_v3 | Win | 14.6min | 788ms | 5.78/22.7/88.6 | 8.0ms | 0 | 0 / 0 | 7 | - |
+| 19 | 5053165 | Voltron (T) | LeyLinesAIE_v3 | Loss | 13.1min | 693ms | 7.89/37.2/121.8 | 9.5ms | 0 | 0 / 0 | 7 | PROXY |
+| 20 | 5053166 | zergid0 (Z) | PersephoneAIE_v4 | Win | 11.9min | 823ms | 5.78/24.4/151.1 | 8.7ms | 0 | 0 / 0 | 7 | POOL_12 |
+| 21 | 5053167 | MayOrMayNotWorkIDK (P) | IncorporealAIE_v4 | Win | 18.4min | 477ms | 10.76/43.9/103.1 | 12.2ms | 0 | 0 / 0 | 7 | - |
+| 22 | 5053168 | NexusPrime (P) | PersephoneAIE_v4 | Win | 12.4min | 659ms | 5.44/23.6/88.0 | 9.4ms | 0 | 0 / 0 | 7 | - |
+| 23 | 5053169 | norman (P) | IncorporealAIE_v4 | Loss | 10.6min | 483ms | 4.38/13.6/67.4 | 6.7ms | 0 | 0 / 0 | 7 | - |
+| 24 | 5053170 | PerilousProtossBot (P) | PylonAIE_v4 | Win | 10.8min | 1046ms | 4.1/17.5/66.7 | 7.4ms | 0 | 0 / 0 | 7 | - |
+| 25 | 5053171 | Thssprtssbt (P) | PylonAIE_v4 | Loss | 8.0min | 1123ms | 3.36/12.1/77.6 | 5.0ms | 0 | 0 / 0 | 7 | - |
+
+- **M7 ladder criterion: PASS.** The first 20 played games have no Citadel Crash, TimeOut or InitializationError; all ended by the game rules (10 wins, 9 losses, 1 tie). The 25 played by the check: 13 wins, 11 losses, 1 tie. For comparison the M6 zip's last 40 ladder games went 17-23.
+- Every played game has its STARTUP line (419-1,123 ms, §6 limit 5 s) and record version 7 (the M7 code); 0 guarded errors and 0 tracebacks in all 25 logs; max step 66.7-151.1 ms, so the 200 ms step guard never switched on; AI Arena's average step 5.0-14.2 ms. Opponent memory from M6's 263 games loads (e.g. Molly: "9 games (2 won, 7 lost)"), and pre-raises from it fired (PROXY, POOL_12, ONE_BASE_ALLIN, CANNON_RUSH).
+- **Match 5050882 vs zergid0: a 60:00 tie.** AI Arena closes the game at its time limit, so `on_end` never ran: no `METRIC game` line, and neither the game record nor the opponent memory got this game. Citadel stayed on one base all game (every probe sent to the natural died to Zerglings, 61 probes lost in all, 0 left from 23:00) and never reached `ATTACK_START_SUPPLY` (150; at most 125), so its 90-supply army (value killed 23,200, lost 775) never launched (§4.5.2; the §4.7 end-game rules lower the level gate, not the supply gate). Carried forward; the rematch (game 20) was won in 11.9 min with POOL_12 pre-raised.
+- **Match 5051673 vs dantalion: not played, not counted.** The game ran to 18:12 (24,758 loops), then dantalion's connection hit the arena's 30 s bot timeout: the game controller's result line from that websocket carries dantalion's build tag (`build_TwoGateCoreGas2`); Citadel was waiting on a step response (`Cannot receive: Connection already closed`, no slow step before) and exited 0, dantalion exited 1. AI Arena scored `InitializationError` for both, no result. The M6 zip had matches scored the same way (e.g. 5038983 vs ZerglingZwickel).
