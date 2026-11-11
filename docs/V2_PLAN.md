@@ -1,7 +1,8 @@
 # V2 plan: from rank 48 to the top 10
 
-**Status: DRAFT IN PROGRESS (2026-11-11).** Parts 1 and 2 are complete and verified. Parts 3-8 are
-partly written; items marked PENDING are still being checked. Nothing in the bot has been changed.
+**Status: complete, waiting on the decisions in Part 8 (2026-11-11).** One item is still open:
+the command-by-command Ubuntu setup (6.7), which depends on D5 and D6. Nothing in the bot has
+been changed.
 
 **What this file is.** An audit and a plan, asked for by the user on 2026-11-10. No bot code
 changes, no uploads. Every claim is labelled **Verified** (evidence given), **Likely** or
@@ -122,23 +123,151 @@ about 21 more wins in 370 games, roughly +40 Elo from one bridge line and one me
 
 ## Part 3. Defense review
 
-PENDING (module audit running). Confirmed so far:
-- **Probes never flee.** No code in `bot/defense/`, `bot/macro/` or `bot/main.py` moves mining
-  probes away from an attacker (grep for flee / evacuate / safe: no match). **Verified.**
+Labels in Parts 3-5: **Verified** means I re-read the cited lines myself after the helper audit
+reported them. **Reported** means a helper audit quoted the lines and I have not re-read them
+(the full reports, with quotes, are in `docs/v2_evidence/helper_reports/`). Nothing
+here was observed in a game.
+
+### 3.1 What the bot plans for
+
+| Threat | Plan | Label |
+|---|---|---|
+| Worker rush, cannon rush, 12-pool, proxy, one-base all-in, air harass, unknown aggression | Yes (`bot/defense/defense_planner.py`, one `_plan_*` each) | Reported |
+| Dark Templar, cloaked Banshee, burrow | **Barely.** `Threat.DT` is never raised anywhere in `bot/`. The only answer is one home Observer, vs Protoss only, once a Twilight Council is seen (`scout_planner.py:419-425`) | Verified (no `Threat.DT` use outside the enum) |
+| Two-base timing attack | **None.** `Threat.TIMING_ATTACK` and `Threat.MACRO` are never raised; spec §4.4 rows 12, 14, 16 have no code | Verified |
+| Runbys (Hellion, Adept, Zergling) after 4:00 | **None.** Probes fight Zerglings only while POOL_12 is active (`worker_defense.py:83`), and that flag expires at 4:00 | Verified (line 83); expiry Reported |
+| Drops (Medivac, Warp Prism, Overlord), Widow Mines, Nydus, Swarm Hosts, Disruptors | **None** | Reported |
+| Zerg one-base Roach all-in | Late: no Zerg structure is in the production list, so it is caught when Roaches appear, about 3:30-4:30 | Reported |
+
+### 3.2 What costs more than it saves
+
+| Finding | Evidence | Label |
+|---|---|---|
+| A Reaper seen anywhere raises PROXY and ends the opener | `ares_bridge.py:67`; the first raise needs only the ares boolean, the "units near home" test applies only to later confirms (`ares_bridge.py:104-126`) | Verified. Cost measured in 2.3 |
+| Memory pre-raise of PROXY ends the opener at 0:00 | `bot/main.py:147` | Verified. Cost measured in 2.3 |
+| A lingering enemy probe raises CANNON_RUSH | `detectors.py:11` | Verified. In 119 games; a Cannon followed in 12 |
+| One visible Zergling before 2:20 raises POOL_12 and ends the opener | `detectors.py:485-492` | Reported |
+| AIR_HARASS (any Stargate, Spire or Starport tech lab) builds Forge, Pylon, Cannon and Battery at every mineral line, about 350 minerals per base | `static_defense.py` | Reported. Note the opposite failure in cause 2: against Oracles this arrives too late |
+| Fogged enemy Cannons are ignored by the planner: `completed_enemy_cannons()` requires `is_powered`, which is False in the fog | `defense_planner.py:331-335` | Verified (the line); fog behaviour per `VERIFY_NOTES.md:1025` |
+
+### 3.3 Where it is thin
+
+- **Probes never flee.** Nothing moves mining probes away from an attacker. **Verified** (no such
+  code in `bot/defense/`, `bot/macro/`, `bot/main.py`; the defense audit found the same).
 - **Nothing answers an Oracle in time.** 197 games have a `DEFEND ... hold, nothing can hit it`
-  line; their record is 28-169. **Verified.**
+  line; their record is 28-169. **Verified** (logs).
+- **Static defense:** one Battery at the main ramp under 12-pool or proxy, up to 3 at the natural
+  for a one-base all-in, Cannons only through AIR_HARASS. No Cannon or Battery by time alone.
+  **Reported.**
+- **Enemy tech is seen 2-3 minutes late.** The main re-scout is one point at the enemy Nexus
+  (`scout_planner.py:509`) and counts as done once that point is visible, so buildings at the
+  edge of the main are missed. After 5:00 the enemy main is re-seen every 100-150 s at best.
+  **Reported.**
+- **No standing map vision:** no Pylon, probe or Observer on attack paths or at expansions, and no
+  record of where the enemy army is unless something sees it right now. **Reported.**
 
 ## Part 4. Capability gaps
 
-PENDING (module audit running).
+### 4.1 Army separation
+
+| Fact | Evidence | Label |
+|---|---|---|
+| Roles exist (DEFEND, ATTACK, REINFORCE, HARASS, SCOUT), but at launch **every** home fighter joins ATTACK | `army.py:300-303` | Verified |
+| So during an attack the home guard is only what was built since the launch | follows from the line above | Verified |
+| The army comes home, all of it, only if enemies at home are worth 30% of the attack squad | `army.py:272-283`, `ARMY_RECALL_FRACTION` | Verified |
+| Only one home threat is handled at a time: the enemy nearest any base. A second prong is ignored | `army.py:556-565` | Verified |
+| Any visible enemy unit within 22 of a base blocks both the launch and new reinforcements; Warp Prisms, Medivacs and Ravens are not on the harmless list | `army.py:290`, `:363` | Reported |
+| HARASS exists only as the §4.6 counterattack, and never runs during an attack | `counterattack.py` | Reported; 2.4 shows it achieves nothing |
+
+**What is needed** (the three jobs from the request):
+- **(a) A standing home guard** sized by what the scouts have seen (air or ground, how many),
+  that stays home at launch, answers each base separately, and includes units that can shoot up.
+- **(b) Map vision:** Observers and cheap Pylons or probes on the attack paths and at free
+  expansions, plus a remembered enemy-army position that the launch and recall rules read.
+- **(c) Raiders:** small groups (Adepts, Oracles, Dark Templar, a Warp Prism) with their own
+  target choice and their own retreat rule, running while the main army does something else.
+  This needs the spec's cut list changed (Part 8, D2).
+
+### 4.2 Micro
+
+| Exists | Label |
+|---|---|
+| Lowest-HP target choice, units that fight back first; kiting through ares's `KeepUnitSafe` (Stalker, Adept, Immortal, Colossus, Sentry, Phoenix, Void Ray, Oracle, Tempest) | Reported |
+| Blink: back on low shields, in as a group, finishing a kill, away on retreat | Reported |
+| Storm at 4+ targets, Templar stay behind and merge to Archons; Void Ray and Tempest target preferences | Reported |
+
+| Absent | Why it matters |
+|---|---|
+| **Shoot-then-step kiting.** `micro.py:4-5` says it uses ares's `StutterUnitBack`; the code uses `KeepUnitSafe` (`micro.py:250`), which only steps out of danger and has no weapon-cooldown timing | Stalkers lose damage every cycle against Marines, Zerglings, Zealots |
+| Target priority beyond lowest HP (Siege Tanks, Medivacs, Banelings, casters, detectors) | fights vs Terran bio and tank lines (causes 3, 5) |
+| Guardian Shield, Force Field (the Sentry share is 1%, so no Sentry is built) | holding a ramp at 5:00-9:00 (cause 3) |
+| Splitting against splash; dodging Storms, Biles, Disruptor shots, Widow Mines, Liberator zones | probes and army both |
+| Control for Phoenix, Oracle, Disruptor, Dark Templar, Warp Prism | needed for 4.1 (c) |
+| Fighting next to Shield Batteries and Cannons on purpose | cause 3 |
+
+The simulator's blind spots also matter: it ignores spells, and enemy memory lasts 30 s
+(`engagement.py:182-215` reads only enemies within 20 of the squad or the target). **Reported.**
 
 ## Part 5. Code audit
 
-- `bot/constants.py`: 385 module-level names, **none unused**. 13 are used only to build other
-  constants; 5 (`M1_PROBES_AT_6_MIN`, `M3_EXPECTED_FLAGS`, `M3_ALWAYS_ALLOWED`, `M3_FLAG_RATE`,
-  `M3_SCOUT_SAFE_RATE`) are read only by `scripts/`, so they are test settings living in the bot's
-  file. **Verified** (name search over `bot/`, `scripts/`, `run.py`, `ladder.py`).
-- Module-by-module findings: PENDING.
+**Summary.** No invented API was found. Every ares and python-sc2 name the bot uses exists with
+a matching signature in the sources actually installed, and every option in `protoss_builds.yml`
+and `config.yml` is one ares parses (**Reported** by all four module audits). All 7 offline test
+scripts pass (16/16, 36/36, 14/14, 234/234, 31/31, 38/38, 7/7; **Reported**, outputs saved). What
+the audit did find is wrong assumptions, rules that fire on too little evidence, and some dead
+weight. The risk in this codebase is behaviour, not hallucinated calls.
+
+### 5.1 Bugs and wrong assumptions
+
+| ID | File:line | What is wrong | Proposed fix | Label |
+|---|---|---|---|---|
+| INT-4 | `bot/intel/ares_bridge.py:104-126` | A unit-based ares flag raises its threat on the boolean alone, with no matching unit near home | Require evidence near our bases for the first raise | Verified |
+| DEF-2 | `ares_bridge.py:67` | Reaper seen → PROXY | Remove the bridge, or map it to a harassment note | Verified |
+| DEF-3 | `bot/defense/defense_planner.py:331-335` | `is_powered` drops Cannons in the fog | Drop the test, as `engagement.py` already did | Verified |
+| ARMY-1 | `bot/army/army.py:272-283, 300-303` | No home guard during an attack; all-or-nothing recall | M11 | Verified |
+| ARMY-2 | `army.py:556-565` | One home threat at a time | M11 | Verified |
+| MAC-1 | `bot/main.py:165, 267` | Step time covers `on_step` only; ares's after-step (mining, production, warp-ins) is not timed, so the step guard never sees it | Time the after-step too | Verified (the timing lines); what runs in after-step Reported |
+| INT-6 | `bot/intel/enemy_mix.py:145` | `calculate_supply_cost` returns the morph difference, so a Baneling counts 0 and a Brood Lord 2; this skews the air share | Read supply from game data per unit type | Verified (the call); library behaviour Reported |
+| INT-3 | `bot/intel/scout_planner.py:509` | Main re-scout is one point | Lap points around the main | Reported |
+| ARMY-3/4 | `army.py:290, 363, 517-530` | Harmless flyers and unshootable structures can block launches | Extend the harmless list; skip targets nothing can hit | Reported |
+| MAC-2 | `bot/error_guard.py` | A part that fails every step leaves 3 tracebacks, then one line a minute; nothing reacts. Seven different calls share the part name "unit destroyed" | Separate names; fail loudly in local runs | Reported. Note: 0 guarded errors in 367 ladder games |
+| MAC-3 | `bot/main.py` `on_start` | Component construction is unguarded; an exception there forfeits the game | Guard it | Reported |
+| MAC-4/5 | ares DataManager; `bot/main.py:147` | Opener win rates start with a fake win, and a game whose opener was ended at 0:00 is still booked under that opener | Do not book pre-raised games; see D4 | Reported. Consistent with `C_2GateRobo` staying in use at 29% |
+| MAC-6 | `bot/macro/build_executor.py` | `finished` can never become true if one conditional item never fires; gas stays at 4 and the 4th base never unlocks | Add a time fallback | Reported |
+| SCR-1/2 | `scripts/create_ladder_zip.py:41-52` | A zip built on Windows would carry `.pyd` files the Linux ladder cannot load; only the Python version is checked | Refuse to build off Linux | Reported |
+| MAC-9 | `ladder.py:84` | Arguments to `_play_game` in the wrong positions (both None today) | Fix the call | Reported, not re-checked |
+
+### 5.2 Dead or stale
+
+| What | Evidence | Proposed | Label |
+|---|---|---|---|
+| `Threat.DT`, `TIMING_ATTACK`, `MACRO` and their TTL entry | never raised | Build in M10 or delete | Verified |
+| `Decision.flipped`, `NO_DEFENDER`, `DefensePlan.cannons_needed`, unused `blink_ready` import in `micro.py:30` | 1-2 references each, definitions only | Delete | Verified (reference counts) |
+| Wall fallback branch | unused on all 7 pool maps (`VERIFY_NOTES.md:605`) | Keep only if a new map needs it | Reported |
+| `LATCHES` in `ares_bridge.py:75-76` | read and logged only | Delete or use | Reported |
+| Opponent record fields `wins`, `losses`, `first_aggression_time` | logged, never used | Use in M10 (expected attack time) | Reported |
+| `scripts/m7_d37_switch_back.py` | its C4 edits match nothing since D38; running `ALL` leaves a half-edited worktree | Remove | Reported |
+| `scripts/update_ares.py` | moves the pinned submodule; nothing references it; against CLAUDE.md | Remove | Reported |
+| `scripts/create_pyinstaller_exe.py`, `.github/workflows/build_windows_exe.yaml` | spec §10 puts executables out of scope | Remove (D7) | Reported |
+| `test_air_counters.py`, `test_scout_abilities.py`, `test_can_win_fight.py`, `check_ramp_walls.py` | always exit 0, so they are experiments | Give them a pass/fail or move to `scripts/experiments/` | Reported |
+| `docs/STATUS.md:323` says AIR_HARASS has no detector; the Voltron postmortem names two scripts that do not exist | stale | Correct | Reported |
+
+### 5.3 Rule and housekeeping items
+
+- `bot/constants.py`: 385 module-level names, **none unused**. 5 are read only by `scripts/`
+  (`M1_PROBES_AT_6_MIN`, `M3_EXPECTED_FLAGS`, `M3_ALWAYS_ALLOWED`, `M3_FLAG_RATE`,
+  `M3_SCOUT_SAFE_RATE`): test settings living in the bot's file. **Verified** (name search).
+- Thresholds outside `constants.py`: `army.py:524, 536, 759`; `micro.py:127, 167, 297, 326, 338`;
+  `scout_tasks.py:101`; `scout_planner.py:269, 475, 551`; `detectors.py:225`. Two unit stats are
+  typed in (`constants.py:714` Oracle beam energy, `:743` hallucination life). **Reported.**
+- `test_attack_decision.py` and `test_counterattack_rules.py` hard-code TUNE values, so tuning
+  those constants would fail the tests while the logic is right. Fix before M14. **Reported.**
+- `scripts/run_matches.py` runs games one after another, takes only the built-in AI or the four
+  scripted cheeses, writes no result file, and has no way to override a constant. All four are
+  needed for a test rig. **Reported.**
+- The GitHub Action runs no tests before building the zip. **Reported.**
+- `docs/VERIFY_NOTES.md` is 2,927 lines and mixes API findings with acceptance evidence. Split it
+  (D8).
 
 ## Part 6. Unattended improvement on the desktop
 
@@ -233,20 +362,54 @@ decided, because the steps differ if Claude Code is installed there. The outline
 4. Run one offline test and one game as a smoke check.
 5. Start a batch inside `tmux`, so it keeps running after you disconnect.
 
-## Part 7. Roadmap (draft order, by losses each should remove)
+## Part 7. Roadmap
 
-| M | Deliverable | Losses it targets |
-|---|---|---|
-| M8 | **Stop the false alarms.** Reaper ≠ PROXY; a scouting probe ≠ CANNON_RUSH; memory pre-raises only on confirmed structures; retire or fix `C_2GateRobo` | up to ~38 of 177 (2.3) |
-| M9 | **Hold the mineral lines.** Probes flee and return; anti-air at each mineral line on the first air-tech sighting; a standing home-defense group that can shoot up | 31 (cause 2) plus part of cause 3 |
-| M10 | **Survive the 6:00-10:00 attack.** Army size and static defense by time, driven by what the scouts see; fight at the right place with Batteries | 105 (cause 3) |
-| M11 | **Independent groups.** Home guard, main army, scouts, raiders, each with its own decision | causes 2, 3, 5 |
-| M12 | **Attack decision on whole-army intel**; replace or remove the counterattack | 33 (causes 4, 5); 239 wasted launches |
-| M13 | **Code cleanup** from Part 5 | none directly |
-| M14 | **Tuning rig on the Ubuntu boot** | Elo from numbers, after the rules are right |
+Ordered by how many of the 177 losses each milestone should remove. Each one follows CLAUDE.md:
+one at a time, spec diff first, evidence for every criterion, then stop. "Rig" means the batch
+runner built in M8. Every milestone also keeps the existing regressions (STATUS "Test commands")
+and ends with the ladder check: `poetry run python scripts/ladder_watch.py --first 20`.
 
-Acceptance criteria per milestone: PENDING.
+| M | Deliverable | Losses targeted | Acceptance (each checked by a command) | Runs where |
+|---|---|---|---|---|
+| **M8** | **Test rig and false alarms.** (a) `run_matches.py`: parallel games, a JSON result file, downloaded ladder zips as opponents through the `ladder_env_test.py` setup, constant overrides. (b) Reaper no longer raises PROXY; ares unit flags need a unit near home; a scouting probe alone does not raise CANNON_RUSH; memory pre-raises only on a confirmed structure; `C_2GateRobo` fixed or retired | up to 38 (2.3) | Rig: 20 games vs each of Thssprtssbt, Mulebot, norman, sludgement2-revived finish with a result file, and the baseline is recorded. False alarms: replaying the 49 pre-raised Terran logs' flag inputs through the offline flag test raises PROXY only in the 4 with a proxy structure. Ladder: over the next 100 games, one-base-at-5:00 falls from 35% of games to under 15% (`docs/v2_evidence/classify.py`) | Rig on Ubuntu; code in cloud |
+| **M9** | **Hold the mineral lines.** Probes leave a mineral line under attack and return when it is clear; anti-air at each mineral line from the first air-tech sighting or by time vs Protoss; fogged Cannons counted (DEF-3) | 31 (cause 2), part of 105 | Rig: vs Thssprtssbt, at least 12 of 20 (ladder today 2-13). Median mining probes lost in losses under 30 (today 62). New offline test for the flee rule passes | Cloud; rig on Ubuntu |
+| **M10** | **Survive 5:00-10:00.** Expected-attack time from memory and scouting drives army size, Batteries and Sentries; lap re-scout of the enemy main; DT and timing-attack detectors built or the dead enums removed; shoot-then-step kiting and target priority | 105 (cause 3) | Rig: vs Mulebot, norman, sludgement2-revived, at least 10 of 20 each (ladder today 1-5, 4-7, 4-9). Ladder: losses with no launch fall from 81% to under 60% of losses | Cloud; rig on Ubuntu |
+| **M11** | **Independent groups.** A home guard that stays at launch and answers each base; map vision posts; a remembered enemy-army position; raiders if D2 allows | causes 2, 3, 5 | Staged tests: two simultaneous raids on two bases are both answered while the main army stays out; a drop does not block a launch. Rig: no drop in M9 and M10 results | Cloud; rig on Ubuntu |
+| **M12** | **Attack decision.** Launch and retreat read the remembered whole army, not the local view; the counterattack is replaced by M11's raiders or removed | 33 (causes 4, 5) | Ladder: launches that retreat within 60 s fall from 41% to under 20%; value lost / killed in losses under 1.3 (today 1.88) | Cloud |
+| **M13** | **Cleanup** from Part 5.2 and 5.3, after D7 and D8 | none directly | `git grep` finds none of the removed names; all offline tests pass; the zip's content hash is unchanged by doc-only and script-only commits | Cloud |
+| **M14** | **Tuning and unattended runs.** SPSA on one group of constants at a time, with a separate acceptance set; a restricted unattended Claude Code session if D6 allows | Elo from numbers | A tuned group is kept only if it wins the acceptance set at 95% confidence (6.4) and the next 100 ladder games do not fall | Ubuntu |
+
+**Target check after M10:** if causes 2 and 3 are halved and 2.3 is fixed, about 85 of 177 losses
+become wins, which is about 74% over the same games, above the 69% that +137 Elo needs.
+**Uncertain**: opponents get harder with each division, so expect the gain to arrive in steps.
+
+**Not attempted in this run:** any game (no SC2 here), the Windows zip build, the GitHub Action,
+and any ladder upload.
 
 ## Part 8. Decisions needed
 
-PENDING.
+| # | Decision | My recommendation |
+|---|---|---|
+| D1 | Accept this plan's order (M8 first)? | Yes. M8's two fixes are small and measured |
+| D2 | Spec §7 cut list: allow offensive harassment (Adept, Oracle, Dark Templar, Warp Prism raids)? | Yes, but not before M11. Defense first, because that is where the games are lost |
+| D3 | Spec §1 "defense-first": change the style? | Keep it. The data says Citadel fails at defending, not that defending is the wrong idea. Add "and it must be able to raid" when D2 lands |
+| D4 | Opponent memory: pre-raise only on a confirmed structure, and never end the opener from memory alone? | Yes |
+| D5 | Spec §10 "no machine learning": lift it? | Not yet. Lift only for offline tuning tools in M14; no model in the bot until a narrow case is proven |
+| D6 | New dependencies: allow tuning packages on the dev side (not in the zip)? Allow an unattended Claude Code session on the Ubuntu boot? | Dev-side packages yes, asked one by one. Unattended session: try once in M14 with the restrictions in 6.5 |
+| D7 | Remove the Windows executable script and workflow, `update_ares.py`, `m7_d37_switch_back.py`? | Yes |
+| D8 | Split `docs/VERIFY_NOTES.md` into API findings and an evidence archive, and trim `docs/STATUS.md`? | Yes, in M13 |
+| D9 | Downloading other authors' public bot zips to use as sparring partners | Allowed by their setting; ask on the AI Arena Discord first if you want to be courteous |
+
+### Proposed wording (nothing is changed until approved)
+
+- **CLAUDE.md, Environment**, add: "The desktop also dual-boots Ubuntu Server (NVIDIA drivers
+  installed). It is the test rig: headless SC2 4.10, batches of games, unattended during school
+  hours and overnight. It is never used for uploads."
+- **CLAUDE.md, Rules**, change the dependency line to: "Bot code adds no dependencies beyond the
+  template's without asking me. Tools that only run on the test rig may, also after asking."
+- **DESIGN.md §4.4 and `ares_bridge.py`**: "A Reaper is not proxy evidence. A unit-based ares
+  flag raises a threat only with a matching unit near our bases."
+- **DESIGN.md §5**: "A flag pre-raised from memory needs a structure sighting in the earlier
+  games and never ends the opener by itself."
+- **DESIGN.md §7**: milestones M8-M14 as above; the cut list loses "Oracle harass as a plan" and
+  "Warp Prism" when D2 is approved.
