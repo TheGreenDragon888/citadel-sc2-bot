@@ -142,9 +142,96 @@ PENDING (module audit running).
 
 ## Part 6. Unattended improvement on the desktop
 
-PENDING (research running). Direction so far, from Part 2: the biggest losses are **missing
-behaviours and wrong rules**, which tuning numbers cannot fix. Automatic tuning becomes useful
-after M8-M10 below, and it first needs opponents that attack the way ladder bots do.
+### 6.1 Recommendation
+
+**Use the Ubuntu boot first as a test rig, second as a tuner, and not for a model in the bot yet.**
+
+| Option | Expected ladder gain | Risk | Effort | Verdict |
+|---|---|---|---|---|
+| **Test rig**: replay every code change against the real ladder bots that beat Citadel | High. It makes M8-M12 measurable; today no local opponent attacks the way ladder bots do | Low | Medium (one-time setup) | **Do first (part of M8)** |
+| **A. Auto-tune the TUNE values** | Medium, later. Part 2 shows the losses come from missing behaviours and wrong rules, which numbers cannot fix | Medium: tuning to a small opponent pool can lower ladder results | Medium | **After M10**, on small groups of related constants |
+| **C. Unattended Claude Code session** | High while the work is rule fixes with a clear test | Medium: it needs strict permissions and a branch of its own; it uses your plan's usage window | Medium | **Try in M14**, restricted (6.5) |
+| **B. A trained model inside the bot** | Unknown. No public write-up of a top ladder bot using one was found | High: new dependency in the zip, hard to debug, needs thousands of labelled fights | High | **Not now.** Revisit after M12 for one narrow use: predicting fight outcome from the fight telemetry |
+
+### 6.2 What the ladder allows
+
+| Fact | Label |
+|---|---|
+| Bot image is Python 3.12, **CPU only** (CPU builds of torch and tensorflow); no GPU is documented | Verified (aiarena-docker `Dockerfile.bot`, `pyproject.toml`) |
+| Packages listed in the image's lock file on master: numpy, scipy, scikit-learn, pandas, torch (CPU), tensorflow-cpu. onnxruntime is not listed. The image the live ladder runs may be older (`docs/VERIFY_NOTES.md:1408-1414` found other versions in v0.8.0) | Verified for master; live tag Uncertain |
+| Zip limit 50 MB (Citadel's is 5.5 MB) | Verified (AI Arena wiki, Getting Started) |
+| Network access is forbidden apart from the local game connection; `./data` persists between games | Verified (wiki) |
+| The controller enforces a 30 s per-request timeout; the 40 ms frame time in the sample config is not enforced | Verified (`docs/VERIFY_NOTES.md:1422-1436`, controller source) |
+| Cores and RAM per bot | Not found |
+
+So the RTX 4070 SUPER can only help **offline** (training). Anything the bot runs on the ladder
+runs on a CPU inside the step budget.
+
+### 6.3 What the games are played against, and why it should carry over
+
+- **9 of the 165 active ladder bots have a publicly downloadable zip. Four of them are among the
+  opponents Citadel loses to most:** Thssprtssbt (P, Oracle harassment, Citadel 2-13),
+  Mulebot (T, 1-5), norman (P, 4-7), sludgement2-revived (Z, 4-9). Also who (rank 11, Random),
+  Creepy_strategies (rank 25, P), mini-puck, CryptBotRevival, monsterbot. **Verified** (API
+  `bots/<id>/`, field `bot_zip_publicly_downloadable`).
+- These are the real programs, so a fix that beats them locally should beat them on the ladder.
+  That is the reason to expect carry-over. **Likely.**
+- Citadel's own test bots (`scripts/test_bots/`) cover four cheeses; none harasses. The built-in
+  AI stays as the regression check, not as the target.
+- `scripts/ladder_env_test.py` already runs the official AI Arena images locally. It is the
+  natural way to run downloaded zips, since they expect the ladder's layout. Whether it can run
+  several matches at once is PENDING (scripts audit).
+- **Guard against tuning to the pool:** tune on one set of games, accept a change only on a
+  separate set, and confirm on the ladder before keeping it.
+
+### 6.4 How many games, and what that buys
+
+- **Throughput is not measured yet.** No published figure was found. `docs/STATUS.md` reports
+  about 40 games in 40-70 minutes on a 4-core cloud machine against the built-in AI. On 6 cores
+  and 12 threads, 5 or 6 games at once is a fair first guess, so about **600-900 games per
+  20-hour day**. **Uncertain** until M8 measures it.
+- **What a day can detect** (95% confidence, 80% power, comparing two versions):
+
+| True improvement | Games needed (both versions together) | Days at ~750 games |
+|---|---|---|
+| 50% → 70% (about +147 Elo) | 186 | under 1 |
+| 50% → 60% (+70 Elo) | 776 | 1 |
+| 50% → 55% (+35 Elo) | 3,130 | 4 |
+| +10 Elo | about 19,000 | 25 |
+
+- So the rig can confirm a real fix overnight, and cannot see small tweaks. Tuning 385 constants
+  at once would chase noise. The method that fits is **SPSA** (two evaluations per step whatever
+  the number of parameters) on groups of 5-20 related constants, then a separate acceptance run.
+  **Likely** (chessprogramming.org SPSA; fishtest wiki warns that tuning many values together
+  drifts at random).
+
+### 6.5 An unattended Claude Code session
+
+From the Claude Code docs (headless, permission-modes, sandboxing, remote-control pages, read
+2026-11-11). **Verified** as what the docs say; the combination is this plan's reading.
+- `claude -p "<task>"` runs without a terminal. `--permission-mode dontAsk` is the mode the docs
+  call "designed for unattended use": anything not pre-approved is denied instead of asked.
+- A short allow-list (run the match scripts, edit files under `bot/` and `scripts/`, commit to
+  one branch) keeps it from doing anything else. `--max-budget-usd` caps spend.
+- Remote Control lets you watch from your phone. It needs your claude.ai login on the machine.
+- It never uploads to the ladder and never touches `main`; you review the branch after class.
+
+### 6.6 How results get back into the repo
+
+Each run writes a results file under `data/tuning/<date>/` (ignored by git) and a summary under
+`docs/tuning/`. The summary is committed and pushed to a branch named `tuning/<date>`. A cloud
+session, or you, reads that branch. Nothing merges by itself.
+
+### 6.7 Setup on the Ubuntu boot
+
+PENDING: written out command by command, with what each part does, once D5 and D6 (Part 8) are
+decided, because the steps differ if Claude Code is installed there. The outline:
+1. Install git, Python 3.12, Poetry and Docker.
+2. Clone the repo with its submodule; `poetry install`.
+3. Download headless SC2 4.10 and copy the maps (the commands are already in
+   `docs/M7_PLAN.md` "Step S").
+4. Run one offline test and one game as a smoke check.
+5. Start a batch inside `tmux`, so it keeps running after you disconnect.
 
 ## Part 7. Roadmap (draft order, by losses each should remove)
 

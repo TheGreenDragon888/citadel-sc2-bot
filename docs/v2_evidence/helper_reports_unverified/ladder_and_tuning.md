@@ -71,3 +71,52 @@ Binary-outcome noise: one game's result has SD 0.5 (win rate at p=0.5), so 1000 
   - In Elo terms vs a fixed 50% baseline: +10 Elo ~9,500 games; +20 Elo ~2,400; +50 Elo ~380 (one-sample two-sided). A/B of two unknown versions needs about double.
 - Standard error of win rate at p=0.5: 100 games +/-9.8 pts (95%); 400 +/-4.9; 1000 +/-3.1; 4000 +/-1.5. [Computed]
 - Ladder implication: Elo vs a 165-bot field is not a single-opponent win rate; ladder games are sparse and the pool changes, so local fixed-pool testing is the only way to resolve +10-20 Elo changes. [Likely]
+
+## 8. Claude Code docs: headless, permission modes, Remote Control (read 2026-11-11)
+
+Headless / non-interactive [Verified] https://code.claude.com/docs/en/headless
+- `claude -p "<prompt>"` runs non-interactively; exit code 0 on success, non-zero on failure; `--output-format text|json|stream-json`; `--continue` / `--resume <session_id>` to continue; JSON output includes `total_cost_usd`.
+- `--bare` is "the recommended mode for scripted and SDK calls" (skips hooks, skills, plugins, MCP, auto memory, CLAUDE.md; needs `ANTHROPIC_API_KEY`, no subscription login). Without `--bare`, `-p` runs project hooks and `.mcp.json` servers even in an untrusted folder.
+- `--allowedTools "Bash(git diff *),Read,Edit"` pre-approves tools; `--permission-prompts none` (v2.1.259+) denies anything that would prompt instead of waiting, for scheduled/unattended jobs. Since v2.1.302 `-p` starts in Manual mode if nothing sets a mode, so un-approved calls are denied.
+- SIGTERM exits with code 143 and leaves the turn unfinished; send SIGINT first to end the turn. `-p` waits for background work but stops idle waits after 10 min by default (`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`). `--max-budget-usd` caps spend and stops background work.
+Permission modes [Verified] https://code.claude.com/docs/en/permission-modes
+- `default`, `acceptEdits`, `plan`: expect a human. `dontAsk`: "Designed for unattended use", anything not pre-approved is denied ("for CI pipelines or restricted environments where you pre-define what Claude may do"). `auto`: a classifier reviews actions; "does not guarantee safety"; pauses and resumes prompting after 3 consecutive or 20 total blocks (so it can stall a headless run); broad `Bash(*)` allow rules are dropped. `bypassPermissions`: "Only use this mode in isolated environments like containers, VMs, or dev containers without internet access"; "offers no protection against prompt injection"; refuses to run as root/sudo outside a recognised sandbox; deny rules still apply; enable via `--permission-mode bypassPermissions` or `--dangerously-skip-permissions`.
+- Example from the page: `claude -p "run the test suite" --permission-mode dontAsk --allowedTools "Bash(npm test)" "Read"`.
+Sandboxing [Verified] https://code.claude.com/docs/en/sandboxing
+- OS-enforced boundary for Bash commands only (file tools, MCP, hooks run outside it). Linux needs bubblewrap + socat; WSL2 yes, WSL1 no; native Windows unsandboxed. Writes limited to the working dir (+ added dirs); reads are broad by default (incl. ~/.ssh unless denied); network via a proxy with an empty allowed-domain list. Off by default; `sandbox.enabled: true`; `sandbox.failIfUnavailable: true` to refuse to run unsandboxed. Docker is incompatible with the sandbox (relevant to a docker-based SC2 match harness).
+Remote Control [Verified] https://code.claude.com/docs/en/remote-control
+- Connects claude.ai/code or the Claude mobile app to a session running on your machine; execution and files stay local; the machine makes outbound HTTPS only, no inbound ports. Needs a claude.ai subscription login (Pro/Max/Ultra/Team/Enterprise); API-key auth is not supported.
+- `claude remote-control` (server mode) keeps a process running with a URL/QR; flags include `--name`, `--spawn same-dir|worktree`, `--capacity N` (default 32), `--permission-mode <mode>`, `--continue`. Interactive sessions reconnect automatically after sleep/network drop; server mode "gives up after roughly 10 minutes" of network outage and the process exits (needs a supervisor to restart). Permission prompts stay open until answered from any connected device. Transcript is stored on Anthropic servers while connected. Optional Trusted Devices.
+Supported way to run a long unattended session safely (summary of the docs above; combination is my synthesis) [Likely]
+- Dedicated non-root user in a container/VM or dev container (bypassPermissions needs that), OR the safer default of `claude -p ... --permission-mode dontAsk --allowedTools "<explicit narrow list>" --permission-prompts none` with sandboxing on (`sandbox.failIfUnavailable: true`), `--max-budget-usd` as a spend cap, `--output-format stream-json` logged to a file, `--bare` plus explicit `--settings`/`--mcp-config` so the run is reproducible, a supervisor (systemd) restarting with `--resume <session_id>`, and deny rules for anything destructive. Use Remote Control (server mode, `--permission-mode` set explicitly) only to watch/steer from a phone; it does not make the run unattended-safe by itself.
+- Subscription usage limits: seat/plan 5-hour and weekly windows apply; on hitting them v2.1.234+ can wait and auto-continue after reset (`autoContinueAtUsageLimit`). [Verified] https://code.claude.com/docs/en/costs
+
+## 2. How the top bots are built (publicly documented)
+
+- Nothing found documenting Atlas, Eris, Phobos, Deimos, Zozo, Horizon, Xena, ArgoBot or JimmyBotP: searches returned no source repos or write-ups; a suggested https://github.com/AresSC2/Deimos URL returned 404. [Not found]
+- Sharpened Edge is built on the open sharpy-sc2 framework (rule-based, Plan/Step build DSL), MIT: https://github.com/DrInfy/sharpy-sc2 [Verified that sharpy-sc2 is its author's framework per docs/RESEARCH.md:56-57; that the current ladder version equals the repo is Uncertain]
+- Do top Python bots use learned components? No public evidence found either way. [Not found]. The ladder bot image ships torch, tensorflow-cpu, stable-baselines3 and river, so learned components are possible (section 1) but unconfirmed for any named bot.
+
+## 4. Throughput of headless SC2 4.10 on Linux
+
+- No published loops-per-second or instances-per-core figures found. Blizzard's API docs only say the simulation uses fixed game loops and "faster" speed is 22.4 loops/s. [Not found] https://github.com/Blizzard/s2client-proto/blob/master/docs/protocol.md
+- Local data point from this repo: ladder-environment matches of 8:24-11:32 game time were played with bot step mean 1.4-2.9 ms and controller avg step 4.4-5.6 ms (/home/user/citadel-sc2-bot/docs/VERIFY_NOTES.md:1548-1560); wall-clock per game not recorded there. Measure on the target desktop: time N games at realtime=False with 1, 2, 4, 6 concurrent instances. [Uncertain]
+- local-play-bootstrap warns parallel runs need care (data folder thread-safety; host-network compose may not support concurrency). [Verified] https://github.com/aiarena/local-play-bootstrap
+
+## 7. Prior art: small-scale ML in ladder bots
+
+- No SC2 ladder bot-author write-up on bandit build selection, fight predictors or small RL micro found in searches. [Not found]
+- Related papers (Brood War / SC2 research, not ladder-bot write-ups): Facebook AI Research, "High-Level Strategy Selection under Partial Observability in StarCraft" (learned build-order switching with opponent estimation as auxiliary task; trained on random build-order switches; deployed in AIIDE 2018 via TorchCraftAI) https://www.alphaxiv.org/abs/1811.08568.md and https://torchcraft.github.io/TorchCraftAI/blog/2018/11/28/build-order-switch-retraining-has-arrived.html [Verified from search summaries; not read in full]. "Learning Macromanagement in StarCraft from Replays using Deep Learning" https://arxiv.org/pdf/1707.03743 (needs large replay sets) [Likely]. University of Alberta thesis on clustering build orders into strategies and opponent modelling https://era.library.ualberta.ca/files/cft848q99j/thesis_pdfa.pdf [Uncertain, summary only].
+- Data-need statements for these approaches: not verified. [Uncertain]
+
+## Could not confirm
+
+- Ladder CPU cores / RAM per bot, GPU availability, any bot-data size cap (none found in wiki, aiarena-docker, bootstrap, match-controller README).
+- Whether the live ladder uses the same MAX_GAME_TIME / timeout config as local-play-bootstrap (the only source read for it is the local config and the controller source in VERIFY_NOTES).
+- Image tag actually used on the ladder (aiarena-docker master lock file differs from the v0.8.0 image: numpy 2.2.6 vs 2.0.2, scipy 1.15.3 vs 1.17.0, sklearn 1.7.2 vs 1.8.0). onnxruntime absent in master.
+- Source repos or zip downloadability for the top-10 bots; aiarena.net/api/bots needs login.
+- Build details, learned components, authors of the named top bots.
+- Headless SC2 4.10 throughput numbers.
+- SC2 ladder-bot ML write-ups.
+- SPRT/SPSA/CMA-ES numbers for 385 parameters: fishtest wiki gives no parameter-count limit; CMA-ES/CLOP/Optuna dimension and noise guidance were not read in primary text (labels Likely/Uncertain above).
+- Claude Code: exact current behaviour of `bypassPermissions` as root inside this particular container, and a doc statement on how long an unattended `-p` session may run (not found; only spend cap `--max-budget-usd` and plan windows).
