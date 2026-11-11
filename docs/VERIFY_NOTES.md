@@ -2941,7 +2941,7 @@ Checked in source before the code relied on it (ares-sc2 v3.13.1 at `8730865`).
 
 | Check | Command | Result |
 |---|---|---|
-| ares bridge | `poetry run python scripts/test_ares_bridge.py` | PASS, 0 failed (20 checks) |
+| ares bridge | `poetry run python scripts/test_ares_bridge.py` | PASS, 0 failed (21 checks) |
 | opponent memory | `poetry run python scripts/test_opponent_memory.py` | 48/48 passed (38 before, 10 new) |
 | other offline tests | `test_threat_flags`, `test_attack_decision`, `test_m3_checks`, `test_counterattack_rules`, `test_m7_rules`, `test_error_guard --offline` | 31/31, 16/16, 14/14, 36/36, 234/234, 7/7 |
 | ladder history through the new memory rule | `poetry run python docs/v2_evidence/m8_memory_replay.py <cache>` | pre-raises over the same 367 games: PROXY 72 → 9 (a proxy structure followed in 4 of the 9), POOL_12 6 → 2, ONE_BASE_ALLIN 22 → 20, CANNON_RUSH 17 → 17 |
