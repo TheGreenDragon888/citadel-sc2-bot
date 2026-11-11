@@ -862,17 +862,29 @@ COUNTER_RELAUNCH_WAIT_S: float = 30.0  # Citadel: no new counterattack this soon
 DATA_DIR: str = "data"  # §2: Citadel writes only under ./data (ares's own file is ./data/<id>-protoss.json)
 OPPONENTS_SUBDIR: str = "opponents"
 MEMORY_CHEESE: Tuple[str, ...] = ("WORKER_RUSH", "CANNON_RUSH", "POOL_12", "PROXY", "ONE_BASE_ALLIN")  # user decision
-# weak sources that don't count toward the pre-raise (a Forge-first expand; an enemy probe alone,
-# which M2 already doesn't let end the opener)
-MEMORY_IGNORED_SOURCES: Tuple[Tuple[str, str], ...] = (("CANNON_RUSH", "forge_first"), ("CANNON_RUSH", "cannon_probe"))
+# M8 (user decision D4, docs/V2_PLAN.md): only these (threat, source) pairs count toward the
+# pre-raise: a structure that was seen (or, for the no-natural rule, looked for and not there), and
+# the worker rush, which has no structure and needs WORKER_RUSH_CONFIRM_MIN workers at our base.
+# Left out: unit-based ares flags, "missing production" (`proxy_missing`), early Zerglings, a
+# Forge-first expand and a lone enemy probe. They fire against normal openings too.
+MEMORY_CONFIRMED_SOURCES: Tuple[Tuple[str, str], ...] = (
+    ("WORKER_RUSH", "worker_rush"),
+    ("WORKER_RUSH", "ares:get_enemy_worker_rushed"),
+    ("CANNON_RUSH", "cannon_structures"),
+    ("POOL_12", "early_pool"),
+    ("PROXY", "proxy_structure"),
+    ("ONE_BASE_ALLIN", "no_natural"),
+    ("ONE_BASE_ALLIN", "ares:get_enemy_four_gate"),
+)
 MEMORY_LAST_GAMES: int = 3  # §5: the same cheese flag in >= MEMORY_MIN_GAMES of the last 3 games ...
 MEMORY_MIN_GAMES: int = 2  # ... is pre-raised at 0:00 as STRUCTURE evidence with a phase-only expiry
 MEMORY_KEEP_GAMES: int = 20  # threats_seen keeps entries from this many recent games
 MEMORY_SOURCE: str = "memory"  # flag source of a pre-raised flag (never counted for the next game)
-# Pre-raised flags that apply their plan but leave the ares opener running (user decision after the
-# M5 12-pool A/B): the same flag raised in game, or the opener reaching its `expand` step (a Nexus
-# the plan won't allow), ends it. Every other pre-raised cheese ends the opener at 0:00.
-MEMORY_KEEPS_OPENER: Tuple[str, ...] = ("POOL_12",)
+# Pre-raised flags that apply their plan but leave the ares opener running: the same flag raised in
+# game, or the opener reaching its `expand` step (a Nexus the plan won't allow), ends it. POOL_12
+# since the M5 12-pool A/B; M8 (user decision D4): every pre-raised cheese, so memory alone never
+# ends the opener.
+MEMORY_KEEPS_OPENER: Tuple[str, ...] = MEMORY_CHEESE
 # §5 has no phase rule for WORKER_RUSH (UNIT evidence); a pre-raised one ends after this time once
 # at most WORKER_RUSH_END_AT enemy workers are within BRIDGE_HOME_RADIUS of our bases (user decision)
 WORKER_RUSH_MEMORY_END_S: float = 150.0

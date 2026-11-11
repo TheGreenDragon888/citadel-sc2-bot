@@ -11,7 +11,8 @@ last 3 games" can be counted and weak sources left out):
   (source MEMORY_SOURCE) are never recorded, or a pre-raise would keep itself going;
 - `first_aggression_time`: the earliest §8 first-aggression time over all games;
 - pre-raise (§5): a cheese threat (MEMORY_CHEESE, user decision) raised in at least
-  MEMORY_MIN_GAMES of the last MEMORY_LAST_GAMES games, not counting MEMORY_IGNORED_SOURCES.
+  MEMORY_MIN_GAMES of the last MEMORY_LAST_GAMES games, counting only MEMORY_CONFIRMED_SOURCES
+  (M8, user decision D4: a seen structure or a confirmed worker rush, never an inference).
 A missing or unreadable file starts a fresh record (logged); it never stops the game.
 """
 
@@ -23,7 +24,7 @@ from loguru import logger
 
 from bot.constants import (
     MEMORY_CHEESE,
-    MEMORY_IGNORED_SOURCES,
+    MEMORY_CONFIRMED_SOURCES,
     MEMORY_KEEP_GAMES,
     MEMORY_LAST_GAMES,
     MEMORY_MIN_GAMES,
@@ -85,11 +86,11 @@ def recurring_cheese(record: dict[str, Any]) -> dict[str, int]:
     """Cheese threats raised in >= MEMORY_MIN_GAMES of the last MEMORY_LAST_GAMES games: name -> games."""
     games = record["games"]
     last = set(range(games - MEMORY_LAST_GAMES + 1, games + 1))
-    ignored = set(MEMORY_IGNORED_SOURCES)
+    confirmed = set(MEMORY_CONFIRMED_SOURCES)
     seen: dict[str, set[int]] = {}
     for entry in record["threats_seen"]:
         threat, source, game = entry["threat"], entry.get("source", ""), entry.get("game", 0)
-        if threat in MEMORY_CHEESE and (threat, source) not in ignored and game in last:
+        if threat in MEMORY_CHEESE and (threat, source) in confirmed and game in last:
             seen.setdefault(threat, set()).add(game)
     return {threat: len(g) for threat, g in sorted(seen.items()) if len(g) >= MEMORY_MIN_GAMES}
 

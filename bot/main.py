@@ -129,9 +129,10 @@ class CitadelBot(AresBot):
 
     def _load_memory(self) -> None:
         """§5: load the opponent's record; pre-raise the cheese it showed in 2 of its last 3 games
-        as STRUCTURE evidence (phase-only expiry) that acts like the same flag raised in game,
-        ending the opener where that flag would (user decision), except MEMORY_KEEPS_OPENER
-        threats, whose plan applies while the opener runs on (`DefensePlanner._maybe_end_opener`)."""
+        as STRUCTURE evidence (phase-only expiry). Its plan applies, but MEMORY_KEEPS_OPENER threats
+        (M8, user decision D4: all of them) leave the opener running; the same flag raised in game,
+        or the opener's expand step under a plan that holds expansions, ends it
+        (`DefensePlanner._maybe_end_opener`, `_end_opener_at_expand`)."""
         try:
             self.memory = OpponentStore(self.opponent_id)
             self.memory.load()

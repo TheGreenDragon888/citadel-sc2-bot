@@ -388,6 +388,8 @@ and any ladder upload.
 
 ## Part 8. Decisions needed
 
+**Decided 2026-11-11 (user): D1 yes, D4 yes, D6 yes. M8 started.**
+
 | # | Decision | My recommendation |
 |---|---|---|
 | D1 | Accept this plan's order (M8 first)? | Yes. M8's two fixes are small and measured |

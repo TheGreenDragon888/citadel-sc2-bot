@@ -5,15 +5,18 @@ Runs every intel tick after `super().on_step()`, so ares's managers have updated
 are lazy properties that only update (and set their latches) when read (§11.1).
 
 A True ares flag raises an ARES-evidence flag that expires like its basis (§5):
-- unit-based flags as UNIT evidence, confirmed each tick that a matching enemy unit is visible
-  within BRIDGE_HOME_RADIUS of our bases (the ares boolean itself often never resets, so it
-  can't be the confirmation, and units far away are not a threat to us yet). After the flag
-  expires it is raised again only when the ares flag is True and such units are there.
+- unit-based flags as UNIT evidence, raised and confirmed only while a matching enemy unit is
+  visible within BRIDGE_HOME_RADIUS of our bases (the ares boolean itself often never resets and
+  counts units seen anywhere, so it can't be the evidence, and units far away are not a threat to
+  us yet). M8: this holds for the first raise too; before, the boolean alone raised the flag.
+- ares's reaper flag ("a Reaper was ever seen") is not bridged (M8): a Reaper is a normal Terran
+  opening, not proxy evidence. On the ladder it raised PROXY in games with no proxy structure and,
+  through the opponent memory, kept Citadel on one base (docs/V2_PLAN.md 2.3).
 - ares's four-gate flag (a Gateway count) as STRUCTURE evidence, with the Gateways as tags.
 A flag is raised (or raised again) only inside the ares flag's own time window
 (`constants.ARES_INTEL`), or before `BRIDGE_RAISE_UNTIL_S` for flags ares can raise at any
-time (the reaper flag): a latched flag would otherwise re-raise its plan for the whole game
-whenever a matching unit shows up.
+time: a latched flag would otherwise re-raise its plan for the whole game whenever a matching
+unit shows up.
 """
 
 from dataclasses import dataclass
@@ -64,7 +67,6 @@ BRIDGES: tuple[Bridge, ...] = (
         "get_enemy_marine_rush", (Threat.PROXY, Threat.ONE_BASE_ALLIN), Evidence.UNIT,
         frozenset({UnitTypeId.MARINE}),
     ),
-    Bridge("get_enemy_went_reaper", (Threat.PROXY,), Evidence.UNIT, frozenset({UnitTypeId.REAPER})),
     Bridge("get_enemy_marauder_rush", (Threat.ONE_BASE_ALLIN,), Evidence.UNIT, frozenset({UnitTypeId.MARAUDER})),
     Bridge(
         "get_enemy_four_gate", (Threat.ONE_BASE_ALLIN,), Evidence.STRUCTURE,
@@ -110,9 +112,10 @@ class AresBridge:
                     continue
                 if not value or now > self._raise_until(bridge):
                     continue
-                raised_before = any(r.threat == threat and r.source == source for r in self.flags.history)
-                if raised_before and bridge.expires_as == Evidence.UNIT and not evidence:
-                    continue  # latched ares flag, no new units: don't re-raise (§5)
+                if bridge.expires_as == Evidence.UNIT and not evidence:
+                    # M8: the ares boolean alone is not a threat to us (ares counts units seen
+                    # anywhere, and often never resets): every raise needs a matching unit here
+                    continue
                 self.flags.raise_flag(
                     threat,
                     Evidence.ARES,

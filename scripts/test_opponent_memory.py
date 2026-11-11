@@ -104,6 +104,19 @@ def main() -> int:
     check("pre-raise: ONE_BASE_ALLIN counts (user decision)", recurring_cheese(games([ob], [ob], [])) == {"ONE_BASE_ALLIN": 2})
     air = ("AIR_HARASS", "tech", 180.0)
     check("pre-raise: non-cheese threats don't", recurring_cheese(games([air], [air], [air])) == {})
+    # M8 (D4): only confirmed sightings count
+    for weak in (("PROXY", "ares:get_enemy_went_reaper", 180.0), ("PROXY", "proxy_missing", 110.0),
+                 ("PROXY", "ares:get_enemy_marine_rush", 150.0), ("POOL_12", "early_lings", 100.0),
+                 ("POOL_12", "ares:get_enemy_ling_rushed", 120.0), ("ONE_BASE_ALLIN", "ares:get_enemy_marauder_rush", 200.0)):
+        check(f"pre-raise: {weak[0]} from {weak[1]} doesn't count (M8)", recurring_cheese(games([weak], [weak], [weak])) == {})
+    ps = ("PROXY", "proxy_structure", 95.0)
+    check("pre-raise: a seen proxy structure counts", recurring_cheese(games([ps], [], [ps])) == {"PROXY": 2})
+    ep = ("POOL_12", "early_pool", 70.0)
+    check("pre-raise: a seen early Pool counts", recurring_cheese(games([ep], [ep], [])) == {"POOL_12": 2})
+    check("pre-raise: weak and confirmed sources in the same games count the confirmed ones only",
+          recurring_cheese(games([ps, ("PROXY", "proxy_missing", 110.0)], [("PROXY", "proxy_missing", 110.0)], [])) == {})
+    from bot.constants import MEMORY_CHEESE, MEMORY_KEEPS_OPENER
+    check("pre-raise: no pre-raised cheese ends the opener by itself (M8)", set(MEMORY_KEEPS_OPENER) == set(MEMORY_CHEESE))
     mem = ("PROXY", MEMORY_SOURCE, 0.0)
     check("pre-raise: a pre-raised flag doesn't keep itself going", recurring_cheese(games([mem], [mem], [mem])) == {})
 

@@ -2925,3 +2925,25 @@ No crashes and no caught bot errors; every `ROW` has `log=ok`, `err=0` and `raa=
 - Every played game has its STARTUP line (419-1,123 ms, §6 limit 5 s) and record version 7 (the M7 code); 0 guarded errors and 0 tracebacks in all 25 logs; max step 66.7-151.1 ms, so the 200 ms step guard never switched on; AI Arena's average step 5.0-14.2 ms. Opponent memory from M6's 263 games loads (e.g. Molly: "9 games (2 won, 7 lost)"), and pre-raises from it fired (PROXY, POOL_12, ONE_BASE_ALLIN, CANNON_RUSH).
 - **Match 5050882 vs zergid0: a 60:00 tie.** AI Arena closes the game at its time limit, so `on_end` never ran: no `METRIC game` line, and neither the game record nor the opponent memory got this game. Citadel stayed on one base all game (every probe sent to the natural died to Zerglings, 61 probes lost in all, 0 left from 23:00) and never reached `ATTACK_START_SUPPLY` (150; at most 125), so its 90-supply army (value killed 23,200, lost 775) never launched (§4.5.2; the §4.7 end-game rules lower the level gate, not the supply gate). Carried forward; the rematch (game 20) was won in 11.9 min with POOL_12 pre-raised.
 - **Match 5051673 vs dantalion: not played, not counted.** The game ran to 18:12 (24,758 loops), then dantalion's connection hit the arena's 30 s bot timeout: the game controller's result line from that websocket carries dantalion's build tag (`build_TwoGateCoreGas2`); Citadel was waiting on a step response (`Cannot receive: Connection already closed`, no slow step before) and exited 0, dantalion exited 1. AI Arena scored `InitializationError` for both, no result. The M6 zip had matches scored the same way (e.g. 5038983 vs ZerglingZwickel).
+
+## M8 findings (2026-11-11)
+
+Checked in source before the code relied on it (ares-sc2 v3.13.1 at `8730865`).
+
+| Item | Finding | Where |
+|---|---|---|
+| ares reaper flag | `get_enemy_went_reaper` is "at least one Reaper ever seen", with no time window and no reset. It says nothing about a proxy | `bot/constants.py` `ARES_INTEL` (read from `ares-sc2/src/ares/managers/intel_manager.py` in M0) |
+| First raise of a bridged unit flag | Before M8 the first raise needed only the ares boolean; the "unit within `BRIDGE_HOME_RADIUS`" test applied to confirms and re-raises. Now every raise of a UNIT bridge needs it | `bot/intel/ares_bridge.py` `AresBridge.update` |
+| Which sources count for the memory pre-raise (user decision D4) | `MEMORY_CONFIRMED_SOURCES` in `bot/constants.py`. WORKER_RUSH has no structure; its two unit-confirmed sources stay in (it was never pre-raised in the 367 ladder games, so this changes nothing measured). Ask before changing it | `bot/memory/opponent_store.py` `recurring_cheese` |
+| Pre-raised flags and the opener | `MEMORY_KEEPS_OPENER` is now every cheese: the plan applies, the opener runs on, and `_end_opener_at_expand` ends it only at an expand step the plan holds | `bot/main.py` `_load_memory`, `bot/defense/defense_planner.py` |
+
+### M8 (b) evidence, offline (no SC2 in this session)
+
+| Check | Command | Result |
+|---|---|---|
+| ares bridge | `poetry run python scripts/test_ares_bridge.py` | PASS, 0 failed (20 checks) |
+| opponent memory | `poetry run python scripts/test_opponent_memory.py` | 48/48 passed (38 before, 10 new) |
+| other offline tests | `test_threat_flags`, `test_attack_decision`, `test_m3_checks`, `test_counterattack_rules`, `test_m7_rules`, `test_error_guard --offline` | 31/31, 16/16, 14/14, 36/36, 234/234, 7/7 |
+| ladder history through the new memory rule | `poetry run python docs/v2_evidence/m8_memory_replay.py <cache>` | pre-raises over the same 367 games: PROXY 72 → 9 (a proxy structure followed in 4 of the 9), POOL_12 6 → 2, ONE_BASE_ALLIN 22 → 20, CANNON_RUSH 17 → 17 |
+
+Not checked: any game. The in-game effect (two bases at 5:00, results vs the Terran bots) needs the rig or the ladder.
