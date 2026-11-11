@@ -308,8 +308,8 @@ runs on a CPU inside the step budget.
 - Citadel's own test bots (`scripts/test_bots/`) cover four cheeses; none harasses. The built-in
   AI stays as the regression check, not as the target.
 - `scripts/ladder_env_test.py` already runs the official AI Arena images locally. It is the
-  natural way to run downloaded zips, since they expect the ladder's layout. Whether it can run
-  several matches at once is PENDING (scripts audit).
+  natural way to run downloaded zips, since they expect the ladder's layout. It sets no CPU or
+  memory limits and runs one match at a time; running several at once is M8 work (**Reported**).
 - **Guard against tuning to the pool:** tune on one set of games, accept a change only on a
   separate set, and confirm on the ladder before keeping it.
 
