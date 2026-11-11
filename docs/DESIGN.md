@@ -134,7 +134,7 @@ Chrono Nexus probes until the Cybernetics Core completes, then chrono Warp Gate 
   - Robotics Facility at ~4:00.
   - 3rd Nexus at ~3:50–4:15 if no ling, roach or ravager flag is active.
 - **B2. PvZ safe:** as B, but a Robotics Facility replaces the Stargate and a 3rd Gateway goes down at 3:00.
-- **C. PvP, 2 Gate Robo (Liquipedia "ultra-safe" answer to 4-gate; prioritises safety against 4-gate):**
+- **C. PvP, 2 Gate Robo (Liquipedia "ultra-safe" answer to 4-gate; prioritises safety against 4-gate): **Retired from the opener cycle in M8** (user decision, 2026-11-11: 19-46 on the ladder against C2's 73-38); the build stays for tests:**
   1. 14 Pylon.
   2. 16 Gateway (scout).
   3. 17 Assimilator.

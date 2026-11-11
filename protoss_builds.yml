@@ -31,9 +31,12 @@ BuildChoices:
         Cycle:
             - B_PvZ
             - B2_PvZSafe
+    # M8 (user decision, 2026-11-11): C_2GateRobo is out of the cycle. On the ladder it went 19-46
+    # against C2_1GateExpand's 73-38 (docs/V2_PLAN.md 2.3). Its build below and its schedule in
+    # bot/constants.py stay, so `--opener C_2GateRobo` still runs it in tests. Old entries for it
+    # in ./data/<id>-protoss.json are ignored (ares counts only builds in the cycle).
     Protoss:
         Cycle:
-            - C_2GateRobo
             - C2_1GateExpand
     # Race unknown at start: A with a Stalker instead of the Adept (§4.1 A, step 8)
     Random:

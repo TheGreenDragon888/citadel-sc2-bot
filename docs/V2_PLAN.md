@@ -1,8 +1,7 @@
 # V2 plan: from rank 48 to the top 10
 
-**Status: complete, waiting on the decisions in Part 8 (2026-11-11).** One item is still open:
-the command-by-command Ubuntu setup (6.7), which depends on D5 and D6. Nothing in the bot has
-been changed.
+**Status: plan complete (2026-11-11); M8 started** (decisions recorded in Part 8). The audit
+itself changed nothing in the bot; M8's changes are listed in `docs/STATUS.md`.
 
 **What this file is.** An audit and a plan, asked for by the user on 2026-11-10. No bot code
 changes, no uploads. Every claim is labelled **Verified** (evidence given), **Likely** or
@@ -353,14 +352,10 @@ session, or you, reads that branch. Nothing merges by itself.
 
 ### 6.7 Setup on the Ubuntu boot
 
-PENDING: written out command by command, with what each part does, once D5 and D6 (Part 8) are
-decided, because the steps differ if Claude Code is installed there. The outline:
-1. Install git, Python 3.12, Poetry and Docker.
-2. Clone the repo with its submodule; `poetry install`.
-3. Download headless SC2 4.10 and copy the maps (the commands are already in
-   `docs/M7_PLAN.md` "Step S").
-4. Run one offline test and one game as a smoke check.
-5. Start a batch inside `tmux`, so it keeps running after you disconnect.
+Written out command by command in `docs/UBUNTU_RIG.md`, including Claude Code with Remote
+Control and an assessment of the local Ollama model.
+
+---
 
 ## Part 7. Roadmap
 
@@ -388,7 +383,9 @@ and any ladder upload.
 
 ## Part 8. Decisions needed
 
-**Decided 2026-11-11 (user): D1 yes, D4 yes, D6 yes. M8 started.**
+**Decided 2026-11-11 (user): D1 yes, D4 yes, D6 yes. M8 started.** Also decided: `C_2GateRobo`
+retired from the opener cycle; the scouting-probe CANNON_RUSH flag stays (it doesn't end the
+opener, and games with it go 58-61); upload the M8 (b) version now.
 
 | # | Decision | My recommendation |
 |---|---|---|
