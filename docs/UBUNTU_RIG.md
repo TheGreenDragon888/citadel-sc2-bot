@@ -3,9 +3,9 @@
 How to set up the desktop's Ubuntu Server install to play batches of test games while you are
 away. Written for someone new to Linux: every command is followed by what each part does.
 
-**What this gives you today:** the existing batch runner (`scripts/run_matches.py`) against the
-built-in AI and the four scripted cheese bots, one game after another. **Not built yet (M8 a):**
-several games at once, downloaded ladder bots as opponents, and a results file.
+**What this gives you:** the batch runner (`scripts/run_matches.py`) against the built-in AI and
+the four scripted cheese bots, and the sparring rig (`scripts/rig.py`, section 8.1), which plays
+the ladder zip against real ladder bots, several games at once, and writes a results file.
 
 **Where things were checked:** the SC2 and Poetry steps are the ones this project already uses in
 cloud sessions (README "Setup", `docs/M7_PLAN.md` "Step S"). The Claude Code commands are from its
@@ -194,6 +194,48 @@ sudo usermod -aG docker $USER
 - `docker.io` is Docker, which runs AI Arena's own match containers.
 - `usermod -aG docker $USER` adds you to the `docker` group so you can use it without `sudo`.
   Log out and back in afterwards.
+
+### 8.1 Sparring against real ladder bots
+
+Needs Docker (above) and your AI Arena API token, which the download uses to read the bot list.
+
+```bash
+export UPLOAD_API_TOKEN=<your token>
+```
+`export NAME=value` sets a variable for this terminal session; programs started from it can read
+it. Put the token where `<your token>` is. It is not saved anywhere.
+
+```bash
+cd ~/citadel-sc2-bot
+poetry run python scripts/rig.py fetch Thssprtssbt Mulebot norman sludgement2-revived
+```
+Downloads those four bots (their authors made them downloadable) into `ladder_env/sparring/`.
+That folder is ignored by git.
+
+```bash
+poetry run python scripts/create_ladder_zip.py
+```
+Builds `publish/Citadel.zip` from the code you have checked out. The rig tests that zip, exactly
+as the ladder would run it.
+
+```bash
+poetry run python scripts/rig.py play --opponent Thssprtssbt --games 20 --jobs 4 --label my-first-run
+```
+- `--games 20`: twenty matches, cycling through the 7 ladder maps.
+- `--jobs 4`: four matches at once. Each match runs two copies of the game and two bots, so
+  allow about 2 CPU threads per job; 4 or 5 is sensible on your 12 threads. Start with 4 and
+  watch `htop` (press `q` to leave it).
+- `--label`: the results go to `data/rig/my-first-run/results.jsonl`, one line per match.
+
+It prints a `ROW` line per finished match and a table at the end: wins, losses, the win rate with
+its 95% range, and how many games Citadel was on one base at 6:00. To see the table again:
+
+```bash
+poetry run python scripts/rig.py report data/rig/my-first-run
+```
+
+The opponents are other people's programs. They only run inside Docker containers, as they do on
+the ladder, not directly on your machine.
 
 ## 9. Claude Code on this machine: worth it, for two things
 

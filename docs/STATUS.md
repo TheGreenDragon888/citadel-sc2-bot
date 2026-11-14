@@ -21,6 +21,8 @@ findings and Citadel's choices are in `docs/VERIFY_NOTES.md`.
 
 | File | What it does |
 |---|---|
+| `scripts/rig.py` | M8 test rig: `fetch` downloads publicly downloadable ladder bots (and the data their authors share) into `ladder_env/sparring/`; `play` runs the ladder zip against one in the arena-client containers, in parallel lanes (`ladder_env/rig/lane<k>`, each with a private Docker network and its own Citadel ./data), and appends to `data/rig/<label>/results.jsonl`; `report` prints wins, a 95% interval and one-base-at-6:00 |
+| `scripts/run_matches.py` (M8) | `--json FILE` (one JSON line per game), `--stop N` (split a batch over processes), `--set NAME=VALUE` (a number or True/False from `bot/constants.py` for this run only) |
 | `bot/intel/threat_flags.py` | `FlagStore`: flags keyed by (threat, source), §5 expiry rules, history for the end-of-game report |
 | `bot/intel/ares_bridge.py` | ares intel flags → ThreatFlags (`BRIDGES` table) |
 | `bot/intel/detectors.py` | Citadel's detectors: worker rush, cannon structures/probe, early Pool, early lings, proxy (missing/far production), no natural; also the §5 phase rules (`expiry_context`) and scouting state (`main_scouted_at`, `enemy_workers_in_main`, `natural_seen_at`) |
@@ -60,6 +62,7 @@ Every threshold is in `bot/constants.py`.
 | Check | Command |
 |---|---|
 | ThreatFlag expiry unit test (no game) | `poetry run python scripts/test_threat_flags.py` |
+| M8 rig (Docker running, `UPLOAD_API_TOKEN` set for `fetch`) | `poetry run python scripts/rig.py fetch <names>`; `poetry run python scripts/rig.py play --opponent <name> --games 20 --jobs 2 --label <label>`; `poetry run python scripts/rig.py report data/rig/<label>` |
 | M8 ares bridge (no game) / memory replay over ladder history | `poetry run python scripts/test_ares_bridge.py`; `poetry run python docs/v2_evidence/m8_memory_replay.py <cache>` (cache from `docs/v2_evidence/fetch.py`, `fetch_logs.py`, `standing.py`) |
 | M2 acceptance, one batch per cheese bot | `poetry run python scripts/run_matches.py --opponent worker_rush --map all --total 10 --seed 100` (also `cannon_rush`, `twelve_pool`, `proxy_rax`) |
 | One cheese variant | add `--variant natural`/`main` (`cannon_rush`) or `third`/`center` (`proxy_rax`) |

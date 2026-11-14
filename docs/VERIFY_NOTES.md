@@ -2972,3 +2972,15 @@ md5 `7f51e00547dcca176db4bcc23ff17d6c`, bot data on. At upload the old zip stood
 division 4, 207 Season 2 games at 50.2% (it was 1654 and division 3 on 2026-11-11). Ladder check:
 `poetry run python scripts/ladder_watch.py --first 20`, then the one-base-at-5:00 share over the
 next 100 games with `docs/v2_evidence/` (target under 15%; 35% before).
+
+### M8 (a) findings: the rig (2026-11-14)
+
+| Item | Finding | How it was found |
+|---|---|---|
+| Parallel arena clients on one machine | The v0.8.0 proxy always listens on port 8080: neither `ACPROXY_PORT` nor a `PORT` line in `config.toml` moves it, and the binary holds no such setting name. So the host-network layout runs one match at a time. With a private Docker network per work folder (local-play-bootstrap's default layout, service names as hosts) several run side by side | `docker run` of the proxy with each setting ("listening on 0.0.0.0:8080" every time); `strings` on the binary; two lanes played to the end at once |
+| Private Docker networks in the cloud container | They work (`docker run` on the default bridge, and compose networks). The IPv4 shim is still needed | trial run |
+| Public bot zips | `GET /api/bots/?name=<name>` then `GET /api/bots/<id>/zip/` with the token; md5 equals the site's `bot_zip_md5hash`. 9 of 165 active bots allow it | `rig.py fetch` |
+| Bots that need their ladder data | Thssprtssbt stops at 6 s without `data/learned.txt`. Where the author also shares the bot data (`bot_data_publicly_downloadable`), `GET /api/bots/<id>/data/` gives it; `fetch` takes it and each lane starts the opponent from it. Shared: Thssprtssbt, Mulebot. Not shared (and not needed to start): norman, sludgement2-revived | first trial: `FileNotFoundError: data/learned.txt`; second trial played to the end |
+| Bot types | python (Thssprtssbt, Mulebot), nodejs (norman) and cpplinux (sludgement2-revived, 86 MB zip) all start in `aiarena/arenaclient-bot:v0.8.0` | one full game each |
+| `--set` in `run_matches.py` | Applied to `bot.constants` before `import run`, so every `from bot.constants import X` sees the new value (checked: `bot.army.army.ARMY_RECALL_FRACTION`, `bot.memory.opponent_store.MEMORY_MIN_GAMES`). A constant that `constants.py` reads again to compute another is refused (checked with `ast`, comments don't count) | offline check |
+| Speed in this 4-core container | two matches at once: 3 to 10 minutes each | trial runs |
