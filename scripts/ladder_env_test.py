@@ -74,6 +74,7 @@ class Match:
     opponent_id: str  # what Citadel gets as --OpponentId
     citadel_seat: int  # 1 or 2
     map_name: str
+    opponent_type: str = "python"  # the arena client's bot type (python, cpplinux, nodejs, dotnetcore, java)
 
 
 # scripted cheese bots as ladder bots: folder -> (TEST_BOTS name, race, seed, variant)
@@ -216,7 +217,10 @@ def fetch_sc2_controller(dest: Path) -> None:
     dest.chmod(0o755)
 
 
-def prepare(workdir: Path, zip_path: Path, keep_data: bool, matches: list[Match]) -> None:
+def prepare(workdir: Path, zip_path: Path, keep_data: bool, matches: list[Match], bridge: bool = False) -> None:
+    """`bridge`: give this workdir's four containers a private Docker network (local-play-bootstrap's
+    default layout) instead of the host's. scripts/rig.py uses it to run several workdirs side by
+    side: the v0.8.0 proxy always listens on port 8080, so only one can use the host network."""
     if subprocess.run(["docker", "info"], capture_output=True).returncode != 0:
         raise SystemExit("Docker isn't running (start it with `dockerd &` in this container)")
     for image in (PROXY_IMAGE, BOT_IMAGE):
@@ -233,7 +237,13 @@ def prepare(workdir: Path, zip_path: Path, keep_data: bool, matches: list[Match]
     if not bootstrap.exists():
         run(["git", "clone", "-q", BOOTSTRAP_REPO, str(bootstrap)])
     run(["git", "-C", str(bootstrap), "checkout", "-q", BOOTSTRAP_COMMIT])
-    shutil.copy(bootstrap / "config.toml", workdir / "config.toml")
+    config = (bootstrap / "config.toml").read_text()
+    if bridge:
+        for key, host in (("BOT_CONT_1_HOST", "bot_controller1"), ("BOT_CONT_2_HOST", "bot_controller2"), ("SC2_CONT_HOST", "sc2_controller")):
+            config, found = re.subn(rf'(?m)^{key}\s*=\s*"[^"]*"', f'{key}="{host}"', config)
+            if found != 1:
+                raise SystemExit(f"config.toml: expected one {key} line, found {found}")
+    (workdir / "config.toml").write_text(config)
 
     sc2_path = Path(os.environ.get("SC2PATH", Path.home() / "StarCraftII")).resolve()
     maps = workdir / "maps"
@@ -255,7 +265,7 @@ def prepare(workdir: Path, zip_path: Path, keep_data: bool, matches: list[Match]
         if any(m.opponent == folder for m in matches):
             package_cheese_bot(bots / folder, name, race, seed, variant)
 
-    (workdir / "docker-compose.yml").write_text(
+    compose = (
         COMPOSE.format(
             tag=IMAGE_TAG,
             proxy_image=PROXY_IMAGE,
@@ -265,6 +275,19 @@ def prepare(workdir: Path, zip_path: Path, keep_data: bool, matches: list[Match]
             shim_volume='\n      - "./ipv4only.so:/app/ipv4only.so:ro"' if shim else "",
         )
     )
+    if bridge:
+        compose = compose.replace("    network_mode: host\n", "")
+        for old, new in (
+            ("ACSC2_PROXY_HOST=127.0.0.1", "ACSC2_PROXY_HOST=proxy_controller"),
+            ("ACBOT_PROXY_HOST=127.0.0.1", "ACBOT_PROXY_HOST=proxy_controller"),
+            ("ACPROXY_BOT_CONT_1_HOST=127.0.0.1", "ACPROXY_BOT_CONT_1_HOST=bot_controller1"),
+            ("ACPROXY_BOT_CONT_2_HOST=127.0.0.1", "ACPROXY_BOT_CONT_2_HOST=bot_controller2"),
+            ("ACPROXY_SC2_CONT_HOST=127.0.0.1", "ACPROXY_SC2_CONT_HOST=sc2_controller"),
+        ):
+            if old not in compose:
+                raise SystemExit(f"compose template: {old} not found")
+            compose = compose.replace(old, new)
+    (workdir / "docker-compose.yml").write_text(compose)
     log(f"SETUP workdir {workdir}; IPv4 shim {'on (no IPv6 in this kernel)' if shim else 'off'}; SC2 {sc2_path}")
 
 
@@ -294,7 +317,7 @@ def package_cheese_bot(folder: Path, name: str, race: str, seed: int, variant: O
 
 def matches_line(match_no: int, match: Match) -> str:
     citadel = (f"le-{CITADEL.lower()}", CITADEL, "P", "python")
-    opponent = (match.opponent_id, match.opponent, match.race, "python")
+    opponent = (match.opponent_id, match.opponent, match.race, match.opponent_type)
     first, second = (citadel, opponent) if match.citadel_seat == 1 else (opponent, citadel)
     return ",".join([*first, *second, match.map_name])
 

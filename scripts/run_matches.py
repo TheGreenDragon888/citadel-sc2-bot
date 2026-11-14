@@ -27,6 +27,16 @@ counterattacks launched (each one's end reason), `pre` the flags pre-raised from
 games already in this opponent's record, `log` whether this game's §8 line is in
 ./data/logs/games.jsonl, `guard` the §6 step guard activations. The M5 summary line counts crashes
 and games whose §8 line was written (M5 acceptance: no crash in 30 local games).
+
+M8 (the test rig):
+- `--json FILE` appends one JSON line per finished game (the row's fields plus the batch's
+  settings), so results can be counted by a program instead of read off the screen.
+- `--stop N` ends after game N. With `--start`, one batch can be split over several processes
+  (games keep their map, race and seed): `--total 40 --start 1 --stop 10`, `--start 11 --stop 20`, ...
+  Don't split a batch that uses `--opponent-id`: its games must run in order to build the memory.
+- `--set NAME=VALUE` (repeatable) changes a number or True/False in bot/constants.py for this run
+  only, before any bot module reads it. The file is not edited. A constant that constants.py itself
+  uses to compute another one is refused, because the computed value would keep the old number.
 """
 
 import json
@@ -51,6 +61,50 @@ ROOT: Path = Path(__file__).resolve().parent.parent
 # run.py resolves config.yml and the ares-sc2 import paths relative to the working directory
 os.chdir(ROOT)
 sys.path.insert(0, str(ROOT))
+
+
+
+def apply_overrides(argv: list[str]) -> dict[str, object]:
+    """`--set NAME=VALUE`: set simple constants in bot.constants before bot modules import them.
+    Runs before argparse because `import run` below already imports the bot."""
+    pairs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "--set"]
+    pairs += [a.split("=", 1)[1] for a in argv if a.startswith("--set=")]
+    if not pairs:
+        return {}
+    for path in ("ares-sc2/src/ares", "ares-sc2/src", "ares-sc2"):  # as run.py does
+        if path not in sys.path:
+            sys.path.append(path)
+    import re
+
+    import bot.constants as constants
+
+    source = (ROOT / "bot" / "constants.py").read_text()
+    applied: dict[str, object] = {}
+    for pair in pairs:
+        name, sep, text = pair.partition("=")
+        if not sep or not hasattr(constants, name):
+            sys.exit(f"--set {pair}: expected NAME=VALUE with a name from bot/constants.py")
+        old = getattr(constants, name)
+        if isinstance(old, bool):
+            if text not in ("True", "False"):
+                sys.exit(f"--set {pair}: {name} is True/False")
+            new: object = text == "True"
+        elif isinstance(old, (int, float)):
+            try:
+                new = type(old)(text)
+            except ValueError:
+                sys.exit(f"--set {pair}: {name} is {type(old).__name__} ({old!r})")
+        else:
+            sys.exit(f"--set {pair}: {name} is a {type(old).__name__}; only numbers and True/False can be set")
+        if len(re.findall(rf"\b{re.escape(name)}\b", source)) > 1:
+            sys.exit(f"--set {pair}: {name} is used again inside bot/constants.py, so a value computed from it would keep the old number")
+        setattr(constants, name, new)
+        applied[name] = new
+        print(f"SET {name} = {new!r} (file value {old!r})")
+    return applied
+
+
+OVERRIDES: dict[str, object] = apply_overrides(sys.argv)
 
 import run  # noqa: E402  (also puts ares-sc2 on sys.path)
 from sc2 import maps  # noqa: E402
@@ -195,6 +249,12 @@ def parse_args() -> argparse.Namespace:
         help="the ladder's opponent id to give Citadel (default none, as in local games): enables "
         "opponent memory in ./data/opponents/<id>.json and ares's ./data/<id>-protoss.json",
     )
+    parser.add_argument("--stop", type=int, default=None, help="last game number to play (default: the last one)")
+    parser.add_argument("--json", type=Path, default=None, help="append one JSON line per finished game to this file")
+    parser.add_argument(
+        "--set", action="append", default=[], metavar="NAME=VALUE",
+        help="set a number or True/False from bot/constants.py for this run only (repeatable)",
+    )
     args = parser.parse_args()
     if args.games < 1:
         parser.error("--games must be at least 1")
@@ -338,7 +398,7 @@ def main() -> int:
 
     rows = []
     for i, (map_name, opp_race) in enumerate(zip(schedule, races), start=1):
-        if i < args.start:
+        if i < args.start or (args.stop is not None and i > args.stop):
             continue
         if args.opponent:
             bot_class = TEST_BOTS[args.opponent][0]
@@ -460,6 +520,16 @@ def main() -> int:
             }
         )
         print(f"ROW {format_row(rows[-1])}", flush=True)
+        if args.json is not None:
+            args.json.parent.mkdir(parents=True, exist_ok=True)
+            line = {
+                **{k: (dict((" ".join(key), n) for key, n in v.items()) if isinstance(v, Counter) else v) for k, v in rows[-1].items()},
+                "opponent": args.opponent or f"{difficulty.name} {ai_build.name}", "opponent_id": args.opponent_id,
+                "game_seed": game_seed, "forced_opener": args.opener, "overrides": OVERRIDES,
+                "finished": datetime.now().isoformat(timespec="seconds"),
+            }
+            with open(args.json, "a") as f:
+                f.write(json.dumps(line, separators=(",", ":"), default=str) + "\n")
 
     counts = Counter(row["outcome"] for row in rows)
     decided = counts[Result.Victory.name] + counts[Result.Defeat.name] + counts[Result.Tie.name]
