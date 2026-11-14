@@ -74,11 +74,11 @@ def apply_overrides(argv: list[str]) -> dict[str, object]:
     for path in ("ares-sc2/src/ares", "ares-sc2/src", "ares-sc2"):  # as run.py does
         if path not in sys.path:
             sys.path.append(path)
-    import re
+    import ast
 
     import bot.constants as constants
 
-    source = (ROOT / "bot" / "constants.py").read_text()
+    tree = ast.parse((ROOT / "bot" / "constants.py").read_text())  # comments don't count as uses
     applied: dict[str, object] = {}
     for pair in pairs:
         name, sep, text = pair.partition("=")
@@ -96,7 +96,7 @@ def apply_overrides(argv: list[str]) -> dict[str, object]:
                 sys.exit(f"--set {pair}: {name} is {type(old).__name__} ({old!r})")
         else:
             sys.exit(f"--set {pair}: {name} is a {type(old).__name__}; only numbers and True/False can be set")
-        if len(re.findall(rf"\b{re.escape(name)}\b", source)) > 1:
+        if any(isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Load) for n in ast.walk(tree)):
             sys.exit(f"--set {pair}: {name} is used again inside bot/constants.py, so a value computed from it would keep the old number")
         setattr(constants, name, new)
         applied[name] = new
