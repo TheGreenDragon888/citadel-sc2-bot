@@ -2947,3 +2947,28 @@ Checked in source before the code relied on it (ares-sc2 v3.13.1 at `8730865`).
 | ladder history through the new memory rule | `poetry run python docs/v2_evidence/m8_memory_replay.py <cache>` | pre-raises over the same 367 games: PROXY 72 → 9 (a proxy structure followed in 4 of the 9), POOL_12 6 → 2, ONE_BASE_ALLIN 22 → 20, CANNON_RUSH 17 → 17 |
 
 Not checked: any game. The in-game effect (two bases at 5:00, results vs the Terran bots) needs the rig or the ladder.
+
+### M8 (b) evidence with games, and the upload (2026-11-11 to 2026-11-14)
+
+SC2 4.10 was installed in the session after all (`docs/M7_PLAN.md` "Step S"). Code `c04f3c1`
+(M8 (b) plus `C_2GateRobo` out of the PvP cycle). Zip `publish/Citadel.zip`: md5
+`7f51e00547dcca176db4bcc23ff17d6c`, content hash `6d9a4e96...`, 260 files, 9.9 MB, same file list
+as the M7 upload's build.
+
+| Check | Command | Result | Before (STATUS) |
+|---|---|---|---|
+| Smoke | `run_matches.py --difficulty Hard --race Terran --map PylonAIE_v4 --total 1` | Victory 9:35, err=0 | - |
+| VeryHard Terran | `run_matches.py --difficulty VeryHard --race Terran --map all --total 10 --game-seed 3000 --opponent-id m8-vh-terran` | 9/10; **no PROXY flag in any game**; 0 crashes, 0 errors | 9-10/10 |
+| VeryHard Protoss (C2_1GateExpand only) | same with `--race Protoss`, id `m8-vh-protoss` | 9/10 (lost Pylon, game 5); 0 crashes, 0 errors | 10/10 |
+| Proxy rax | `run_matches.py --opponent proxy_rax --map all --total 10 --seed 100 --game-seed 5000 --opponent-id m8-proxy-rax` | 10/10, correct flag 10/10; PROXY pre-raised in games 3-10 (from `proxy_structure`), opener kept, all won | 10/10 |
+| 12-pool | same with `--opponent twelve_pool`, id `m8-twelve-pool` | 10/10, correct flag 10/10; POOL_12 pre-raised in games 3-10 | 9-10/10 |
+| Ladder environment (the uploaded zip in AI Arena's v0.8.0 images) | `ladder_env_test.py --matches 1-4` | 4 matches, RESULT PASS: no crash, time-out or traceback; start-up 447-840 ms; step mean 1.5-1.9 ms | PASS |
+
+Not run: VeryHard Zerg, cannon rush, worker rush, the Air batches (the changes don't touch their
+paths, but that is an argument, not a test).
+
+**Upload:** `upload_to_ai_arena.py --upload` at 2026-11-14 18:57 UTC, HTTP 200; the site reports
+md5 `7f51e00547dcca176db4bcc23ff17d6c`, bot data on. At upload the old zip stood at Elo 1615,
+division 4, 207 Season 2 games at 50.2% (it was 1654 and division 3 on 2026-11-11). Ladder check:
+`poetry run python scripts/ladder_watch.py --first 20`, then the one-base-at-5:00 share over the
+next 100 games with `docs/v2_evidence/` (target under 15%; 35% before).
