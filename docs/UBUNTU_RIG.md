@@ -231,6 +231,86 @@ claude --remote-control "Citadel rig"
 
 It uses the same usage allowance as your other Claude sessions.
 
+### 9.1 Start Remote Control by itself at every boot
+
+A shutdown ends the Remote Control process, so it has to start again after each boot. The install
+and your login are saved on disk and survive. **systemd**, the program that starts and supervises
+background services on Ubuntu, can start it for you and restart it if it stops. (The Claude Code
+docs don't describe running it as a boot service; this is the standard Linux way applied to it,
+and it has not been run on your machine. The docs do say server mode exits after about ten
+minutes without network, which is the other reason to let systemd restart it.)
+
+Do these once.
+
+```bash
+claude auth login
+```
+Stores your claude.ai login in your home folder. Choose the claude.ai option; Remote Control does
+not work with an API key.
+
+```bash
+cd ~/citadel-sc2-bot && claude remote-control --name "Citadel rig"
+```
+Server mode: it waits for you to connect from the Claude app. The first time it asks
+`Enable Remote Control? (y/n)`; answer `y`, check that "Citadel rig" appears in the app, then stop
+it with `Ctrl+C`. A boot service cannot answer that question, so it must be done once by hand.
+
+```bash
+mkdir -p ~/.config/systemd/user
+nano ~/.config/systemd/user/citadel-rc.service
+```
+- `mkdir -p` makes the folder (and any missing parent folders) where systemd looks for services
+  that belong to your user.
+- `nano` is a simple text editor. Paste the text below, press `Ctrl+O` then `Enter` to save, and
+  `Ctrl+X` to exit.
+
+```ini
+[Unit]
+Description=Claude Code Remote Control for the Citadel rig
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/citadel-sc2-bot
+ExecStart=%h/.local/bin/claude remote-control --name "Citadel rig"
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target
+```
+- `After=network-online.target`: wait for the network first.
+- `WorkingDirectory`: the folder it runs in. `%h` means your home folder.
+- `ExecStart`: the command to run. `~/.local/bin/claude` is where the installer puts it.
+- `Restart=always`, `RestartSec=30`: if it exits for any reason, start it again after 30 seconds.
+- `WantedBy=default.target`: start it automatically.
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now citadel-rc.service
+sudo loginctl enable-linger $USER
+```
+- `daemon-reload` makes systemd re-read its service files. `--user` means "my services".
+- `enable` starts it at every boot; `--now` also starts it right away.
+- `enable-linger` lets your services start at boot with nobody logged in. Without it they only
+  run while you are logged in.
+
+Check it:
+
+```bash
+systemctl --user status citadel-rc.service
+journalctl --user -u citadel-rc.service -n 30
+```
+- `status` shows whether it is running (press `q` to leave).
+- `journalctl ... -n 30` shows the last 30 lines it logged. Look here if it does not appear in
+  the app.
+
+Two things to know:
+- It only runs while the desktop is booted into Ubuntu. In Windows the rig is off.
+- If `status` shows it exiting at once, it may need a terminal, which a service does not have.
+  Send me the `journalctl` output; the fallback is to have systemd start it inside `tmux`.
+
+To stop it starting at boot: `systemctl --user disable --now citadel-rc.service`.
+
 ## 10. The local model (Ollama, qwen3.5:9b)
 
 You are right that the games would not get in its way: this SC2 build runs on the CPU only, so
